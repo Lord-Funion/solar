@@ -132,15 +132,15 @@ public final class JellyfinSettingsHost {
         if (prefs == null) return "";
         if (RowKeys.JELLYFIN_URL.equals(rowKey)) {
             String u = prefs.getString("jellyfin_url", "");
-            return u != null && !u.isEmpty() ? u : "—";
+            return u != null && !u.isEmpty() ? u : "-";
         }
         if (RowKeys.JELLYFIN_USER.equals(rowKey)) {
             String u = prefs.getString("jellyfin_user", "");
-            return u != null && !u.isEmpty() ? u : "—";
+            return u != null && !u.isEmpty() ? u : "-";
         }
         if (RowKeys.JELLYFIN_PASS.equals(rowKey)) {
             String p = prefs.getString("jellyfin_pass", "");
-            return p != null && !p.isEmpty() ? "••••" : "—";
+            return p != null && !p.isEmpty() ? "••••" : "-";
         }
         return "";
     }

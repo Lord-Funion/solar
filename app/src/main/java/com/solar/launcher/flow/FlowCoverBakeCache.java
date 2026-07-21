@@ -25,6 +25,21 @@ public final class FlowCoverBakeCache {
     private static final int MAX_ENTRIES = 56;
     private static final ExecutorService BAKE_EXECUTOR = Executors.newSingleThreadExecutor();
 
+    /** 2026-07-20 — Design cap for docs / tests (fatter reflection composites). */
+    public static int maxEntries() {
+        return MAX_ENTRIES;
+    }
+
+    /**
+     * 2026-07-20 — coverKey half of {@link #bakeKey} (before first '|').
+     * Layman: which album this baked tile belongs to.
+     */
+    public static String coverKeyFromBakeKey(String bakeKey) {
+        if (bakeKey == null || bakeKey.isEmpty()) return null;
+        int pipe = bakeKey.indexOf('|');
+        return pipe > 0 ? bakeKey.substring(0, pipe) : bakeKey;
+    }
+
     private final Map<String, Bitmap> baked = new LinkedHashMap<String, Bitmap>(16, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, Bitmap> eldest) {
@@ -88,6 +103,7 @@ public final class FlowCoverBakeCache {
                     if (out != null) baked.put(key, out);
                     notify = listener;
                 }
+                // 2026-07-20 — Prefer bake-only residency under pressure (drop raw in listener).
                 if (notify != null && out != null) notify.onBaked(key);
             }
         });
@@ -134,5 +150,14 @@ public final class FlowCoverBakeCache {
         }
         baked.clear();
         baking.clear();
+    }
+
+    /**
+     * 2026-07-20 — MemoryRelease step 1: drop bake composites (covers stay until cover LRU step).
+     * Layman: throw away pre-drawn album+reflection tiles; they rebuild when you scroll Flow.
+     * Reversal: no-op; only clear on viewport/metric change.
+     */
+    public synchronized void releaseForMemoryPressure() {
+        clear();
     }
 }

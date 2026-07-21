@@ -145,16 +145,27 @@ case "$(getprop persist.solar.device_family 2>/dev/null)" in
         ;;
 esac
 if [ -f /system/etc/solar/sync-rockbox-libs.sh ]; then
-    # Skip heavy Rockbox codec sync on A5 — no Rockbox product path.
+    # 2026-07-19 — Skip codec sync unless Rockbox is installed (Solar-only ROMs).
+    # Was: always run on Y1/Y2. Reversal: drop pm path check.
     case "$(getprop persist.solar.device_family 2>/dev/null)" in
         a5) ;;
-        *) sh /system/etc/solar/sync-rockbox-libs.sh ;;
+        *)
+            if pm path org.rockbox >/dev/null 2>&1 \
+                    || [ -f /system/app/org.rockbox.apk ]; then
+                sh /system/etc/solar/sync-rockbox-libs.sh
+            fi
+            ;;
     esac
 fi
 if [ -f /system/etc/solar/sync-rockbox-assets.sh ]; then
     case "$(getprop persist.solar.device_family 2>/dev/null)" in
         a5) ;;
-        *) sh /system/etc/solar/sync-rockbox-assets.sh ;;
+        *)
+            if pm path org.rockbox >/dev/null 2>&1 \
+                    || [ -f /system/app/org.rockbox.apk ]; then
+                sh /system/etc/solar/sync-rockbox-assets.sh
+            fi
+            ;;
     esac
 fi
 if [ -f /system/etc/solar/sync-y1-keymap.sh ]; then

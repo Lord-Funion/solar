@@ -30,4 +30,18 @@ public class StemTempoSyncTest {
         assertEquals(1f, r, 0.001f);
         assertFalse(StemTempoSync.needsSoundTouch(r));
     }
+
+    /** Tempo bus × pad screw — Houston feel without dropping match. 2026-07-20 */
+    @Test
+    public void composePadRateMultiplies() {
+        assertEquals(0.77f, StemTempoSync.composePadRate(1.1f, 0.7f), 0.01f);
+        assertEquals(0.5f, StemTempoSync.composePadRate(1f, 0.4f), 0.001f);
+    }
+
+    /** Slave media clock scales with tempoRate under IJK setSpeed. 2026-07-20 */
+    @Test
+    public void expectedSlavePosScales() {
+        assertEquals(1100, StemTempoSync.expectedSlavePosMs(1000, 1.1f));
+        assertEquals(1000, StemTempoSync.expectedSlavePosMs(1000, 1f));
+    }
 }

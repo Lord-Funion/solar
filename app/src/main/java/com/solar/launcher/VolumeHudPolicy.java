@@ -12,6 +12,20 @@ public final class VolumeHudPolicy {
     private VolumeHudPolicy() {}
 
     /**
+     * 2026-07-20 — Devices that route volume keys through Solar’s HUD / inline pulse.
+     * Layman: Y2 and A5 have real volume buttons — Solar paints (or pulses) volume itself.
+     * Was: MainActivity only checked A5/emulator + family prop (Y2 missed when prop unset).
+     * Reversal: drop y2Device arg; require family prop for Y2 again.
+     */
+    public static boolean shouldUseSolarVolumeHud(boolean y2Device, boolean a5Device,
+            boolean emulator, String deviceFamilyProp) {
+        if (y2Device || a5Device || emulator) return true;
+        if (deviceFamilyProp == null) return false;
+        return "y1".equals(deviceFamilyProp) || "y2".equals(deviceFamilyProp)
+                || "a5".equals(deviceFamilyProp);
+    }
+
+    /**
      * @param hardwareVolumeDevice Y2 / A5 / emulator (devices with HW volume keys using Solar HUD)
      * @param nowPlayingOrVideo {@code STATE_PLAYER} or video player showing transport volume pulse
      * @param contextModalOpen in-app ThemedContextMenu or global chip overlay is painted

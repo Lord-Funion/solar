@@ -94,24 +94,83 @@ public final class SolarDiagContextCollector {
         sb.append("detail: ").append(full ? "full" : "light").append('\n');
         sb.append("time_ms: ").append(System.currentTimeMillis()).append('\n');
         sb.append("time_iso: ").append(new java.util.Date().toString()).append('\n');
-        appendBuild(sb);
-        appendApp(sb, context);
-        appendNetwork(sb, context);
+        // 2026-07-20 — Each block is fail-open: one bad probe must not kill the whole dump.
+        // Layman: if Bluetooth (or anything) hiccups, skip that bit and keep gathering the rest.
+        // Was: bare append* calls; NoSuchMethodError from BT getType aborted USER_REPORT ships.
+        // Reversal: call append* directly without safeAppend.
+        safeAppend(sb, "build", new Runnable() { public void run() { appendBuild(sb); } });
+        safeAppend(sb, "app", new Runnable() { public void run() { appendApp(sb, context); } });
+        safeAppend(sb, "network", new Runnable() { public void run() { appendNetwork(sb, context); } });
         if (full) {
-            appendWifi(sb, context);
-            appendBluetooth(sb);
-            appendLocation(sb, context);
-            appendSensors(sb, context);
-            appendProc(sb);
-            appendPrefsKeys(sb, context);
+            safeAppend(sb, "wifi", new Runnable() { public void run() { appendWifi(sb, context); } });
+            safeAppend(sb, "bluetooth", new Runnable() { public void run() { appendBluetooth(sb); } });
+            safeAppend(sb, "location", new Runnable() { public void run() { appendLocation(sb, context); } });
+            safeAppend(sb, "sensors", new Runnable() { public void run() { appendSensors(sb, context); } });
+            safeAppend(sb, "proc", new Runnable() { public void run() { appendProc(sb); } });
+            safeAppend(sb, "prefs", new Runnable() { public void run() { appendPrefsKeys(sb, context); } });
+            safeAppend(sb, "storage", new Runnable() { public void run() { appendStorage(sb); } });
         } else {
-            appendWifiLight(sb, context);
             // Cheap and highly informative for triage — no sensor wait / Wi‑Fi scan.
-            appendProc(sb);
-            appendStorage(sb);
+            safeAppend(sb, "wifi_light", new Runnable() { public void run() { appendWifiLight(sb, context); } });
+            safeAppend(sb, "proc", new Runnable() { public void run() { appendProc(sb); } });
+            safeAppend(sb, "storage", new Runnable() { public void run() { appendStorage(sb); } });
         }
-        if (full) appendStorage(sb);
         return sb.toString();
+    }
+
+    /**
+     * Run one env section; on any Throwable write a skip note and continue.
+     * 2026-07-20 — Errors (NoSuchMethodError) are not Exceptions — catch Throwable.
+     */
+    private static void safeAppend(StringBuilder sb, String section, Runnable block) {
+        if (block == null) return;
+        try {
+            block.run();
+        } catch (Throwable t) {
+            try {
+                sb.append("\n--- ").append(section).append(" skipped ---\n");
+                sb.append("skip_reason: ")
+                        .append(t.getClass().getSimpleName())
+                        .append(": ")
+                        .append(t.getMessage() != null ? t.getMessage() : "")
+                        .append('\n');
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    /**
+     * True when {@link BluetoothDevice#getType()} exists (API 18+).
+     * 2026-07-20 — Y1 is API 17; calling getType there throws NoSuchMethodError.
+     */
+    public static boolean supportsBluetoothDeviceType(int sdkInt) {
+        return sdkInt >= 18;
+    }
+
+    /**
+     * Format bonded-device type for env text, or null to omit the field.
+     * 2026-07-20 — Null typeOrNull means the live getType call failed — skip, do not abort.
+     */
+    public static String formatBluetoothDeviceType(int sdkInt, Integer typeOrNull) {
+        if (!supportsBluetoothDeviceType(sdkInt) || typeOrNull == null) return null;
+        return String.valueOf(typeOrNull.intValue());
+    }
+
+    /**
+     * Best-effort device class for one bonded peer; never throws.
+     * 2026-07-20 — Reflect getType (API 18+) so Y1 DEX never hard-links a missing method.
+     * Was: direct d.getType() → NoSuchMethodError aborted USER_REPORT on API 17.
+     * Reversal: Integer.valueOf(d.getType()) after SDK gate.
+     */
+    private static String readBluetoothDeviceTypeSafe(BluetoothDevice d) {
+        if (d == null || !supportsBluetoothDeviceType(Build.VERSION.SDK_INT)) return null;
+        try {
+            java.lang.reflect.Method m = BluetoothDevice.class.getMethod("getType");
+            Object v = m.invoke(d);
+            if (!(v instanceof Integer)) return null;
+            return formatBluetoothDeviceType(Build.VERSION.SDK_INT, (Integer) v);
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     /** Connected SSID/RSSI only — no scan results / configured network dump. */
@@ -380,18 +439,27 @@ public final class SolarDiagContextCollector {
                 sb.append("adapter: null\n");
                 return;
             }
-            sb.append("enabled: ").append(adapter.isEnabled()).append('\n');
+            try {
+                sb.append("enabled: ").append(adapter.isEnabled()).append('\n');
+            } catch (Throwable t) {
+                sb.append("enabled: [skipped]\n");
+            }
             try {
                 sb.append("name: ").append(adapter.getName()).append('\n');
-            } catch (SecurityException se) {
-                sb.append("name: [permission]\n");
+            } catch (Throwable t) {
+                // 2026-07-20 — Was SecurityException-only; any failure → skip field.
+                sb.append("name: [skipped]\n");
             }
             try {
                 sb.append("address: ").append(adapter.getAddress()).append('\n');
             } catch (Throwable t) {
-                sb.append("address: [unavailable]\n");
+                sb.append("address: [skipped]\n");
             }
-            sb.append("state: ").append(adapter.getState()).append('\n');
+            try {
+                sb.append("state: ").append(adapter.getState()).append('\n');
+            } catch (Throwable t) {
+                sb.append("state: [skipped]\n");
+            }
             try {
                 sb.append("scan_mode: ").append(adapter.getScanMode()).append('\n');
             } catch (Throwable ignored) {}
@@ -401,22 +469,49 @@ public final class SolarDiagContextCollector {
                     sb.append("bonded_count: ").append(bonded.size()).append('\n');
                     for (BluetoothDevice d : bonded) {
                         if (d == null) continue;
+                        // 2026-07-20 — Per-device fail-open; never call getType on API 17.
+                        // Was: d.getType() always → NoSuchMethodError on Y1 aborted ship.
+                        // Reversal: append type=d.getType() inside SecurityException-only catch.
                         try {
-                            sb.append("  bonded: name=").append(d.getName())
-                                    .append(" addr=").append(d.getAddress())
-                                    .append(" bond=").append(d.getBondState())
-                                    .append(" type=").append(d.getType())
-                                    .append('\n');
-                        } catch (SecurityException se) {
-                            sb.append("  bonded: [permission]\n");
+                            sb.append("  bonded: name=");
+                            try {
+                                sb.append(d.getName());
+                            } catch (Throwable t) {
+                                sb.append("[skipped]");
+                            }
+                            sb.append(" addr=");
+                            try {
+                                sb.append(d.getAddress());
+                            } catch (Throwable t) {
+                                sb.append("[skipped]");
+                            }
+                            sb.append(" bond=");
+                            try {
+                                sb.append(d.getBondState());
+                            } catch (Throwable t) {
+                                sb.append("[skipped]");
+                            }
+                            String typeLabel = readBluetoothDeviceTypeSafe(d);
+                            if (typeLabel != null) {
+                                sb.append(" type=").append(typeLabel);
+                            }
+                            sb.append('\n');
+                        } catch (Throwable t) {
+                            sb.append("  bonded: [skipped]\n");
                         }
                     }
                 }
-            } catch (SecurityException se) {
-                sb.append("bonded: [permission]\n");
+            } catch (Throwable t) {
+                sb.append("bonded: [skipped] ")
+                        .append(t.getClass().getSimpleName())
+                        .append('\n');
             }
-        } catch (Exception e) {
-            sb.append("bt_error: ").append(e.getMessage()).append('\n');
+        } catch (Throwable t) {
+            sb.append("bt_error: ")
+                    .append(t.getClass().getSimpleName())
+                    .append(": ")
+                    .append(t.getMessage() != null ? t.getMessage() : "")
+                    .append('\n');
         }
     }
 
@@ -501,7 +596,15 @@ public final class SolarDiagContextCollector {
             Sensor accel = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             if (accel != null) {
                 sb.append("accelerometer: present name=").append(accel.getName()).append('\n');
-                float[] sample = sampleAccelerometer(sm, accel, 400L);
+                // 2026-07-20 — Sensor callbacks need a Looper; SolarDiagScan has none.
+                // Layman: skip motion sample on the log-upload worker so we don't crash.
+                // Was: always sampleAccelerometer. Reversal: always call sampleAccelerometer.
+                float[] sample = null;
+                if (android.os.Looper.myLooper() != null) {
+                    sample = sampleAccelerometer(sm, accel, 400L);
+                } else {
+                    sb.append("accelerometer_sample: skipped_no_looper\n");
+                }
                 if (sample != null && sample.length >= 3) {
                     sb.append("accelerometer_sample: x=").append(sample[0])
                             .append(" y=").append(sample[1])
@@ -510,7 +613,7 @@ public final class SolarDiagContextCollector {
                     double mag = Math.sqrt(sample[0] * sample[0] + sample[1] * sample[1]
                             + sample[2] * sample[2]);
                     sb.append("accelerometer_magnitude: ").append(mag).append('\n');
-                } else {
+                } else if (android.os.Looper.myLooper() != null) {
                     sb.append("accelerometer_sample: unavailable\n");
                 }
             } else {

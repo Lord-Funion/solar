@@ -71,19 +71,35 @@
     <string name="settings_sub_theme_variant">설정: %1$s</string>
     <string name="status_home">홈</string>
     <string name="status_now_playing">지금 재생 중</string>
-    <string name="status_stem_player">스템 플레이어</string>
-    <string name="browser_stem_player">스템 플레이어</string>
+    <string name="status_stem_player">스템</string>
+    <string name="browser_stems">스템</string>
+    <string name="browser_stem_player">스템</string>
+    <string name="browser_get_stems">스템 만들기</string>
     <string name="browser_has_stems">스템 있음</string>
     <string name="status_has_stems">스템 있음</string>
     <string name="path_library_has_stems">스템 있음</string>
-    <string name="has_stems_empty">분리된 트랙이 없습니다 — Stem Player로 분리하세요</string>
+    <string name="has_stems_empty">분리된 트랙이 없습니다. 스템 만들기로 분리하세요</string>
     <string name="has_stems_loading">스템 트랙 불러오는 중…</string>
-    <string name="context_action_stem_player">스템 플레이어</string>
-    <string name="stem_pick_status">스템 · %1$d/3 · 재생으로 시작</string>
-    <string name="stem_pick_slot">스템 %1$d</string>
-    <string name="stem_pick_marked">스템 %1$d 표시됨</string>
+    <string name="status_stems_hub">스템</string>
+    <!-- 2026-07-21 Stems/Mix sanity KO. -->
+    <string name="context_action_get_stems">스템 만들기</string>
+    <string name="context_action_start_stem_session">스템 세션 시작</string>
+    <!-- 2026-07-20 — Was: "스템 플레이어". Reversal: restore short label. -->
+    <string name="context_action_stem_player">스템 만들기</string>
+    <!-- 2026-07-20 — KO stub for multi-select Stem pick. -->
+    <string name="context_action_stem_select_tracks">스템 세션 시작</string>
+    <string name="stem_mix_pick_select_all">모두 선택</string>
+    <string name="stem_mix_pick_clear_all">모두 해제</string>
+    <string name="stem_queue_need_prepared">스템이 있는 트랙만 잼 중에 추가할 수 있습니다</string>
+    <string name="mix_deck_stamped">덱 %1$d</string>
+    <string name="stem_pick_status">스템 · %1$d곡 표시 · 재생으로 시작</string>
+    <string name="stem_pick_slot">(%1$d)</string>
+    <string name="stem_pick_marked">대기열 (%1$d)</string>
     <string name="stem_pick_cleared">스템 표시 해제</string>
-    <string name="stem_pick_need_mark">먼저 트랙을 표시한 뒤(중앙) 재생</string>
+    <string name="stem_pick_need_mark">가운데 버튼으로 곡을 표시한 뒤 재생</string>
+    <string name="stem_pick_use_pads">가운데=표시/해제 · 재생=시작</string>
+    <string name="stem_pick_onboarding">가운데로 표시 · 재생으로 시작 (대기열 무제한)</string>
+    <string name="stem_reassign_ok_hint">트랙 %1$d 교체 · 가운데 확인 · Prev/Next=다른 트랙</string>
     <string name="stem_player_need_file">스템 플레이어는 로컬 트랙 파일이 필요합니다</string>
     <string name="stem_player_need_wifi">스템 분리를 위해 Wi‑Fi에 연결하세요</string>
     <string name="settings_lalal">스템 플레이어 (Lalal.ai)</string>
@@ -144,7 +160,7 @@
     <string name="lib_preview_split_credits">feat., &amp; 등으로 여러 아티스트가 적힌 태그를 각각 별도 항목으로 표시합니다.</string>
     <string name="lib_preview_norm_album">대소문자만 다른 앨범 이름을 하나로 묶습니다.</string>
     <string name="lib_preview_guest_browse">게스트로만 나오는 아티스트를 탭할 때 앨범 또는 곡 목록 중 무엇을 먼저 보여줄지 정합니다.</string>
-    <string name="lib_preview_artist_filter">아티스트 목록을 줄입니다 — 1곡 게스트 숨기기, 앨범 소유자만 보기 등.</string>
+    <string name="lib_preview_artist_filter">아티스트 목록을 줄입니다. 1곡 게스트 숨기기, 앨범 소유자만 보기 등.</string>
     <string name="lib_preview_artist_sort">아티스트 목록을 가나다순, 곡 수, 최근 추가 순으로 정렬합니다.</string>
     <string name="lib_preview_song_sort">아티스트·앨범·장르·재생목록의 곡 목록 기본 정렬 순서입니다.</string>
     <string name="lib_preview_album_sub">앨범 아래에 곡 아티스트와 다른 앨범 소유자를 표시합니다.</string>
@@ -269,7 +285,7 @@
     <string name="settings_preview_reset_rockbox">내부 저장소(/storage/sdcard0)의 .rockbox 폴더를 삭제합니다. Rockbox 설정, 테마, 재생 목록이 제거됩니다.</string>
     <string name="settings_preview_reset_solar">Solar 앱의 모든 환경설정(설정, 라이브러리 규칙, Reach/Deezer 옵션 등)을 지웁니다. MicroSD 내용을 선택하지 않으면 음악 파일은 유지됩니다.</string>
     <string name="settings_preview_reset_themes">내부 저장소의 테마 폴더(Themes/, JJ_Themes/)와 Solar 내부 테마 캐시를 삭제합니다.</string>
-    <string name="settings_preview_reset_microsd">MicroSD의 모든 파일과 폴더를 삭제합니다. 삭제 전 한 번 덮어쓰므로 일반 복구 도구로 찾을 수 있을 수 있습니다 — 보안 삭제는 아닙니다.</string>
+    <string name="settings_preview_reset_microsd">MicroSD의 모든 파일과 폴더를 삭제합니다. 삭제 전 한 번 덮어쓰므로 일반 복구 도구로 찾을 수 있을 수 있습니다. 보안 삭제는 아닙니다.</string>
     <string name="settings_preview_reset_caches">앨범 아트 캐시, Flow 썸네일, 스트림/다운로드 임시 파일 등 Solar 캐시 데이터를 지웁니다.</string>
     <string name="settings_preview_reset_everything">아래 모든 초기화 항목을 선택합니다. 계속하기 전에 각 항목을 확인하세요.</string>
     <string name="settings_preview_reset_continue">선택한 초기화를 실행합니다. 삭제 전에 확인을 요청합니다.</string>
@@ -297,7 +313,7 @@
     <string name="about_report_issues">이슈 보고: github.com/thesolarproject/issues</string>
     <string name="about_donation">기부: https://ko-fi.com/thesolarproject</string>
     <string name="about_update_button">앱 버전 업데이트 / 변경</string>
-    <string name="about_update_unavailable">업데이트를 사용할 수 없습니다 — Wi‑Fi 연결을 확인하세요</string>
+    <string name="about_update_unavailable">업데이트를 사용할 수 없습니다. Wi‑Fi 연결을 확인하세요</string>
     <string name="settings_bluetooth_setup">블루투스</string>
     <string name="settings_display_brightness">밝기</string>
     <string name="settings_storage_info">저장소 정보</string>
@@ -320,7 +336,7 @@
     <string name="bg_section_theme_wallpapers">테마 배경 (480×360)</string>
     <string name="bg_wallpaper_desktop">데스크톱</string>
     <string name="bg_wallpaper_global">글로벌</string>
-    <string name="bg_wallpaper_theme_row">%1$s — %2$s</string>
+    <string name="bg_wallpaper_theme_row">%1$s: %2$s</string>
     <string name="bg_pick_custom_image">사용자 이미지 선택 (480×360)</string>
     <string name="toast_bg_wallpaper_size_hint">480×360 JPG/PNG 권장</string>
     <string name="settings_background_source">배경 소스</string>
@@ -350,9 +366,9 @@
     <string name="home_menu_photos">사진</string>
     <string name="home_menu_audiobooks">오디오북</string>
     <string name="home_menu_apps">앱</string>
-    <string name="home_videos_coming_soon">동영상 — 곧 제공됩니다.</string>
-    <string name="home_photos_coming_soon">사진 — 곧 제공됩니다.</string>
-    <string name="home_audiobooks_coming_soon">오디오북 — 곧 제공됩니다.</string>
+    <string name="home_videos_coming_soon">동영상: 곧 제공됩니다.</string>
+    <string name="home_photos_coming_soon">사진: 곧 제공됩니다.</string>
+    <string name="home_audiobooks_coming_soon">오디오북: 곧 제공됩니다.</string>
     <string name="home_screen_editor">홈 화면</string>
     <string name="home_screen_shortcuts">바로가기</string>
     <string name="home_screen_arrange">메뉴 정렬</string>
@@ -418,7 +434,8 @@
     <string name="keyboard_soulseek_username">Soulseek 사용자 이름</string>
     <string name="keyboard_soulseek_password">Soulseek 비밀번호</string>
     <string name="keyboard_playlist_name">재생목록 이름…</string>
-    <string name="keyboard_hint">[prev] 삭제 · [play] 확인 · [next] 공백\n[play] hold Aa/# · [wheel] 선택 · [ok] 입력\n[back] 취소</string>
+    <!-- 2026-07-20 — Hold tip: Capitals/Symbols (was Aa/#). -->
+    <string name="keyboard_hint">[prev] 삭제 · [play] 확인 · [next] 공백\nhold [play] 대문자와 기호\n[back] 취소</string>
     <string name="browser_folders">📁 폴더</string>
     <string name="browser_artists">👤 아티스트</string>
     <string name="browser_albums">💿 앨범</string>
@@ -431,6 +448,7 @@
     <string name="status_youtube_audio">YouTube 오디오</string>
     <string name="browser_search_library">라이브러리 검색</string>
     <string name="browser_search">검색…</string>
+    <string name="browser_search_ellipsis">🔍 검색…</string>
     <string name="keyboard_library_search">라이브러리 검색</string>
     <string name="library_search_section_artists">아티스트</string>
     <string name="library_search_section_albums">앨범</string>
@@ -451,6 +469,7 @@
     <string name="library_sort_album">앨범</string>
     <string name="library_sort_track">트랙 번호</string>
     <string name="library_sort_date">추가 날짜</string>
+    <string name="library_sort_length">길이</string>
     <string name="library_sort_now">정렬: %1$s</string>
     <string name="library_playlists_local_section">로컬 재생목록</string>
     <string name="library_playlists_empty">로컬 재생목록 없음</string>
@@ -517,8 +536,10 @@
     <string name="update_none_found">릴리스를 찾을 수 없습니다</string>
     <string name="update_releases_truncated">최신 %1$d / %2$d 릴리스 표시</string>
     <string name="update_installing_title">업데이트 설치 중</string>
-    <string name="update_reboot_eta">업데이트를 완료하려면 재시작합니다. 약 3분 소요</string>
+    <string name="update_reboot_eta">업데이트를 마치려면 다시 시작합니다. 다시 켜지는 데 최대 약 3분이 걸릴 수 있습니다.</string>
     <string name="update_device_restarting">업데이트를 위해 기기를 재시작합니다</string>
+    <string name="platform_prep_reboot_title">준비 중입니다. 잠시만 기다려 주세요…</string>
+    <string name="platform_prep_reboot_detail">Solar가 이 기기에서 설정을 마치는 중입니다.</string>
     <string name="update_available_title">업데이트 사용 가능</string>
     <string name="update_available_message">Solar %1$s을(를) 사용할 수 있습니다.</string>
     <string name="update_install">설치</string>
@@ -557,10 +578,10 @@
     <string name="soulseek_sharing_disabled">공유: 꺼짐 (설정에서 비활성화)</string>
     <string name="soulseek_invalid_username">사용자 이름: 영문, 숫자, _ - 만 (최대 20자)</string>
     <string name="soulseek_login_failed">로그인 실패: %1$s</string>
-    <string name="soulseek_login_failed_check_account">로그인 실패: %1$s — 설정 → 계정을 확인하거나 재생성하세요.</string>
-    <string name="soulseek_invalid_reset_auto">잘못된 계정 — 새 자동 계정으로 재설정됩니다.</string>
+    <string name="soulseek_login_failed_check_account">로그인 실패: %1$s. 설정 → 계정을 확인하거나 재생성하세요.</string>
+    <string name="soulseek_invalid_reset_auto">잘못된 계정. 새 자동 계정으로 재설정됩니다.</string>
     <string name="soulseek_port_warning">Soulseek는 TCP 포트 %1$d를 사용합니다. 다운로드가 실패하면 라우터에서 이 포트를 포워딩하세요. 간접 연결은 더 느릴 수 있습니다.</string>
-    <string name="soulseek_download_only_note">다운로드 전용 — 일부 사용자는 파일을 공유하는 다운로더만 허용합니다.</string>
+    <string name="soulseek_download_only_note">다운로드 전용. 일부 사용자는 파일을 공유하는 다운로더만 허용합니다.</string>
     <string name="soulseek_type_search">검색어 입력…</string>
     <string name="soulseek_new_search_with">\"%1$s\"(으)로 새 검색</string>
     <string name="soulseek_search_hint">검색어 입력</string>
@@ -593,8 +614,8 @@
     <string name="soulseek_phase_receiving_user">%1$s에서 수신 중</string>
     <string name="soulseek_phase_receiving">%1$s에서 수신 중</string>
     <string name="soulseek_phase_retrying">%1$s 재시도 중</string>
-    <string name="soulseek_phase_complete">완료 — %1$s</string>
-    <string name="soulseek_stall_hint">아직 데이터 없음 (%1$s). 피어가 오프라인이거나 대기 중일 수 있습니다 — 다른 결과를 시도하세요.</string>
+    <string name="soulseek_phase_complete">완료: %1$s</string>
+    <string name="soulseek_stall_hint">아직 데이터 없음 (%1$s). 피어가 오프라인이거나 대기 중일 수 있습니다. 다른 결과를 시도하세요.</string>
     <string name="soulseek_try_another_result">다른 결과 시도</string>
     <string name="soulseek_research_section">다시 검색해 보기</string>
     <string name="soulseek_download_failed_title">다운로드 실패: %1$s · %2$s</string>
@@ -714,10 +735,10 @@
     <!-- 2026-07-11 — Y2: Back or Power opens Options; matches EN context_hold_back_or_power_hint. -->
     <string name="context_hold_back_or_power_hint">뒤로 또는 전원 길게 눌러 옵션</string>
     <!-- 2026-07-18 — NP Flow tip prose after Options dismissed. -->
-    <string name="flow_hold_play_pause_hint">길게 — Flow 열기</string>
+    <string name="flow_hold_play_pause_hint">Flow 열기</string>
     <!-- 2026-07-18 — NP live keep-holding tips (glyphs show the button). -->
-    <string name="np_keep_holding_for_options">길게 누르기 — 옵션</string>
-    <string name="np_keep_holding_for_flow">길게 누르기 — Flow</string>
+    <string name="np_keep_holding_for_options">옵션</string>
+    <string name="np_keep_holding_for_flow">Flow</string>
     <string name="podcasts_saved_on_device">기기에 저장됨</string>
     <string name="podcasts_resume_badge">[이어듣기]</string>
     <string name="podcasts_empty_saved">SD 카드에 저장된 에피소드가 없습니다.</string>
@@ -730,8 +751,8 @@
     <string name="reach_buffering_track">버퍼링 중…</string>
     <string name="reach_buffering_pct">버퍼링 · %1$d%%</string>
     <string name="podcasts_no_results">팟캐스트를 찾을 수 없습니다.</string>
-    <string name="podcasts_filtered_unavailable">%1$d개 팟캐스트가 숨겨졌습니다 — 이 기기에서 피드 또는 오디오에 연결할 수 없습니다.</string>
-    <string name="podcasts_episodes_filtered">%1$d개 에피소드가 숨겨졌습니다 — 이 기기에서 오디오에 연결할 수 없습니다.</string>
+    <string name="podcasts_filtered_unavailable">%1$d개 팟캐스트가 숨겨졌습니다. 이 기기에서 피드 또는 오디오에 연결할 수 없습니다.</string>
+    <string name="podcasts_episodes_filtered">%1$d개 에피소드가 숨겨졌습니다. 이 기기에서 오디오에 연결할 수 없습니다.</string>
     <string name="podcasts_checking_shows">팟캐스트 확인 중…</string>
     <string name="podcasts_checking_episodes">에피소드 확인 중…</string>
     <string name="podcasts_type_search">검색어 입력…</string>
@@ -823,7 +844,7 @@
     <string name="toast_bg_none">설정된 사용자 배경이 없습니다.</string>
     <string name="toast_bg_applied">배경이 적용되었습니다!</string>
     <string name="settings_flow">Flow</string>
-    <string name="settings_flow_hold_play_pause_hint">길게 — Flow 화면 열기</string>
+    <string name="settings_flow_hold_play_pause_hint">Flow 화면 열기</string>
     <string name="settings_sub_flow">Flow 실험 기능</string>
     <string name="settings_debug_xposed_modules">Xposed 모듈</string>
     <string name="settings_debug_xposed_intro">Solar ROM은 전역 빠른 메뉴, stock 앱 휠 라우팅, 시스템 글꼴에 Xposed 모듈을 사용합니다. 변경 후 재부팅이 필요합니다. 필수 모듈을 끄면 복구할 때까지 오버레이·핸드오프·테마가 깨질 수 있습니다.</string>
@@ -853,7 +874,7 @@
     <string name="flow_empty">표시할 항목 없음</string>
     <string name="flow_loading">불러오는 중…</string>
     <string name="flow_loading_episodes">에피소드 불러오는 중…</string>
-    <string name="adb_setup_reboot_warning">기기 설정 중…\n재시작합니다. 약 3분 소요.</string>
+    <string name="adb_setup_reboot_warning">기기 설정 중…\n준비가 되면 다시 시작하세요. 다시 켜지는 데 최대 약 3분이 걸릴 수 있습니다.</string>
     <string name="settings_debug_wireless_adb">무선 ADB</string>
     <string name="settings_debug_wireless_adb_hint">루트 권한이 있는 경우 시작 시 무선 ADB를 자동으로 활성화합니다.</string>
 </resources>

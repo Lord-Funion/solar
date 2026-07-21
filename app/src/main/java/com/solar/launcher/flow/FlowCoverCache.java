@@ -122,4 +122,32 @@ public final class FlowCoverCache {
         }
         cache.clear();
     }
+
+    /**
+     * 2026-07-20 — MemoryRelease step 2: clear covers then re-pin Now Playing / handoff bitmap.
+     * Layman: empty the carousel picture shelf but keep the song that’s playing so NP never goes blank first.
+     * Technical: clear + optional put(keepKey, keep). Reversal: clear() only / invalidateCoverCaches.
+     */
+    public synchronized void releaseKeeping(String keepKey, Bitmap keep) {
+        clear();
+        if (keepKey != null && keep != null && !keep.isRecycled()) {
+            put(keepKey, keep);
+        }
+    }
+
+    /**
+     * 2026-07-20 — Drop one raw cover after bake lands (avoid bake+raw double residency).
+     * Layman: throw away the plain album picture once the shiny tile exists.
+     * Technical: remove+recycle unless placeholder. Reversal: no-op; keep both in RAM.
+     */
+    public synchronized void drop(String coverKey) {
+        if (coverKey == null || coverKey.isEmpty()) return;
+        Bitmap old = cache.remove(coverKey);
+        recycleUnlessPlaceholder(old);
+    }
+
+    /** 2026-07-20 — Design cap for docs / tests (LRU eldest eviction). */
+    public static int maxEntries() {
+        return MAX_ENTRIES;
+    }
 }

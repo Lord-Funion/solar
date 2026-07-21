@@ -2,6 +2,7 @@ package com.solar.launcher.library;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,6 +78,22 @@ public final class LibrarySegmentCache<T> {
         blocks.clear();
     }
 
+    /**
+     * 2026-07-20 — Evict cold LRU pages down to {@code maxKeep} (MemoryRelease / trim).
+     * Layman: under memory pressure, keep fewer song shelves in RAM.
+     * Technical: remove access-order eldest until size ≤ maxKeep; does not change constructor cap.
+     * Reversal: delete; rely only on removeEldestEntry at put time.
+     */
+    public synchronized void trimTo(int maxKeep) {
+        int keep = maxKeep < 0 ? 0 : maxKeep;
+        while (blocks.size() > keep) {
+            java.util.Iterator<Integer> it = blocks.keySet().iterator();
+            if (!it.hasNext()) break;
+            it.next();
+            it.remove();
+        }
+    }
+
     public synchronized int cachedBlockCount() {
         return blocks.size();
     }
@@ -112,5 +129,14 @@ public final class LibrarySegmentCache<T> {
         // LRU: accessing 1 then putting 2 should evict 0 if max=2... put 2 makes size 3 briefly then eldest.
         if (c.cachedBlockCount() > 2) throw new AssertionError("lru size");
         if (c.blockIndexFor(9) != 2) throw new AssertionError("block index");
+        // 2026-07-20 — trimTo drops eldest until the keep count.
+        LibrarySegmentCache<String> t = new LibrarySegmentCache<String>(4, 4);
+        t.putBlock(0, Collections.singletonList("a"));
+        t.putBlock(1, Collections.singletonList("b"));
+        t.putBlock(2, Collections.singletonList("c"));
+        t.trimTo(1);
+        if (t.cachedBlockCount() != 1) throw new AssertionError("trimTo size");
+        t.trimTo(0);
+        if (t.cachedBlockCount() != 0) throw new AssertionError("trimTo empty");
     }
 }

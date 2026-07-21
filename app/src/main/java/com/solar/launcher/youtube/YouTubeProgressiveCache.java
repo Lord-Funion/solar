@@ -13,18 +13,48 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Layman: download the stream to a file, then play it like a normal video.
  * Tech: MUST use SolarHttp (OkHttp + TlsHelper). Raw HttpURLConnection fails TLS on API 17
  * for googlevideo / ytapi HTTPS, so cache never completed and play always failed.
- * Reversal: stream-only openUrl without cache.
+ * 2026-07-20 — Pause new cache growth under MemoryRelease / LowMemoryGate pressure (reuse OK).
+ * Reversal: stream-only openUrl without cache; drop growthPaused.
  */
 public final class YouTubeProgressiveCache {
     private static final String TAG = "SolarYouTubeCache";
     private static final long MAX_CACHE_BYTES = 120L * 1024L * 1024L;
     private static final long MIN_USABLE_BYTES = 256L * 1024L;
+    /** 2026-07-20 — When true, skip new downloads (reuse existing cache files). */
+    private static volatile boolean growthPaused;
 
     public interface Progress {
         void onProgress(int percent, long done, long total);
     }
 
     private YouTubeProgressiveCache() {}
+
+    /**
+     * 2026-07-20 — MemoryRelease / pressure: stop growing the YT cache on disk.
+     * Layman: don’t fill storage with new video downloads while RAM is unhappy.
+     * Reversal: always allow download.
+     */
+    public static void setGrowthPaused(boolean paused) {
+        growthPaused = paused;
+    }
+
+    /**
+     * 2026-07-20 — Alias for {@link #setGrowthPaused} (MemoryRelease naming).
+     * Layman: same pause switch under a longer name the release ladder uses.
+     */
+    public static void setPauseOpportunisticGrowth(boolean paused) {
+        setGrowthPaused(paused);
+    }
+
+    /** True when new progressive downloads should not start. */
+    public static boolean isGrowthPaused() {
+        return growthPaused;
+    }
+
+    /** 2026-07-20 — Alias for {@link #isGrowthPaused} (MemoryRelease self-check). */
+    public static boolean isOpportunisticGrowthPaused() {
+        return isGrowthPaused();
+    }
 
     public static File cacheDir(Context ctx) {
         File d = new File(ctx.getApplicationContext().getCacheDir(), "yt_prog");
@@ -55,6 +85,14 @@ public final class YouTubeProgressiveCache {
             if (progress != null) progress.onProgress(100, out.length(), out.length());
             Log.i(TAG, "reuse cache " + out.getName() + " bytes=" + out.length());
             return out;
+        }
+        // 2026-07-20 — Under pressure: reuse only; do not grow disk cache. Reversal: remove gate.
+        boolean pressured = false;
+        try {
+            pressured = com.solar.launcher.LowMemoryGate.isPressured(ctx);
+        } catch (Throwable ignored) {}
+        if (growthPaused || pressured) {
+            throw new java.io.IOException("cache growth paused under memory pressure");
         }
         File tmp = new File(out.getAbsolutePath() + ".part");
         if (tmp.exists() && tmp.length() < MIN_USABLE_BYTES) {

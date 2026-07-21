@@ -1,7 +1,8 @@
 #!/system/bin/sh
-# Re-home Solar when SystemUI UsbStorageActivity wins while UMS is off.
-# ponytail: started by com.solar.launcher while its process lives; exits when Solar stops.
-# Only runs when org.rockbox is disabled (Solar is the active launcher).
+# 2026-07-19 — Disabled: never dismiss stock UsbStorageActivity (Android owns USB UI).
+# Layman: this used to BACK away the USB screen; now exits immediately.
+# Reversal: restore bring_solar_home loop from git before this banner.
+exit 0
 
 SOLAR_PKG="com.solar.launcher"
 SOLAR_ACT="${SOLAR_PKG}/.MainActivity"

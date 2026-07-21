@@ -10,8 +10,13 @@ package com.solar.launcher;
  * Reversal: always return false / 0 from shouldDefer / msUntilAllowed.
  */
 public final class InputPriorityGate {
-    /** Quiet period after last key/touch before background work may run. */
-    public static final long IDLE_MS = 3000L;
+    /**
+     * 2026-07-20 — Quiet period after last key/touch before background work may run.
+     * Layman: wait a beat after you stop scrolling, then catch up on art/precook.
+     * Was 3000L (felt sticky after wheel). Keep above ScrollIdleGate (~180–220ms) so dial stays index-first.
+     * Reversal: 3000L if post-scroll chores fight the wheel again.
+     */
+    public static final long IDLE_MS = 1500L;
 
     private InputPriorityGate() {}
 

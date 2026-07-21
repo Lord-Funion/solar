@@ -3,13 +3,14 @@ package com.solar.launcher.mix;
 import java.io.File;
 
 /**
- * Three-deck Mix jam state — full tracks, not stems.
- * Layman: three songs layered; each side/play button owns one deck.
- * Technical: slots[0..2] file/gain/bpm/rate; activeDeck for wheel/scrub.
- * 2026-07-19
+ * Two-deck Mix jam state — full tracks, optional stem dig per disc.
+ * Layman: two songs floating as discs; Prev/Next own a deck; dig opens four stem pads.
+ * Technical: slots[0..1] file/gain/bpm/rate; activeDeck for wheel/scrub.
+ * Was: DECK_COUNT=3 faders. Reversal: DECK_COUNT = 3.
+ * 2026-07-19 / 2026-07-21 Stems/Mix sanity
  */
 public final class MixSession {
-    public static final int DECK_COUNT = 3;
+    public static final int DECK_COUNT = 2;
     /** Gain near mute — hold pad opens scrub. */
     public static final float SCRUB_GAIN_EPS = 0.02f;
 
@@ -41,7 +42,7 @@ public final class MixSession {
         for (int i = 0; i < DECK_COUNT; i++) decks[i] = new DeckState();
     }
 
-    /** Bind up to 3 files; clears empty slots. 2026-07-19 */
+    /** Bind up to {@link #DECK_COUNT} files; clears empty slots. 2026-07-19 / 2026-07-21 */
     public void bindTracks(File[] tracks) {
         filledCount = 0;
         activeDeck = -1;

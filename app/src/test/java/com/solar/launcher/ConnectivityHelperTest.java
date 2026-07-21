@@ -72,12 +72,23 @@ public class ConnectivityHelperTest {
     @Test
     public void shouldShowHomeShortcut_reachAndPcUpload() {
         ConnectivityHelper.setReachPeerOk(true);
+        ConnectivityHelper.setDeezerEnabled(false);
+        ConnectivityHelper.setDeezerLoginOk(false);
         if (ConnectivityHelper.shouldShowHomeShortcut(HomeMenuConfig.ID_SOULSEEK, false, true, false)) {
             throw new AssertionError("reach offline");
         }
-        if (!ConnectivityHelper.shouldShowHomeShortcut(HomeMenuConfig.ID_SOULSEEK, true, false, false)) {
-            throw new AssertionError("reach online");
+        // 2026-07-19 — Null-prefs path: Soulseek OFF; Get Music needs Deezer runtime flags.
+        // Was: peer ok alone unlocked Get Music. Reversal: restore peer-only assertion.
+        if (ConnectivityHelper.shouldShowHomeShortcut(HomeMenuConfig.ID_SOULSEEK, true, false, false)) {
+            throw new AssertionError("reach alone must not unlock Get Music without prefs");
         }
+        ConnectivityHelper.setDeezerEnabled(true);
+        ConnectivityHelper.setDeezerLoginOk(true);
+        if (!ConnectivityHelper.shouldShowHomeShortcut(HomeMenuConfig.ID_SOULSEEK, true, false, false)) {
+            throw new AssertionError("deezer runtime unlocks Get Music when prefs null");
+        }
+        ConnectivityHelper.setDeezerEnabled(false);
+        ConnectivityHelper.setDeezerLoginOk(false);
         ConnectivityHelper.setReachPeerOk(false);
         if (ConnectivityHelper.shouldShowHomeShortcut(HomeMenuConfig.ID_SOULSEEK, true, false, false)) {
             throw new AssertionError("reach peer blocked");

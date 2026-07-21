@@ -138,6 +138,10 @@ public class SolarWebServer extends Thread {
                     }
                 }
 
+                if (SolarStemPortalHandler.handleRequest(method, path, is, os, contentLength, context, rootFolder)) {
+                    return;
+                }
+
                 if (method.equals("GET") && path.equals("/")) {
                     StringBuilder foldersHtml = new StringBuilder("<option value=\"ROOT\">[Root Folder] /Music</option>");
                     File[] files = rootFolder.listFiles();
@@ -161,6 +165,7 @@ public class SolarWebServer extends Thread {
                             ".box{background:#222; padding:20px; border-radius:10px; margin:10px auto; max-width:400px;}" +
                             "</style></head><body>" +
                             "<h2>🎧 Solar Wireless Upload</h2>" +
+                            "<p><a href='/stems' style='color:#0ff; font-weight:bold; font-size:18px; text-decoration:none; display:inline-block; margin:10px 0; padding:12px 24px; border:2px solid #00ffff; border-radius:30px; background:rgba(0,255,255,0.1);'>🚀 Solar Web Portal &amp; Stem Preparer (Deezer + YouTube + Library) →</a></p>" +
                             "<p><a href='/browse' style='color:#0ff'>Browse &amp; download files →</a></p>" +
                             "<p><a href='/deezer' style='color:#0ff'>Deezer account setup →</a></p>" +
                             "<p><a href='/lalal' style='color:#0ff'>Stem Player (Lalal.ai) API key →</a></p>" +
@@ -293,12 +298,12 @@ public class SolarWebServer extends Thread {
                                     : "Melody live multi-player (default).";
                         } else if (key == null || key.trim().length() < 8) {
                             com.solar.launcher.stem.LalalAccount.saveUserKey(prefs, "");
-                            msg = "Cleared — using bundled demo key.";
+                            msg = "Using bundled demo key: Stem features On.";
                         } else {
                             com.solar.launcher.stem.LalalAccount.saveUserKey(prefs, key.trim());
                             msg = com.solar.launcher.stem.LalalAccount.isUserConfigured(prefs)
                                     ? "Saved your Lalal.ai API key."
-                                    : "Key too short or matches demo — still on demo.";
+                                    : "Using bundled demo key: Stem features On.";
                         }
                         writeLalalSetupPage(os, msg);
                     }
@@ -338,7 +343,7 @@ public class SolarWebServer extends Thread {
                                 "SOLAR_SETTINGS", Context.MODE_PRIVATE);
                         com.solar.launcher.navidrome.NavidromePrefs.save(context, prefs, navUrl, navUser, navPass);
                         String msg = com.solar.launcher.navidrome.NavidromePrefs.isConfigured(prefs)
-                                ? "✅ Navidrome settings saved." : "Saved — enter URL and username.";
+                                ? "✅ Navidrome settings saved." : "Saved: enter URL and username.";
                         writeNavidromeSetupPage(os, msg);
                     }
                 }
@@ -379,8 +384,8 @@ public class SolarWebServer extends Thread {
                             com.solar.launcher.plex.PlexExperiment.setEnabled(prefs, true);
                         }
                         String msg = com.solar.launcher.plex.PlexPrefs.isConfigured(prefs)
-                                ? "✅ Plex settings saved — Music → Plex is unlocked."
-                                : "Saved — enter URL and token.";
+                                ? "✅ Plex settings saved: Music → Plex is unlocked."
+                                : "Saved: enter URL and token.";
                         writePlexSetupPage(os, msg);
                     }
                 }
@@ -425,8 +430,8 @@ public class SolarWebServer extends Thread {
                             com.solar.launcher.jellyfin.JellyfinExperiment.setEnabled(prefs, true);
                         }
                         String msg = com.solar.launcher.jellyfin.JellyfinPrefs.isConfigured(prefs)
-                                ? "✅ Jellyfin settings saved — Music → Jellyfin is unlocked."
-                                : "Saved — enter URL and username.";
+                                ? "✅ Jellyfin settings saved: Music → Jellyfin is unlocked."
+                                : "Saved: enter URL and username.";
                         writeJellyfinSetupPage(os, msg);
                     }
                 }
@@ -829,6 +834,7 @@ public class SolarWebServer extends Thread {
                     "code{background:#333;padding:2px 4px;border-radius:3px;}" +
                     "a{color:#0ff;}</style></head><body>" +
                     "<h2>🎵 Deezer Account</h2>" +
+                    "<p><a href='/stems' style='color:#0ff; font-weight:bold;'>🚀 Open Solar Web Portal &amp; Stem Preparer →</a></p>" +
                     demoNote +
                     instructions +
                     "<div class='box'><p>Status: <b>" + htmlEscape(status) + "</b></p>" +
@@ -852,7 +858,11 @@ public class SolarWebServer extends Thread {
             SharedPreferences prefs = context.getSharedPreferences(
                     com.solar.launcher.stem.LalalAccount.PREFS_NAME, Context.MODE_PRIVATE);
             boolean configured = com.solar.launcher.stem.LalalAccount.isUserConfigured(prefs);
-            String status = configured ? "Configured (your key)" : "Not configured (demo key)";
+            boolean demoOn = !configured
+                    && com.solar.launcher.stem.StemFeatures.isOptedIn(prefs);
+            String status = configured ? "Configured (your key)"
+                    : (demoOn ? "Using demo key (Stem features On)"
+                            : "Stem features Off");
             String msgHtml = message != null
                     ? "<p style='color:#0f0'>" + htmlEscape(message) + "</p>" : "";
             String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>" +
@@ -865,8 +875,9 @@ public class SolarWebServer extends Thread {
                     ".box{background:#222;padding:20px;border-radius:10px;margin:10px auto;max-width:520px;}" +
                     "ul{color:#ccc;} a{color:#0ff;}</style></head><body>" +
                     "<h2>Stem Player · Lalal.ai</h2>" +
-                    "<p style='color:#aaa;text-align:center'>Solar ships a demo key. Paste your own license from " +
-                    "<a href='https://www.lalal.ai/' target='_blank'>lalal.ai</a> to use your quota — or skip the cloud and use your own stem files (below).</p>" +
+                    "<p><a href='/stems' style='color:#0ff; font-weight:bold; display:block; text-align:center; margin-bottom:10px;'>🚀 Open Solar Web Portal &amp; Stem Preparer →</a></p>" +
+                    "<p style='color:#aaa;text-align:center'>Solar ships a demo key that unlocks Stem / Mix. Paste your own license from " +
+                    "<a href='https://www.lalal.ai/' target='_blank'>lalal.ai</a> for your quota, or skip the cloud and use your own stem files (below).</p>" +
                     "<div class='box'><p>Status: <b>" + htmlEscape(status) + "</b></p>" +
                     msgHtml +
                     "<form method='POST' action='/lalal'>" +
@@ -874,7 +885,7 @@ public class SolarWebServer extends Thread {
                     "<button type='submit'>Save</button></form>" +
                     "<form method='POST' action='/lalal' style='margin-top:8px'>" +
                     "<input type='hidden' name='key' value=''>" +
-                    "<button type='submit'>Reset to demo key</button></form></div>" +
+                    "<button type='submit'>Use demo key (enable Stem features)</button></form></div>" +
                     "<div class='box'>" +
                     "<h3>Prepare your own stems</h3>" +
                     "<p>Next to <code>My Song.mp3</code>, create folder <code>My Song.stems/</code> with MP3s:</p>" +
@@ -893,7 +904,7 @@ public class SolarWebServer extends Thread {
                     "<button type='submit'>Toggle Melody premix (now: " +
                     (com.solar.launcher.stem.LalalAccount.isPremixExperimental(prefs) ? "On" : "Off") +
                     ")</button></form>" +
-                    "<p>Open Stem Player on that track — Solar loads the folder first (no upload). " +
+                    "<p>Open Stem Player on that track. Solar loads the folder first (no upload). " +
                     "Full guide: <code>docs/using-solar/stem-player.md</code> in the Solar repo.</p>" +
                     "</div>" +
                     "<p style='text-align:center'><a href='/'>← Back to upload</a></p></body></html>";

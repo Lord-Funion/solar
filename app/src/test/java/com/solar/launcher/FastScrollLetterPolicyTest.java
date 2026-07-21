@@ -90,6 +90,10 @@ public class FastScrollLetterPolicyTest {
         assertFalse(eligible(FastScrollLetterPolicy.STATE_BROWSER,
                 FastScrollLetterPolicy.BROWSER_VIRTUAL_SONGS, "ALL",
                 0, LibraryBrowsePrefs.SONG_SORT_DATE, 0, 0, false, false, false));
+        // 2026-07-20 — Length sort is not A–Z letter-indexable.
+        assertFalse(eligible(FastScrollLetterPolicy.STATE_BROWSER,
+                FastScrollLetterPolicy.BROWSER_VIRTUAL_SONGS, "ALL",
+                0, LibraryBrowsePrefs.SONG_SORT_LENGTH, 0, 0, false, false, false));
     }
 
     @Test

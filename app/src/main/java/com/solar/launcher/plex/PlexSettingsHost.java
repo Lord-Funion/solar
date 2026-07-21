@@ -126,11 +126,11 @@ public final class PlexSettingsHost {
         if (prefs == null) return "";
         if (RowKeys.PLEX_URL.equals(rowKey)) {
             String u = prefs.getString("plex_url", "");
-            return u != null && !u.isEmpty() ? u : "—";
+            return u != null && !u.isEmpty() ? u : "-";
         }
         if (RowKeys.PLEX_TOKEN.equals(rowKey)) {
             String p = prefs.getString("plex_token", "");
-            return p != null && !p.isEmpty() ? "••••" : "—";
+            return p != null && !p.isEmpty() ? "••••" : "-";
         }
         return "";
     }

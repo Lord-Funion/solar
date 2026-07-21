@@ -85,4 +85,22 @@ public class ByteBudgetLruMapTest {
         assertNull(c.get("huge"));
         assertEquals(0, c.currentBytes());
     }
+
+    /** 2026-07-20 — MemoryRelease soft shrink + OnEvict. */
+    @Test
+    public void trimToBytesFiresOnEvict() {
+        final java.util.ArrayList<Integer> evicted = new java.util.ArrayList<Integer>();
+        ByteBudgetLruMap<String, Integer> c = cache(100);
+        c.setOnEvict(new ByteBudgetLruMap.OnEvict<Integer>() {
+            @Override
+            public void onEvict(Integer value) {
+                evicted.add(value);
+            }
+        });
+        c.put("a", 40);
+        c.put("b", 40);
+        c.trimToBytes(40);
+        assertTrue(c.currentBytes() <= 40);
+        assertFalse(evicted.isEmpty());
+    }
 }

@@ -24,6 +24,10 @@ A user on the **first ever Solar release** who installs the **current APK** (OTA
 4. Graceful fallback without root — Solar music/settings still work
 5. **Blocking wizard** is manual-only (Settings repair); do not re-gate on probe gaps after prep applied (caused loops)
 
+## Rooted phones (2026-07-20)
+
+Phone Solar with `su` runs the **same** `SolarPlatformPrep` ladder as Y1/Y2. **Do not** A5-style skip the wizard on chrome phones. Orientation: `PhoneChromePolicy.active()` → portrait for splash / prep / MainActivity (`LandscapeOrientationGuard.enforceForDevice`).
+
 ## When editing platform prep
 
 - Bump `prepVersion` in `sync-platform-assets.sh` when ladder steps or deprecated list changes

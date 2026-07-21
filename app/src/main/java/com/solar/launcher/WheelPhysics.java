@@ -26,8 +26,7 @@ public final class WheelPhysics {
     public static final int MAX_ROW_STEPS = 4;
     /**
      * Impulse added each notch (higher = snappier ramp).
-     * 2026-07-17 — 1.28 with mic boost: firm scrapes enter multi-row sooner without
-     * needing a huge backlog once the finger lifts.
+     * 2026-07-19 — Mic boost removed; plain KEY impulse only.
      */
     public static final float NOTCH_IMPULSE = 1.28f;
 
@@ -45,22 +44,6 @@ public final class WheelPhysics {
     private float velocity;
     private long lastNanos;
     private int lastDirection;
-    /**
-     * Optional mic scratch boost (≥1). Direction still comes only from {@code direction}.
-     * Set via {@link #setMicBoost(float)} from {@link MicScrollBoost}.
-     */
-    private float micBoost = 1f;
-
-    /** @param boost 1 = no mic help; up to ~1.5 for firm scrape while KEY is live */
-    public void setMicBoost(float boost) {
-        if (boost < 1f) boost = 1f;
-        if (boost > 1.6f) boost = 1.6f;
-        micBoost = boost;
-    }
-
-    public float micBoost() {
-        return micBoost;
-    }
 
     public Result tick(long nowNanos, int direction, Result out) {
         if (out == null) out = new Result();
@@ -83,8 +66,8 @@ public final class WheelPhysics {
         } else {
             velocity *= decay(elapsed);
         }
-        // KEY owns direction; mic only multiplies impulse
-        velocity += NOTCH_IMPULSE * micBoost;
+        // KEY owns direction and impulse (2026-07-19 — no mic multiplier).
+        velocity += NOTCH_IMPULSE;
         lastNanos = nowNanos;
         lastDirection = direction;
         boolean section = velocity >= SECTION_THRESHOLD;

@@ -66,7 +66,19 @@ public final class FocusScrollHelper {
 
     public static void focusListPosition(ListView list, int position) {
         if (list == null || position < 0) return;
-        ensureListPositionVisible(list, position);
+        // 2026-07-21 — Seed/focus paths still requestFocus (idle chrome).
+        ensureListPositionVisible(list, position, true);
+    }
+
+    /**
+     * 2026-07-21 — Select + pin with optional requestFocus (list wheel mid-spin).
+     * Layman: move the highlight on screen; real Android focus can wait until you pause.
+     * Technical: {@code requestFocus=false} skips mid-list requestFocus and edge clear/abort/post.
+     * Reversal: always pass true (pre–ListWheelChromePolicy behaviour).
+     */
+    public static void focusListPosition(ListView list, int position, boolean requestFocus) {
+        if (list == null || position < 0) return;
+        ensureListPositionVisible(list, position, requestFocus);
     }
 
     /**
@@ -91,6 +103,46 @@ public final class FocusScrollHelper {
         if (next < 0) next = 0;
         if (next > maxScroll) next = maxScroll;
         return next;
+    }
+
+    /**
+     * 2026-07-20 — True when the row already sits fully inside the ScrollView window.
+     * Layman: highlight can hop here without moving the list.
+     * Technical: content-space tops vs scrollY..scrollY+viewport. Reversal: always false.
+     */
+    public static boolean isFullyVisibleInScroll(int scrollY, int viewportH,
+            int childTop, int childBottom) {
+        if (viewportH <= 0) return true;
+        return childTop >= scrollY && childBottom <= scrollY + viewportH;
+    }
+
+    /**
+     * 2026-07-20 — Child top/bottom in the scrolled content’s coordinate space.
+     * Layman: where the row sits on the long paper inside the window.
+     * Technical: sum getTop() up to ScrollView’s direct child (not viewport-relative).
+     * Was: offsetDescendantRectToMyCoords alone could disagree with scrollY on API 17.
+     */
+    public static void contentTopBottom(ScrollView scroll, View child, int[] outTopBottom) {
+        if (outTopBottom == null || outTopBottom.length < 2) return;
+        outTopBottom[0] = 0;
+        outTopBottom[1] = 0;
+        if (scroll == null || child == null) return;
+        View content = scroll.getChildCount() > 0 ? scroll.getChildAt(0) : null;
+        if (content == null) {
+            outTopBottom[0] = child.getTop();
+            outTopBottom[1] = child.getBottom();
+            return;
+        }
+        int top = 0;
+        View v = child;
+        while (v != null && v != content && v != scroll) {
+            top += v.getTop();
+            Object p = v.getParent();
+            if (!(p instanceof View)) break;
+            v = (View) p;
+        }
+        outTopBottom[0] = top;
+        outTopBottom[1] = top + Math.max(0, child.getHeight());
     }
 
     /**
@@ -177,9 +229,11 @@ public final class FocusScrollHelper {
     }
 
     /**
-     * 2026-07-11 — Scroll only if focused child clips past top/bottom of ScrollView.
+     * 2026-07-11/20 — Scroll only if focused child clips past top/bottom of ScrollView.
      * Instant scrollTo (ticker): content jumps so the focused row parks at the edge —
      * no smoothScrollTo highlight shunt. Was: isolated ticks used smoothScrollTo.
+     * 2026-07-20 — Content-space tops (not viewport-relative) so mid-list ticks never scroll.
+     * Layman: wheel moves the blue bar; the list only shifts at the top/bottom edge.
      */
     public static void ensureChildVisible(ScrollView scroll, View child) {
         if (scroll == null || child == null) return;
@@ -190,23 +244,59 @@ public final class FocusScrollHelper {
         float density = scroll.getResources().getDisplayMetrics().density;
         int pad = Math.max(1, (int) (ENSURE_VISIBLE_PAD_DP * density));
         int scrollY = scroll.getScrollY();
-        // 2026-07-11 — Descendant rect in content coords (same space as scrollY), per ScrollView AOSP.
-        synchronized (TMP_RECT) {
-            child.getDrawingRect(TMP_RECT);
-            try {
-                scroll.offsetDescendantRectToMyCoords(child, TMP_RECT);
-            } catch (Exception e) {
-                TMP_RECT.set(0, child.getTop(), child.getWidth(), child.getBottom());
+        // 2026-07-20 — Prefer content-space walk; offsetDescendantRect kept as fallback.
+        int[] tb = new int[2];
+        contentTopBottom(scroll, child, tb);
+        int childTop = tb[0];
+        int childBottom = tb[1];
+        if (childBottom <= childTop) {
+            synchronized (TMP_RECT) {
+                child.getDrawingRect(TMP_RECT);
+                try {
+                    scroll.offsetDescendantRectToMyCoords(child, TMP_RECT);
+                } catch (Exception e) {
+                    TMP_RECT.set(0, child.getTop(), child.getWidth(), child.getBottom());
+                }
+                childTop = TMP_RECT.top;
+                childBottom = TMP_RECT.bottom;
             }
-            int childTop = TMP_RECT.top;
-            int childBottom = TMP_RECT.bottom;
-            if (contentH <= 0) contentH = Math.max(childBottom, scrollY + viewport);
-            int targetY = computeEnsureVisibleScrollY(
-                    scrollY, viewport, contentH, childTop, childBottom, pad);
-            if (targetY == scrollY) return;
-            // Abort any in-flight platform smooth scroll, then tick.
-            scroll.scrollTo(0, targetY);
         }
+        if (isFullyVisibleInScroll(scrollY, viewport, childTop, childBottom)) {
+            return; // mid-list: focus only — do not move the viewport
+        }
+        if (contentH <= 0) contentH = Math.max(childBottom, scrollY + viewport);
+        int targetY = computeEnsureVisibleScrollY(
+                scrollY, viewport, contentH, childTop, childBottom, pad);
+        if (targetY == scrollY) return;
+        scroll.scrollTo(0, targetY);
+    }
+
+    /**
+     * 2026-07-20 — requestFocus without mid-list ScrollView jump.
+     * Layman: move the blue bar; don’t slide the whole menu unless the row is off-screen.
+     * Technical: if already fully visible, undo platform bring-into-view after focus.
+     * Reversal: row.requestFocus() + ensureChildVisible always.
+     * @return true if the row took focus
+     */
+    public static boolean requestFocusEdgeOnly(ScrollView scroll, View row) {
+        if (row == null) return false;
+        if (scroll == null) {
+            return row.requestFocus();
+        }
+        int sy = scroll.getScrollY();
+        int vh = scroll.getHeight();
+        int[] tb = new int[2];
+        contentTopBottom(scroll, row, tb);
+        boolean fully = isFullyVisibleInScroll(sy, vh, tb[0], tb[1]);
+        if (!row.requestFocus()) return false;
+        if (fully) {
+            if (scroll.getScrollY() != sy) {
+                scroll.scrollTo(0, sy);
+            }
+            return true;
+        }
+        ensureChildVisible(scroll, row);
+        return true;
     }
 
     /**
@@ -218,25 +308,35 @@ public final class FocusScrollHelper {
      * Clears child focus first + suppresses rect-scroll so chrome does not dual-flash.
      */
     public static void ensureListPositionVisible(ListView list, int position) {
+        ensureListPositionVisible(list, position, true);
+    }
+
+    /**
+     * 2026-07-11/21 — Select + pin; optional skip of requestFocus / edge focus storm.
+     * Layman: keep the chosen row on screen; while spinning, do not re-light focus every notch.
+     * Technical: mid-spin ({@code requestFocus=false}) still setSelectionFromTop; omits
+     * mid-list requestFocus and edge clearFocus/abortListMotion/focusAfterSelect post.
+     * Reversal: always call two-arg overload (requestFocus true).
+     */
+    public static void ensureListPositionVisible(ListView list, int position,
+            boolean requestFocus) {
         if (list == null || position < 0) return;
         int count = list.getCount();
         if (count <= 0 || position >= count) return;
-        // #region agent log
-        final boolean dbg = com.solar.launcher.Debug0f5debLog.ENABLED;
-        long t0 = dbg ? android.os.SystemClock.uptimeMillis() : 0L;
-        // #endregion
+        // 2026-07-20 — Agent metering stripped (was timing + NDJSON on every wheel select).
         // 2026-07-17 — Before first layout (childCount==0) still arm selection so wheel
         // progress is not stuck at 0 until a later frame (real KEY path + inject harness).
         if (list.getChildCount() <= 0) {
             list.setSelection(position);
-            requestFor(list).focusAfterSelect(position, false);
+            if (requestFocus) {
+                requestFor(list).focusAfterSelect(position, false);
+            }
             return;
         }
         int viewport = list.getHeight();
         float density = list.getResources().getDisplayMetrics().density;
         int pad = Math.max(1, (int) (ENSURE_VISIBLE_PAD_DP * density));
         int first = list.getFirstVisiblePosition();
-        int last = list.getLastVisiblePosition();
         int childIdx = position - first;
         View child = (childIdx >= 0 && childIdx < list.getChildCount())
                 ? list.getChildAt(childIdx) : null;
@@ -249,25 +349,6 @@ public final class FocusScrollHelper {
                     : list.getChildAt(list.getChildCount() - 1);
             if (sample != null) rowHint = sample.getHeight();
         }
-        // 2026-07-11 — Natural iPod slots: first/last fully-visible row tops.
-        int firstFullTop = 0;
-        int lastFullTop = 0;
-        boolean hasFirstFull = false;
-        boolean hasLastFull = false;
-        for (int i = 0; i < list.getChildCount(); i++) {
-            View c = list.getChildAt(i);
-            if (c == null) continue;
-            int t = c.getTop();
-            int b = c.getBottom();
-            if (t >= 0 && b <= viewport) {
-                if (!hasFirstFull) {
-                    firstFullTop = t;
-                    hasFirstFull = true;
-                }
-                lastFullTop = t;
-                hasLastFull = true;
-            }
-        }
         boolean laidOut = child != null;
         int top = laidOut ? child.getTop() : 0;
         int bottom = laidOut ? child.getBottom() : 0;
@@ -275,41 +356,18 @@ public final class FocusScrollHelper {
         if (fullyVisible) {
             // 2026-07-16 — Mid-list walk: no clearFocus/abort/post (was ~1 full frame per wheel notch).
             // Layman: highlight just hops to the next already-on-screen row.
-            // Technical: setSelectionFromTop + requestFocus only; edge path still uses full sticky.
+            // Technical: setSelectionFromTop + optional requestFocus; edge path still sticky.
             int sel = list.getSelectedItemPosition();
             if (sel != position) {
                 list.setSelectionFromTop(position, top);
             }
-            if (child != null && !child.isFocused() && child.isFocusable()) {
+            // 2026-07-21 — Mid-spin skips requestFocus (dual-line bind uses selection chrome).
+            if (requestFocus && child != null && !child.isFocused() && child.isFocusable()) {
                 child.requestFocus();
             }
-            // #region agent log
-            if (dbg) {
-                long midMs = android.os.SystemClock.uptimeMillis() - t0;
-                if (midMs >= 4L || (position % 17 == 0)) {
-                    try {
-                        org.json.JSONObject d = new org.json.JSONObject();
-                        d.put("path", "mid");
-                        d.put("pos", position);
-                        d.put("first", first);
-                        d.put("last", last);
-                        d.put("ms", midMs);
-                        d.put("count", count);
-                        com.solar.launcher.Debug0f5debLog.log(list.getContext(),
-                                "FocusScrollHelper.ensureListPositionVisible",
-                                "mid-viewport select", "H1", d);
-                    } catch (Exception ignored) {}
-                }
-            }
-            // #endregion
             return;
         }
-        // 2026-07-11 — Drop old focus chrome first so the bar does not ride a recycled view.
-        clearListChildFocus(list);
-        // Abort fling / leftover PositionScroller from older builds before sticky pin.
-        abortListMotion(list);
         // Walk the page: only pin to the absolute edge if clipping/off-screen.
-        // Removed train-timetable sticky-slot natural top logic per user request.
         boolean pinBottom;
         if (laidOut) {
             pinBottom = top >= 0; // clips bottom (or below) vs clips top
@@ -320,28 +378,23 @@ public final class FocusScrollHelper {
         }
         int rowH = laidOut ? Math.max(1, bottom - top) : Math.max(1, rowHint);
         int selTop = pinBottom ? Math.max(pad, viewport - rowH - pad) : pad;
+        if (!requestFocus) {
+            // 2026-07-21 — Spinning edge: pin viewport only (no clearFocus/abort/focus post).
+            // Layman: slide titles through the bar without a one-frame focus flash.
+            // Was: clearListChildFocus + abortListMotion + focusAfterSelect every edge tick.
+            armRectSuppress(list);
+            list.setSelectionFromTop(position, selTop);
+            if (list instanceof Y1SafeListView) {
+                ((Y1SafeListView) list).setSuppressChildRectScroll(false);
+            }
+            return;
+        }
+        // 2026-07-11 — Drop old focus chrome first so the bar does not ride a recycled view.
+        clearListChildFocus(list);
+        // Abort fling / leftover PositionScroller from older builds before sticky pin.
+        abortListMotion(list);
         setSelectionFromTopSuppressed(list, position, selTop);
         requestFor(list).focusAfterSelect(position, true);
-        // #region agent log
-        if (dbg) {
-            try {
-                org.json.JSONObject d = new org.json.JSONObject();
-                d.put("path", "edge");
-                d.put("pos", position);
-                d.put("first", first);
-                d.put("last", last);
-                d.put("above", above);
-                d.put("pinBottom", pinBottom);
-                d.put("laidOut", laidOut);
-                d.put("ms", android.os.SystemClock.uptimeMillis() - t0);
-                d.put("count", count);
-                d.put("children", list.getChildCount());
-                com.solar.launcher.Debug0f5debLog.log(list.getContext(),
-                        "FocusScrollHelper.ensureListPositionVisible",
-                        "edge sticky pin", "H1", d);
-            } catch (Exception ignored) {}
-        }
-        // #endregion
     }
 
     /**

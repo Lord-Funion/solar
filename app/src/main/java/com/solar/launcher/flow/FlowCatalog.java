@@ -6,6 +6,7 @@ import com.solar.launcher.ArtistBrowsePolicy;
 import com.solar.launcher.ArtistNames;
 import com.solar.launcher.ArtistParser;
 import com.solar.launcher.LibraryBrowsePrefs;
+import com.solar.launcher.MusicLibraryStore;
 import com.solar.launcher.PlaylistManager;
 import com.solar.launcher.deezer.DeezerPlaylist;
 import com.solar.launcher.podcast.OpenRssClient;
@@ -39,6 +40,11 @@ public final class FlowCatalog {
         public final int year;
         /** Display year label (usually same as year string). */
         public final String yearLabel;
+        /**
+         * 2026-07-20 — Cached duration_ms for Length sort; empty = unknown.
+         * Layman: how long the track is, carried from the library row.
+         */
+        public String durationMs = "";
 
         public SongRow(File file, String title, String artist, String album,
                 String albumArtist, long lastModified) {
@@ -174,8 +180,21 @@ public final class FlowCatalog {
     public static List<FlowItem> buildArtists(List<ArtistBrowsePolicy.Track> policyTracks,
             LibraryBrowsePrefs prefs) {
         List<String> names = ArtistBrowsePolicy.collectArtists(policyTracks, prefs);
+        return buildArtistsFromNames(names);
+    }
+
+    /**
+     * 2026-07-20 — Artist carousel from Tier-0 DISTINCT names (SEGMENTED empty policyTracks).
+     * Layman: show artists in Flow without walking every song object.
+     * Reversal: only {@link #buildArtists} from policyTracks.
+     */
+    public static List<FlowItem> buildArtistsFromNames(List<String> names) {
         List<FlowItem> out = new ArrayList<FlowItem>();
-        for (String name : names) {
+        if (names == null) return out;
+        for (int i = 0; i < names.size(); i++) {
+            String name = names.get(i);
+            if (name == null || name.trim().isEmpty()) continue;
+            name = name.trim();
             String key = ArtistNames.matchKey(name);
             out.add(FlowItem.artist(name, "", key));
         }
@@ -300,10 +319,13 @@ public final class FlowCatalog {
                 return display.get(a).compareToIgnoreCase(display.get(b));
             }
         });
+        // 2026-07-19 — Shared AlbumOwnerIndex for artist→album Flow rows (avoid per-album rebuild).
+        ArtistBrowsePolicy.AlbumOwnerIndex browseIndex =
+                ArtistBrowsePolicy.AlbumOwnerIndex.build(policyTracks, prefs);
         List<FlowItem> out = new ArrayList<FlowItem>();
         for (String key : keys) {
             String album = display.get(key);
-            String sub = ArtistBrowsePolicy.albumBrowseSubtitle(album, artist, policyTracks, prefs);
+            String sub = ArtistBrowsePolicy.albumBrowseSubtitle(album, artist, browseIndex, prefs);
             String match = FlowCoverResolver.albumMatchKey(album, artist);
             out.add(FlowItem.album(album, sub, match,
                     Collections.<File>emptyList(), artist));
@@ -340,7 +362,18 @@ public final class FlowCatalog {
                 SongRow sa = byFile.get(a);
                 SongRow sb = byFile.get(b);
                 if (sort == LibraryBrowsePrefs.SONG_SORT_DATE) {
-                    return Long.signum(a.lastModified() - b.lastModified());
+                    // 2026-07-19 — Prefer SongRow cached mtime; was File.lastModified() (stat per compare).
+                    // Reversal: compare a.lastModified()/b.lastModified() again.
+                    long da = sa != null ? sa.lastModified : (a != null ? a.lastModified() : 0L);
+                    long db = sb != null ? sb.lastModified : (b != null ? b.lastModified() : 0L);
+                    return Long.signum(da - db);
+                }
+                if (sort == LibraryBrowsePrefs.SONG_SORT_LENGTH) {
+                    // 2026-07-20 — Shortest→longest for Flow album/session track order.
+                    int len = MusicLibraryStore.compareDurationAscending(
+                            sa != null ? sa.durationMs : null,
+                            sb != null ? sb.durationMs : null);
+                    if (len != 0) return len;
                 }
                 if (sort == LibraryBrowsePrefs.SONG_SORT_ALBUM
                         || sort == LibraryBrowsePrefs.SONG_SORT_ARTIST) {

@@ -43,7 +43,12 @@ public final class FirstSessionReadyGate {
         return !isUiReadyComplete(ctx);
     }
 
-    /** True when platform prep is still behind the bundled ladder (show wizard, not silent-only). */
+    /**
+     * 2026-07-16 — True when platform prep is still behind the bundled ladder (show wizard).
+     * 2026-07-20 — Rooted phones (PhoneChromePolicy) use this same gate — only A5 skips.
+     * Layman: phones with root still get the “Getting things ready” prep steps.
+     * Tech: no A5-style early return for chrome phones; ladder runs when su works.
+     */
     public static boolean shouldShowPrepWizard(Context ctx) {
         if (ctx == null || DeviceFeatures.isA5()) return false;
         try {

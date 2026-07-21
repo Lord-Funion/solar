@@ -56,6 +56,25 @@ public class FlowFlipControllerTest {
     }
 
     @Test
+    public void edgeHintOnlyAfterUserScroll() {
+        // 2026-07-20 — No tip on first land; tip after scrolling to an edge.
+        FlowFlipController flip = new FlowFlipController();
+        flip.setBackContent("A", "", Arrays.asList(
+                new FlowScreenHost.FlowBackRow("One", "", null, null),
+                new FlowScreenHost.FlowBackRow("Two", "", null, null),
+                new FlowScreenHost.FlowBackRow("Three", "", null, null)), 1);
+        advanceFlipToBack(flip);
+        assertEquals(FlowListEdgeHintPolicy.NONE, flip.edgeHintMode());
+        assertFalse(flip.hasUserScrolledBack());
+        assertTrue(flip.scrollBackBy(-1));
+        assertEquals(FlowListEdgeHintPolicy.TOP, flip.edgeHintMode());
+        assertTrue(flip.scrollBackBy(1));
+        assertEquals(FlowListEdgeHintPolicy.NONE, flip.edgeHintMode());
+        assertTrue(flip.scrollBackBy(1));
+        assertEquals(FlowListEdgeHintPolicy.BOTTOM, flip.edgeHintMode());
+    }
+
+    @Test
     public void backStackPushPop() {
         FlowFlipController flip = new FlowFlipController();
         flip.setBackContent("Artist", "", Arrays.asList(

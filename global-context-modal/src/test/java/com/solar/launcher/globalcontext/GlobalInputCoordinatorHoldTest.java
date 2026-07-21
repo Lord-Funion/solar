@@ -34,7 +34,7 @@ public final class GlobalInputCoordinatorHoldTest {
     public void holdDownArmsModalTierNotPassthroughGate() {
         // Contract: passthrough is evaluated on UP at holdMs; DOWN must never skip arming.
         assertTrue(GlobalInputPolicy.shouldPassthroughPowerTap(0L));
-        assertEquals(350L, GlobalInputPolicy.powerModalHoldMsForPackage("com.android.settings"));
+        assertEquals(280L, GlobalInputPolicy.powerModalHoldMsForPackage("com.android.settings"));
         assertEquals(300L, GlobalInputPolicy.powerModalHoldMsForPackage("org.rockbox"));
     }
 }

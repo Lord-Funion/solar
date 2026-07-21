@@ -2,11 +2,13 @@
 
 Input on Solar OS is **layered, not monolithic**. A shared policy JAR defines hold timings and who may intercept keys; Xposed hooks in `system_server` are tier 1 for **Solar-only** quick menus + HOLD BACK → Solar; volume OSD and rescue remain system-wide; root evdev is tier 3 miss-gate.
 
-**Source of truth:** `solar-rom/vendor/global-input-policy/GlobalInputPolicy.java` (`POLICY_REV` **23**) — compiled into bridge, companion, Solar, and daemon.
+**Source of truth:** `solar-rom/vendor/global-input-policy/GlobalInputPolicy.java` (`POLICY_REV` **27**) — compiled into bridge, companion, Solar, and daemon.
 
 **2026-07-14 product contract:** context / power quick menus open **only while Solar is foreground** (in-app `ThemedContextMenu`). Outside Solar on Y2, POWER hold shows the **stock Android power menu**. HOLD BACK outside Solar **launches Solar Home** (no WM quick shell). Volume OSD + 10s rescue unchanged.
 
 **2026-07-15 (POLICY_REV 23):** Y2 short POWER force-`goToSleep` only when the screen was **on at POWER DOWN** (`shouldForcePowerTapSleep`). UP-time `isScreenOn` is already true after a wake, so a wake tap must not call `goToSleep`. Sleep also dismisses in-app / WM overlays and treats an open USB connect prompt as dismissed.
+
+**2026-07-20 (POLICY_REV 27):** Modal / Solar BACK / center holds **280 ms**; `POWER_TAP_MAX_MS` **220 ms** (must stay under hold). Snappier Options open while accidental-tap guard remains.
 
 **2026-07-15 volume HUD (Y2 / A5):** On music Now Playing or video playback, hardware volume keys adjust level and pulse the transport bar only — **no** compact volume overlay. Exception: if an in-app or global context modal is open, volume **clears that modal activity** and shows the compact volume bar instead (`VolumeHudPolicy`, `SolarUiState.persist.solar.ui.now_playing`).
 
@@ -39,11 +41,11 @@ Only one tier owns a concern at a time. Lower tiers arm on **miss** only.
 
 | Constant | ms | Use |
 |----------|-----|-----|
-| `POWER_TAP_MAX_MS` | 380 | Y2 short power → sleep when screen was on at DOWN |
-| `GLOBAL_MODAL_HOLD_MS` | 420 | Third-party BACK → return to Solar; Solar POWER → in-app menu |
+| `POWER_TAP_MAX_MS` | 220 | Y2 short power → sleep when screen was on at DOWN |
+| `GLOBAL_MODAL_HOLD_MS` | 280 | Third-party BACK → return to Solar; Solar POWER → in-app menu |
 | `NAV_OWNED_LAUNCHER_MODAL_HOLD_MS` | 300 | Rockbox/JJ passthrough ceiling; JJ BACK-long modal |
-| `SOLAR_BACK_CONTEXT_HOLD_MS` | 420 | Solar in-app BACK menu |
-| `CENTER_MENU_HOLD_MS` | 420 | OK-long row context menu |
+| `SOLAR_BACK_CONTEXT_HOLD_MS` | 280 | Solar in-app BACK menu |
+| `CENTER_MENU_HOLD_MS` | 280 | OK-long row context menu |
 | `HUD_COUNTDOWN_START_MS` | 7000 | Rescue countdown 3..2..1 visible |
 | `RESCUE_EXECUTE_MS` | 10000 | Continuous hold → Solar restart / `solar-rescue-exec.sh` |
 | `SUB_TIER_CENTER_GRACE_MS` / `APP_MENU_CENTER_GRACE_MS` | 595 | Overlay: ignore center KEY_UP after submenu paint (Power/Wi‑Fi/APP_MENU) |
@@ -65,7 +67,7 @@ Global quick modal (`OverlayModalHost`) activates chips and list rows on **KEY_U
 
 ## Launcher special cases
 
-| Foreground | BACK-long (~420/300 ms) | POWER-long (Y2) | Handoff |
+| Foreground | BACK-long (~280/300 ms) | POWER-long (Y2) | Handoff |
 |------------|-------------------------|-----------------|---------|
 | `com.solar.launcher` | In-app menu (`MainActivity`) | In-app menu (suppress stock) | `MODE_OFF` |
 | `org.rockbox` | **Never** (owns BACK); IME may escape → Solar | **Stock** GlobalActions | `MODE_OFF` |

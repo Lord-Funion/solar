@@ -151,6 +151,7 @@ final class VolumePanelHooks {
                     return;
                 }
                 Context ctx = SystemServerHooks.resolveContext(param.thisObject);
+                // Solar fg: MainActivity / scheduleVolumeOverlay fg-gate owns HUD — do not schedule here.
                 if (SystemServerHooks.isSolarForeground(ctx)) return;
                 scheduleVolumeOverlay();
                 // #region agent log
@@ -284,7 +285,15 @@ final class VolumePanelHooks {
     /** Debounced start of passive Solar volume overlay (Rockbox / third-party apps). */
     private static void scheduleVolumeOverlay() {
         if (isInternalVolumeAdjust()) return;
+        // 2026-07-15 — NP/video inline pulse; never global HUD.
         if (isSolarNowPlayingScreen()) return;
+        // 2026-07-20 — Solar Activity owns volume keys (VolumeHudPolicy); skip global HUD while fg.
+        // Layman: in Solar, volume pop-up is the in-app bar — not the floating overlay.
+        // Was: only NP prop; browse OK but NP race still opened overlay. Reversal: drop fg check.
+        try {
+            Context ctx = SystemServerHooks.currentContext();
+            if (ctx != null && SystemServerHooks.isSolarForeground(ctx)) return;
+        } catch (Throwable ignored) {}
         long now = System.currentTimeMillis();
         volumeHandler().removeCallbacks(SHOW_OVERLAY);
         if (now - lastShowTime > THROTTLE_MS) {

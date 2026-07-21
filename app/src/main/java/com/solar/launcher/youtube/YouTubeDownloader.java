@@ -83,6 +83,17 @@ public final class YouTubeDownloader {
             d.put("titleLen", video.title != null ? video.title.length() : 0);
             com.solar.launcher.Debug88eea4Log.log(ctx, "YouTubeDownloader.save",
                     "save start", "A,D", d);
+            // 2026-07-20 — 0b8f80 H3/H4: Save vs Play-cache for Hello hunt.
+            String t = video.title != null ? video.title : "";
+            boolean helloish = t.toLowerCase(java.util.Locale.US).indexOf("hello") >= 0
+                    || t.toLowerCase(java.util.Locale.US).indexOf("lionel") >= 0
+                    || t.toLowerCase(java.util.Locale.US).indexOf("ritchie") >= 0;
+            com.solar.launcher.Debug0b8f80Log.log("YouTubeDownloader.save", "save start", "H3,H4",
+                    "{\"audioOnly\":" + audioOnly
+                            + ",\"playCacheOnly\":" + playCacheOnly
+                            + ",\"helloish\":" + helloish
+                            + ",\"titleLen\":" + t.length()
+                            + ",\"id\":\"" + video.id.replace("\"", "") + "\"}");
         } catch (Exception ignored) {}
         // #endregion
         // Permanent library hits only for explicit Save — never promote Play into Music/YouTube.
@@ -247,6 +258,21 @@ public final class YouTubeDownloader {
                                 "YouTubeDownloader.downloadResolved", "http done", "B", d);
                     } catch (Exception ignored) {}
                     // #endregion
+                    // #region agent log
+                    // 2026-07-20 — 0b8f80 H3/H4: file landed; Music/YouTube vs play-cache path.
+                    try {
+                        String p = dest.getAbsolutePath();
+                        boolean underMusicYt = p.indexOf("/Music/YouTube/") >= 0;
+                        boolean underPlayCache = p.indexOf("/" + YouTubePlayCache.DIR_NAME + "/") >= 0
+                                || p.indexOf("youtube") >= 0 && !underMusicYt;
+                        com.solar.launcher.Debug0b8f80Log.log(
+                                "YouTubeDownloader.downloadResolved", "http done", "H3,H4",
+                                "{\"len\":" + dest.length()
+                                        + ",\"underMusicYt\":" + underMusicYt
+                                        + ",\"underPlayCache\":" + underPlayCache
+                                        + ",\"name\":\"" + dest.getName().replace("\"", "") + "\"}");
+                    } catch (Exception ignored) {}
+                    // #endregion
                     main.post(new Runnable() {
                         @Override public void run() {
                             if (cb != null) {
@@ -262,6 +288,10 @@ public final class YouTubeDownloader {
                         d.put("err", e.getMessage() != null ? e.getMessage() : "");
                         com.solar.launcher.Debug88eea4Log.log(ctx,
                                 "YouTubeDownloader.downloadResolved", "http fail", "B", d);
+                        com.solar.launcher.Debug0b8f80Log.log(
+                                "YouTubeDownloader.downloadResolved", "http fail", "H3",
+                                "{\"err\":\"" + (e.getMessage() != null
+                                        ? e.getMessage().replace("\"", "") : "") + "\"}");
                     } catch (Exception ignored) {}
                     // #endregion
                     postError(cb, e.getMessage());
@@ -280,6 +310,13 @@ public final class YouTubeDownloader {
     }
 
     private static void postError(final Callback cb, final String msg) {
+        // #region agent log
+        // 2026-07-20 — 0b8f80 H3: resolve/download error surface (Hello may never land).
+        try {
+            com.solar.launcher.Debug0b8f80Log.log("YouTubeDownloader.postError", "save error", "H3",
+                    "{\"err\":\"" + (msg != null ? msg.replace("\"", "") : "error") + "\"}");
+        } catch (Exception ignored) {}
+        // #endregion
         main.post(new Runnable() {
             @Override public void run() {
                 if (cb != null) cb.onError(msg != null ? msg : "error");

@@ -59,8 +59,14 @@ public final class SolarKeyboardShellHost {
                 }
             }
         }
-        if (tvStatusTitle != null && statusTitle != null) {
-            tvStatusTitle.setText(statusTitle);
+        if (tvStatusTitle != null) {
+            // 2026-07-20 — Clock in keyboard status (was purpose title, duplicated with field title).
+            // Layman: status strip shows the time while you type.
+            // statusTitle arg kept for callers; unused for chrome. Reversal: setText(statusTitle).
+            boolean is24 = android.text.format.DateFormat.is24HourFormat(context);
+            java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat(
+                    is24 ? "HH:mm" : "h:mm a", java.util.Locale.US);
+            tvStatusTitle.setText(fmt.format(new java.util.Date()));
             ThemeManager.applyThemedTextStyle(tvStatusTitle, ThemeManager.getStatusBarTextColor());
             View statusBar = shellRoot.findViewById(R.id.layout_keyboard_status_bar);
             if (statusBar != null) {

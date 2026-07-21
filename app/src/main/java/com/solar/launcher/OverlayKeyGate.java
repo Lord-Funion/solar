@@ -143,6 +143,10 @@ public final class OverlayKeyGate {
     /** Overlay shown — tell system_server to block keys from the foreground app. */
     public static void arm(Handler keyHandler) {
         clearLegacyActiveProperty();
+        // Stem/Mix jam owns pads — refuse overlay arm (mutex: stemmix > overlay). 2026-07-19
+        if (StemOrMixSession.isActive()) {
+            return;
+        }
         if (SolarImeRouteArbiter.isActive()) {
             SolarImeKeyGate.pauseForHigherOverlay();
         }

@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 2026-07-18 — FrameLayout: scrub stays bottom; hint overlays above (was LinearLayout push). -->
 <!-- Was: vertical LinearLayout — hint VISIBLE grew and shoved progress/volume down. -->
-<!-- Reversal: LinearLayout vertical + hint above scrub as first child. -->
+<!-- 2026-07-20 — Root height must be progress+hint (66=34+32) or FrameLayout AT_MOST clips tip. -->
+<!-- Reversal: LinearLayout vertical + hint above scrub; or 48dp root (sliced letters). -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/transport_bar_root"
     android:layout_width="match_parent"
@@ -12,7 +13,7 @@
     android:paddingRight="10dp"
     android:paddingBottom="2dp">
 
-    <!-- Tip floats above scrub — full glyph+label visible (minHeight + padding). -->
+    <!-- Tip band = transport − progress; minHeight must fit that band (no vertical clip). -->
     <TextView
         android:id="@+id/transport_hint"
         android:layout_width="match_parent"
@@ -23,13 +24,13 @@
         android:focusable="true"
         android:focusableInTouchMode="true"
         android:gravity="center"
-        android:includeFontPadding="true"
+        android:includeFontPadding="false"
         android:marqueeRepeatLimit="marquee_forever"
         android:minHeight="@dimen/y1_transport_hint_height"
         android:paddingLeft="6dp"
         android:paddingRight="6dp"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp"
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp"
         android:scrollHorizontally="true"
         android:singleLine="true"
         android:text="@string/context_hold_back_hint"

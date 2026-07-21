@@ -7,7 +7,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/** Unit tests for global Bluetooth pairing coordinator routing (2026-07-05). */
+/** Unit tests for global Bluetooth pairing coordinator routing (2026-07-05 / 2026-07-19). */
 public class BluetoothPairingCoordinatorTest {
 
     @Test
@@ -32,6 +32,11 @@ public class BluetoothPairingCoordinatorTest {
     }
 
     @Test
+    public void testNegotiationWindowIs15s() {
+        assertEquals(15_000L, BluetoothPairingCoordinator.NEGOTIATION_WINDOW_MS);
+    }
+
+    @Test
     public void testSelfCheck() {
         BluetoothPairingCoordinator.selfCheck();
         SolarWheelKeyboardController.selfCheck();
@@ -42,5 +47,12 @@ public class BluetoothPairingCoordinatorTest {
         BluetoothPairingCoordinator.clearSession();
         assertFalse(BluetoothPairingCoordinator.onPairingRequest(
                 null, null, BluetoothDevice.PAIRING_VARIANT_PIN, 0, false));
+    }
+
+    @Test
+    public void testPendingPinClearedOnBondedNull() {
+        BluetoothPairingCoordinator.clearSession();
+        BluetoothPairingCoordinator.onBonded(null);
+        assertFalse(BluetoothPairingCoordinator.isPendingPinNegotiation("AA:BB:CC:DD:EE:FF"));
     }
 }

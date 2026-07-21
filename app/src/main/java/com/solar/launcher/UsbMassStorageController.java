@@ -132,10 +132,20 @@ public final class UsbMassStorageController {
     }
 
     /**
+     * 2026-07-20 — After confirmed unplug, ignore residual sysfs export for Solar eject UI.
+     * Layman: unplug must not bounce the “USB storage on” screen while the kernel finishes.
+     * Tech: disable-ums re-enum leaves mass_storage briefly; changeScreen used to re-lock.
+     * Reversal: clear flag helpers; restore live {@code isMassStorageExported} as always UI-active.
+     */
+    private static volatile boolean sIgnoreExportForUiAfterUnplug = false;
+
+    /**
      * 2026-07-15 — Remember user asked for disk mode (survives USB re-enum disconnect blip).
      * Layman: Turn on sticks until Turn Off or real unplug.
      */
     public static void markUserSessionActive() {
+        // Fresh Turn on / auto-connect owns export again — stop ignoring residual unplug state.
+        sIgnoreExportForUiAfterUnplug = false;
         sUserSessionActive = true;
         sEnableArmedAtElapsedMs = android.os.SystemClock.elapsedRealtime();
         writeSysprop(SYSPROP_USER_SESSION, "1");
@@ -148,6 +158,52 @@ public final class UsbMassStorageController {
         sEnableArmedAtElapsedMs = 0L;
         writeSysprop(SYSPROP_USER_SESSION, "0");
         invalidateProbeCache();
+    }
+
+    /**
+     * 2026-07-20 — Confirmed cable out: do not re-paint eject UI from leftover LUN/export.
+     * Layman: after unplug, menus stay usable while disk mode shuts down in the background.
+     */
+    public static void markExportUiIgnoredAfterUnplug() {
+        sIgnoreExportForUiAfterUnplug = true;
+    }
+
+    /** Host reconnect / tests — allow export probes to drive eject UI again. */
+    public static void clearExportUiIgnoreAfterUnplug() {
+        sIgnoreExportForUiAfterUnplug = false;
+    }
+
+    /** True while residual kernel UMS must not force Solar’s USB lock screen. */
+    public static boolean shouldIgnoreExportForUi() {
+        return sIgnoreExportForUiAfterUnplug;
+    }
+
+    /**
+     * 2026-07-20 — Whether Solar should treat UMS as locking menus / eject screen.
+     * Layman: only Solar’s Turn on / eject screen blocks menus; Android owns the stock USB dialog.
+     * Tech: never lock from kernel export alone; discharging forces inactive (cable power gone).
+     * Was: cached/live export could re-lock after unplug. Reversal: restore export|| branch.
+     *
+     * @param discharging battery not charging/full — USB host power is gone
+     */
+    static boolean isUiActiveForTest(boolean locked, boolean onUsbScreen, boolean userSession,
+            boolean cachedExported, boolean liveExported, boolean ignoreExportAfterUnplug,
+            boolean discharging) {
+        // Discharging = not on USB power → Solar must never keep the eject wall up.
+        if (discharging) return false;
+        // Solar-owned disk mode only (Turn on / auto-connect arm / painted eject screen).
+        if (locked || onUsbScreen || userSession) return true;
+        // ignoreExportAfterUnplug kept for call-site clarity; export alone never locks.
+        if (ignoreExportAfterUnplug) return false;
+        // Android SystemUI owns residual mass_storage — do not steal the UI.
+        return false;
+    }
+
+    /** Overload without discharging — assumes still possibly on USB power (tests / hot paths). */
+    static boolean isUiActiveForTest(boolean locked, boolean onUsbScreen, boolean userSession,
+            boolean cachedExported, boolean liveExported, boolean ignoreExportAfterUnplug) {
+        return isUiActiveForTest(locked, onUsbScreen, userSession, cachedExported, liveExported,
+                ignoreExportAfterUnplug, false);
     }
 
     /**
@@ -198,7 +254,8 @@ public final class UsbMassStorageController {
 
     /**
      * 2026-07-16 — Confirmed cable unplug: drop session then tear down kernel UMS.
-     * Layman: only after the cable has been out for good — free the PC disk and leave eject screen.
+     * 2026-07-19 — If Solar never armed UMS and Android owns USB, leave kernel alone (SystemUI path).
+     * Layman: only Solar’s Enable Now / Auto-Connect disk mode is torn down by Solar on unplug.
      */
     public static boolean teardownAfterConfirmedUnplug(Context context) {
         // FocusHelper + manifest WakeReceiver both confirm unplug — one disable script is enough.
@@ -206,8 +263,15 @@ public final class UsbMassStorageController {
             return true;
         }
         try {
+            boolean solarOwned = isUserSessionActive();
+            // 2026-07-20 — Arm before clear so MainActivity cannot re-lock from residual export.
+            markExportUiIgnoredAfterUnplug();
             clearUserSession();
             if (context == null) return false;
+            // Stock SystemUI may have shared storage — do not su-disable on every unplug blip.
+            if (!solarOwned && UsbStorageSessionFlags.preferStockUsbUi(context)) {
+                return true;
+            }
             return disableIfExported(context, true);
         } finally {
             sTeardownInFlight.set(false);
@@ -282,20 +346,26 @@ public final class UsbMassStorageController {
     }
 
     /**
-     * 2026-07-16 — Boot: never auto-present disks because persist.sys.usb.config stayed mass_storage.
-     * Layman: plugging into a PC after reboot must not share storage until the user turns it on.
-     * Tech: clear sticky persist + disable kernel UMS unless Settings → Auto-Connect is on.
-     * Reversal: remove boot call; rely on manual disable only.
+     * 2026-07-16 — Boot: clear Solar-armed UMS session leftovers.
+     * 2026-07-19 — When Android owns USB (no Auto-Connect), do not disable kernel UMS or rewrite
+     * persist.sys.usb.config — that fought SystemUI and stalled Y1 startups while PC-tethered.
+     * Layman: reboot with a PC cable → Android can show its USB dialog; Solar stays out.
+     * Tech: stock path = clearUserSession only; Auto-Connect path leaves kernel for later enable.
+     * Reversal: restore clearSticky + disable for all non-auto boots.
      */
     public static void ensureNoStickyAutoUmsOnBoot(Context context) {
         if (context == null) return;
         clearUserSession();
-        // Always pin persist off mass_storage so UsbDeviceManager cannot re-apply disk mode on enum.
-        clearStickyMassStoragePersist();
         if (UsbStorageSessionFlags.isAutoConnectEnabled(context)) {
             // Auto-connect may re-enable after home is ready — leave kernel alone here.
             return;
         }
+        if (UsbStorageSessionFlags.preferStockUsbUi(context)) {
+            // Android / SystemUI owns mass storage — no su disable storm on cold start.
+            return;
+        }
+        // Legacy Solar-owned prompt path only.
+        clearStickyMassStoragePersist();
         if (isKernelMassStorageMode() || probeLunBackingBound()) {
             disable(context);
             clearStickyMassStoragePersist();

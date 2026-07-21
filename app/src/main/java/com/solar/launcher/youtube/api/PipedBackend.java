@@ -85,8 +85,13 @@ public final class PipedBackend implements YoutubeBackend {
             List<YouTubeVideo> out = new ArrayList<YouTubeVideo>();
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject j = arr.getJSONObject(i);
+                // 2026-07-19 — Piped uses type=stream; skip channel/playlist rows and empty ids.
+                String type = j.optString("type", "stream");
+                if ("channel".equals(type) || "playlist".equals(type)) continue;
+                String id = YoutubeApiUtil.pipedVideoId(j.optString("url", ""));
+                if (id.length() == 0) continue;
                 out.add(new YouTubeVideo(
-                        YoutubeApiUtil.pipedVideoId(j.optString("url", "")),
+                        id,
                         j.optString("title", ""),
                         j.optString("uploaderName", ""),
                         YoutubeApiUtil.formatDuration(j.optInt("duration", 0))));
@@ -278,7 +283,8 @@ public final class PipedBackend implements YoutubeBackend {
         return sb.toString();
     }
 
+    /** 2026-07-19 — Quick timeouts so dead Piped hosts do not burn the search window. */
     private static String httpGet(String url) throws IOException {
-        return new String(SolarHttp.getBytes(url, "application/json", UA), "UTF-8");
+        return new String(SolarHttp.getBytesQuick(url, "application/json", UA, 3, 6), "UTF-8");
     }
 }

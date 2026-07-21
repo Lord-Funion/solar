@@ -3,6 +3,7 @@ package com.solar.launcher;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -20,6 +21,15 @@ public class FocusScrollHelperTest {
                 0, 100, 400, 20, 50, 2));
         assertEquals(100, FocusScrollHelper.computeEnsureVisibleScrollY(
                 100, 100, 400, 120, 150, 2));
+    }
+
+    @Test
+    public void fullyVisible_midList_noViewportMove() {
+        // 2026-07-20 — 1 tick = 1 focus; list stays put while row is on screen.
+        assertTrue(FocusScrollHelper.isFullyVisibleInScroll(0, 200, 40, 80));
+        assertTrue(FocusScrollHelper.isFullyVisibleInScroll(100, 200, 120, 160));
+        assertTrue(!FocusScrollHelper.isFullyVisibleInScroll(0, 200, 180, 220));
+        assertTrue(!FocusScrollHelper.isFullyVisibleInScroll(50, 200, 40, 80));
     }
 
     @Test
@@ -177,6 +187,18 @@ public class FocusScrollHelperTest {
         // 2026-07-11 — No PositionScroller / smoothScrollBy; duration is 0.
         assertEquals(0, FocusScrollHelper.focusScrollDurationMs());
         assertEquals(0, FocusScrollHelper.rapidWheelScrollMs());
+    }
+
+    @Test
+    public void listWheelMidSpinSkipsFocusKeepsViewport() {
+        // 2026-07-21 — Contract with ListWheelChromePolicy: spin pins viewport, idle focuses.
+        // Android ListView path is integration-tested on device; policy flags gate the overload.
+        ListWheelChromePolicy.PaintPlan spin = ListWheelChromePolicy.plan(true);
+        assertTrue(spin.ensureVisible);
+        assertFalse(spin.requestFocus);
+        ListWheelChromePolicy.PaintPlan idle = ListWheelChromePolicy.plan(false);
+        assertTrue(idle.ensureVisible);
+        assertTrue(idle.requestFocus);
     }
 
     @Test

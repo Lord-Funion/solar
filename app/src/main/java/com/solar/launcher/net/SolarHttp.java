@@ -39,6 +39,38 @@ public final class SolarHttp {
         }
     }
 
+    /**
+     * 2026-07-19 — Short connect/read for YouTube instance failover.
+     * Layman: give up on a dead frontend quickly so the next one can answer search.
+     * Tech: default TlsHelper client is 20s/60s — one dead host ate YouTubeClient's 12s budget.
+     * Reversal: call {@link #getBytes(String, String, String)} only.
+     */
+    public static byte[] getBytesQuick(String urlStr, String accept, String userAgent,
+            int connectTimeoutSec, int readTimeoutSec) throws IOException {
+        TlsHelper.ensureSecurityProvider();
+        int connect = connectTimeoutSec > 0 ? connectTimeoutSec : 3;
+        int read = readTimeoutSec > 0 ? readTimeoutSec : 6;
+        OkHttpClient client = TlsHelper.client().newBuilder()
+                .connectTimeout(connect, TimeUnit.SECONDS)
+                .readTimeout(read, TimeUnit.SECONDS)
+                .writeTimeout(connect, TimeUnit.SECONDS)
+                .build();
+        Request.Builder b = new Request.Builder().url(urlStr);
+        b.header("User-Agent", userAgent != null ? userAgent : DEFAULT_UA);
+        if (accept != null && !accept.isEmpty()) b.header("Accept", accept);
+        Response resp = client.newCall(b.build()).execute();
+        try {
+            if (!resp.isSuccessful()) {
+                throw new IOException("HTTP " + resp.code() + " for " + urlStr);
+            }
+            if (resp.body() == null) throw new IOException("Empty body for " + urlStr);
+            return resp.body().bytes();
+        } finally {
+            if (resp.body() != null) resp.body().close();
+            else resp.close();
+        }
+    }
+
     /** Theme gallery assets — many small files in one session; use extended read timeout. */
     public static byte[] getBytesTheme(String urlStr, String accept, String userAgent) throws IOException {
         TlsHelper.ensureSecurityProvider();

@@ -285,6 +285,11 @@ else
     "$SCRIPT_DIR/verify-rom-app-allowlist.sh" "$sys" || fail "system APK allowlist audit"
 fi
 
+# 2026-07-19 — Koensayr bluetooth pairing conf bake.
+# shellcheck source=lib-verify-bluetooth-pairing.sh
+source "$SCRIPT_DIR/lib-verify-bluetooth-pairing.sh"
+verify_bluetooth_pairing_conf_debugfs "$sys"
+
 if [ "$errors" -ne 0 ]; then
     die "$errors check(s) failed — rebuild with ./solar-rom/scripts/build-rom.sh y2"
 fi

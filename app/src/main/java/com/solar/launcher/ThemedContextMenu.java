@@ -188,7 +188,8 @@ public final class ThemedContextMenu {
     private boolean optionsListVisible = true;
     private boolean submenuTierOpen = false;
     private boolean scrollableDetailHeader = false;
-    private String detailHeaderText = "";
+    /** 2026-07-20 — Detail body may carry ImageSpans (queue OK glyphs); was String-only. */
+    private CharSequence detailHeaderText = "";
     /** Dynamic cap so at least one action row peeks below scrollable message body. */
     private int detailHeaderMaxHeightPx = 0;
     private int queueRowHeightPx;
@@ -283,6 +284,17 @@ public final class ThemedContextMenu {
                 }
                 if (event.getAction() == android.view.KeyEvent.ACTION_UP
                         && Y1InputKeys.isBackKey(keyCode)) {
+                    // #region agent log
+                    // 2026-07-20 — H1: View swallows Back UP without dismiss — Activity may never see UP.
+                    try {
+                        org.json.JSONObject d = new org.json.JSONObject();
+                        d.put("showing", isShowing());
+                        d.put("enterExitAnim", isEnterExitAnimating());
+                        d.put("hintOnly", hintOnlyMode);
+                        DebugE0de2eLog.log(context, "ThemedContextMenu.onKey",
+                                "Back UP swallowed by view listener", "H1", d);
+                    } catch (Exception ignored) {}
+                    // #endregion
                     return true;
                 }
                 return false;
@@ -550,6 +562,29 @@ public final class ThemedContextMenu {
             detailHeaderText = "";
             detailHeaderMaxHeightPx = 0;
         }
+    }
+
+    /**
+     * 2026-07-20 — Overwrite scrollable detail body after tier show (glyphs / spans OK).
+     * Layman: swap the tip text for pictures of buttons without rebuilding the whole menu.
+     * Was: detail always copied from labels[0] String only. Reversal: skip this setter.
+     */
+    public void setScrollableDetailContent(CharSequence content) {
+        detailHeaderText = content != null ? content : "";
+        if (scrollableDetailHeader) {
+            refreshScrollableDetailHeader();
+        }
+    }
+
+    /**
+     * 2026-07-20 — Detail TextView for font-locked glyph height (null if not built yet).
+     * Layman: the tip paragraph’s letter box so button icons match.
+     */
+    public TextView getScrollableDetailBody() {
+        FrameLayout panel = scrollableDetailPanel();
+        if (panel == null) return null;
+        View body = panel.findViewWithTag(VerticalTextMarqueeHelper.TAG_BODY);
+        return body instanceof TextView ? (TextView) body : null;
     }
 
     public boolean isScrollableDetailHeader() {
@@ -2198,19 +2233,11 @@ public final class ThemedContextMenu {
         int spinMarginEnd = arrowW + (int) (16 * density);
 
         if (STATE_CONNECTING.equals(stateText)) {
+            // 2026-07-19 — Prefer Connecting… label over spinner-only (Bluetooth plan).
+            if (spin != null) spin.setVisibility(View.GONE);
             if (state != null) {
-                state.setText("");
-                state.setVisibility(View.GONE);
-            }
-            if (spin == null) {
-                spin = new ProgressBar(context, null, android.R.attr.progressBarStyleSmall);
-                spin.setTag(TAG_STATE_SPIN);
-                FrameLayout.LayoutParams spinLp = new FrameLayout.LayoutParams(spinSize, spinSize);
-                spinLp.gravity = Gravity.CENTER_VERTICAL | Gravity.END;
-                spinLp.rightMargin = spinMarginEnd;
-                frame.addView(spin, spinLp);
-            } else {
-                spin.setVisibility(View.VISIBLE);
+                state.setText(context.getString(R.string.bt_status_connecting));
+                state.setVisibility(View.VISIBLE);
             }
             return;
         }
@@ -3510,7 +3537,7 @@ public final class ThemedContextMenu {
             try {
                 String base = context.getString(R.string.context_quick_volume);
                 String hint = context.getString(R.string.hearing_safety_volume_ear_hint);
-                sliderLabel.setText(base + " — " + hint);
+                sliderLabel.setText(base + ": " + hint);
             } catch (Throwable ignored) {}
         } else if (sliderLabel != null && !showEar) {
             // Restore plain volume title when leaving ear state (unlock / lower volume).
@@ -4768,7 +4795,9 @@ public final class ThemedContextMenu {
         boolean hasState = stateText != null && stateText.length() > 0;
         boolean connectingState = STATE_CONNECTING.equals(stateText);
         if (connectingState) hasState = true;
-        boolean stackHint = hasState && !connectingState
+        // Short ✓/✗ sits beside the title; longer hints keep END/stack layout. 2026-07-21
+        boolean shortCheckState = hasState && !connectingState && isShortCheckCrossState(stateText);
+        boolean stackHint = hasState && !connectingState && !shortCheckState
                 && (stateText.length() > 20
                         || (panelWidthPx > 0 && panelWidthPx < (int) (400 * density)));
 
@@ -4827,6 +4856,36 @@ public final class ThemedContextMenu {
             row.addView(stack, stackLp);
             row.setTag(TAG_STATE, state);
             applyRowState(row, stateText);
+        } else if (shortCheckState) {
+            // Title + ✓/✗ as one strip; selection arrow alone at END. 2026-07-21
+            // Was: state END-aligned beside arrow → check collided with focus glyph.
+            // Reversal: restore END stateLp branch for all short states.
+            LinearLayout titleRow = new LinearLayout(context);
+            titleRow.setOrientation(LinearLayout.HORIZONTAL);
+            titleRow.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+            FrameLayout.LayoutParams titleRowLp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+            titleRowLp.leftMargin = labelLeft;
+            titleRowLp.rightMargin = arrowW + arrowMarginEnd + (int) (6 * density);
+            label.setEllipsize(TextUtils.TruncateAt.END);
+            // WRAP so ✓/✗ hugs the words — weight would shove the glyph to the arrow. 2026-07-21
+            LinearLayout.LayoutParams labelInRow = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT);
+            titleRow.addView(label, labelInRow);
+            TextView state = new TextView(context);
+            state.setTypeface(OverlayThemeProvider.get().getCustomFont(), android.graphics.Typeface.BOLD);
+            state.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, menuTextPx * 0.9f);
+            state.setSingleLine(true);
+            state.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+            OverlayThemeProvider.get().applyThemedTextStyle(state,
+                    OverlayThemeProvider.get().contextMenuMutedText(OverlayThemeProvider.get().getHintTextColor()));
+            LinearLayout.LayoutParams stateInRow = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT);
+            stateInRow.leftMargin = (int) (6 * density);
+            titleRow.addView(state, stateInRow);
+            row.addView(titleRow, titleRowLp);
+            row.setTag(TAG_STATE, state);
+            applyRowState(row, stateText);
         } else {
             FrameLayout.LayoutParams labelLp = new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
@@ -4865,6 +4924,20 @@ public final class ThemedContextMenu {
         row.setTag(TAG_ARROW, arrow);
         attachA5OptionRowTap(row, index);
         return row;
+    }
+
+    /**
+     * True for one-glyph On/Off chrome (✓ / ✗) that belongs beside the title.
+     * Layman: tick/cross hug the words; leave the focus arrow alone on the right.
+     * Technical: match common_check / common_cross strings only — longer hints stay END/stack.
+     * Was: all short states used END gravity next to arrow. Reversal: drop this helper branch.
+     * 2026-07-21
+     */
+    private boolean isShortCheckCrossState(String stateText) {
+        if (stateText == null || stateText.length() == 0) return false;
+        String check = context.getString(R.string.common_check);
+        String cross = context.getString(R.string.common_cross);
+        return check.equals(stateText) || cross.equals(stateText);
     }
 
     /** Non-interactive scan/status row — spinner on the right, skipped by wheel focus. */

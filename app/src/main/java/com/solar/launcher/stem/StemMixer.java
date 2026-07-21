@@ -4,7 +4,9 @@ import android.content.Context;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Handler;
-import android.os.Looper;
+import android.os.SystemClock;
+
+import com.solar.launcher.audio.SolarTransport;
 
 import java.io.File;
 import java.io.IOException;
@@ -12,19 +14,26 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Synced MediaPlayers for Stem Player — pad-local loop + hold stutter + optional bass body.
- * Layman: only pads you put in the loop jump back; hold a stem key for a quick hip-hop stutter.
- * Technical: loopCtrl mask seeks joined zones only; holdStutter seeks one zone on a timer;
- * optional bass_body player shares zone-2 gain. Was: seekAll on loop. Reversal: that seekAll path.
- * 2026-07-19
+ * Synced MediaPlayers for Stem Player + NP Stems master (origin or 4-pad mix).
+ * Layman: Stem Player pads, or Now Playing original file vs reconstituted stems.
+ * Technical: ORIGIN = one MediaPlayer; PADS = loopCtrl + beat roll + optional bass_body;
+ * magical swap = matched seek + SoloLayerGains-timed crossfade. Was: pads-only.
+ * Reversal: drop origin/swap APIs; NP back on SolarTransport layers / ensureSolo.
+ * 2026-07-19 / 2026-07-20 / 2026-07-21
  */
 public final class StemMixer {
     public static final int STEM_COUNT = 4;
     private static final int DEFAULT_MS_PER_BAR = 2000;
-    /** Default hip-hop stutter slice when hold-stem fires (~1/8 bar @ 120). */
+    /** Default beat-roll slice when hold-stem fires (~1/8 bar @ 120). */
     public static final int DEFAULT_STUTTER_MS = 250;
-    /** Floor for chop seeks — sub-80ms seek storms crash OMX on Y1 (API 17). 2026-07-19 */
+    /** Floor for roll seeks — sub-80ms seek storms crash OMX on Y1 (API 17). 2026-07-19 */
     public static final int MIN_STUTTER_MS = 80;
+
+    /** NP dual-source: original file vs four stem pads. 2026-07-21 */
+    public enum SourceMode {
+        ORIGIN,
+        PADS
+    }
 
     public interface Listener {
         void onReady();
@@ -32,18 +41,32 @@ public final class StemMixer {
         void onComplete();
     }
 
+    /** Fired when origin↔pads crossfade finishes. 2026-07-21 */
+    public interface SwapListener {
+        void onSwapComplete(SourceMode mode);
+    }
+
     private final Context app;
-    private final Handler main = new Handler(Looper.getMainLooper());
+    // Was: new Handler(Looper.getMainLooper()). Reversal: restore main-looper Handler. 2026-07-20
+    private final Handler main = SolarTransport.get().audioHandler();
     private MediaPlayer[] players = new MediaPlayer[0];
     private int[] playerZones = new int[0];
     private int playerCount;
     private MediaPlayer bassBodyPlayer;
+    /** Single-file origin feed for NP Stems-off (or mid-swap). 2026-07-21 */
+    private MediaPlayer originPlayer;
+    private String originPath;
+    private float originGain = 1f;
+    private SourceMode sourceMode = SourceMode.PADS;
+    private boolean swapBusy;
+    private SwapListener swapListener;
     private final float[] gains = new float[] { 0f, 0f, 0f, 0f };
     private final boolean[] loopCtrl = new boolean[STEM_COUNT];
     private Listener listener;
     private int preparedCount;
     private int expectedPrepare;
     private boolean started;
+    private boolean autoStartPending;
     private boolean released;
     private boolean looping;
     private int loopStartMs;
@@ -60,10 +83,22 @@ public final class StemMixer {
     private tv.danmaku.ijk.media.player.IjkMediaPlayer ijkBassBody;
     private boolean usingIjk;
 
-    /** Hold-stem stutter — one zone at a time. */
+    /**
+     * Fire song-end once per playthrough (any audible stem may signal).
+     * Layman: when this track finishes, tell the jam once — even if Vocals is muted.
+     * Was: only zone 0 completion. Reversal: zone==0 gate only.
+     * 2026-07-21
+     */
+    private boolean songCompleteFired;
+
+    /** Hold-stem beat roll — one zone at a time (fields keep stutter* names). 2026-07-20 */
     private int stutterZone = -1;
     private int stutterSliceMs;
     private int stutterAnchorMs;
+    /** Wall clock when roll started — catch-up uses elapsedRealtime delta. 2026-07-20 */
+    private long rollOriginElapsedRealtime;
+    /** Snapped playhead at roll start — virtual timeline origin. 2026-07-20 */
+    private int rollOriginPosMs;
 
     private final Runnable driftFix = new Runnable() {
         @Override
@@ -72,7 +107,7 @@ public final class StemMixer {
             try {
                 MediaPlayer lead = leadPlayer();
                 if (lead == null || !lead.isPlaying()) {
-                    main.postDelayed(this, 800);
+                    main.postDelayed(this, 3000);
                     return;
                 }
                 int pos = lead.getCurrentPosition();
@@ -84,12 +119,16 @@ public final class StemMixer {
                     if (looping && z >= 0 && z < STEM_COUNT && !loopCtrl[z]) continue;
                     if (z == stutterZone) continue;
                     try {
+                        // Muted pads stay paused — setVolume(0) leaks; don't revive them. 2026-07-19
+                        if (z >= 0 && z < STEM_COUNT && StemControls.isGainSilent(gains[z])) {
+                            continue;
+                        }
                         if (!p.isPlaying()) {
                             int pd = p.getDuration();
                             if (pd > 0 && pos >= pd - 80) continue;
                         }
                         int d = Math.abs(p.getCurrentPosition() - pos);
-                        if (d > 50) {
+                        if (d > 350) {
                             p.seekTo(pos);
                             if (!p.isPlaying() && started && !released) p.start();
                         }
@@ -97,7 +136,7 @@ public final class StemMixer {
                 }
                 syncBassBodyToLead(pos);
             } catch (Exception ignored) {}
-            main.postDelayed(this, 800);
+            main.postDelayed(this, 3000);
         }
     };
 
@@ -174,7 +213,7 @@ public final class StemMixer {
                     d.put("zone", stutterZone);
                     d.put("err", e.getMessage() != null ? e.getMessage() : e.getClass().getName());
                     com.solar.launcher.Debug543e15Log.log(
-                            "StemMixer.stutterTick", "seek failed — stop chop", "F1", d);
+                            "StemMixer.stutterTick", "seek failed — stop roll", "F1", d);
                 } catch (Exception ignored) {}
                 // #endregion
                 clearStutterInternal();
@@ -189,7 +228,7 @@ public final class StemMixer {
                     d.put("sliceMs", stutterSliceMs);
                     d.put("ticks", stutterTickCount);
                     com.solar.launcher.Debug543e15Log.log(
-                            "StemMixer.stutterTick", "chop tick", "F1", d);
+                            "StemMixer.stutterTick", "beat-roll tick", "F1", d);
                 } catch (Exception ignored) {}
             }
             // #endregion
@@ -205,6 +244,406 @@ public final class StemMixer {
 
     public void setListener(Listener listener) {
         this.listener = listener;
+    }
+
+    /** Optional callback when magical origin↔pads swap lands. 2026-07-21 */
+    public void setSwapListener(SwapListener listener) {
+        this.swapListener = listener;
+    }
+
+    /** ORIGIN = full song file; PADS = four stem zones. 2026-07-21 */
+    public SourceMode getSourceMode() {
+        return sourceMode;
+    }
+
+    public boolean isOriginMode() {
+        return sourceMode == SourceMode.ORIGIN;
+    }
+
+    public boolean isPadMode() {
+        return sourceMode == SourceMode.PADS;
+    }
+
+    public boolean isSwapBusy() {
+        return swapBusy;
+    }
+
+    /**
+     * Load the original track as a single feed (NP Stems off).
+     * Layman: play the song file itself, not the stem pads.
+     * Technical: one MediaPlayer; clears pad players. Was: pads-only load.
+     * Reversal: remove; keep load(List) only.
+     * 2026-07-21
+     */
+    public void loadOrigin(File track) throws IOException {
+        if (track == null || !track.isFile()) {
+            throw new IOException("Need origin file");
+        }
+        releasePlayersOnly();
+        usingIjk = false;
+        preparedCount = 0;
+        started = false;
+        looping = false;
+        targetRate = 1f;
+        clearStutterInternal();
+        sourceMode = SourceMode.ORIGIN;
+        originGain = 1f;
+        for (int i = 0; i < STEM_COUNT; i++) {
+            gains[i] = 0f;
+            loopCtrl[i] = false;
+        }
+        originPath = track.getAbsolutePath();
+        expectedPrepare = 1;
+        originPlayer = new MediaPlayer();
+        originPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+        originPlayer.setDataSource(originPath);
+        originPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+            @Override
+            public void onPrepared(MediaPlayer mediaPlayer) {
+                preparedCount++;
+                applyOriginGain();
+                if (preparedCount >= expectedPrepare && listener != null) {
+                    listener.onReady();
+                }
+            }
+        });
+        originPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+            @Override
+            public void onCompletion(MediaPlayer mediaPlayer) {
+                if (released || sourceMode != SourceMode.ORIGIN) return;
+                pause();
+                if (listener != null) listener.onComplete();
+            }
+        });
+        wireError(originPlayer);
+        originPlayer.prepareAsync();
+    }
+
+    /**
+     * Load four stem pads (NP Stems on / Stem Player). Alias keeps call sites clear.
+     * Melody catch-all: pass premixed zone-3 when available (see NpStemPersistGate).
+     * 2026-07-21
+     */
+    public void loadPads(List<LalalClient.StemFile> stems) throws IOException {
+        loadPads(stems, null);
+    }
+
+    /**
+     * Pad load with optional bass body WAV.
+     * 2026-07-21
+     */
+    public void loadPads(List<LalalClient.StemFile> stems, File bassBodyWav) throws IOException {
+        sourceMode = SourceMode.PADS;
+        releaseOriginOnly();
+        load(stems, bassBodyWav);
+    }
+
+    /**
+     * Apply Instrumentals/Vocals group gains on pad mode (timed fade).
+     * Layman: mute voice or band like Stem Player dials.
+     * Technical: {@link NpStemPadGains#targets} → setGain per zone.
+     * 2026-07-21
+     */
+    public void applyIsolationGains(boolean wantVocals, boolean wantInstr) {
+        if (sourceMode != SourceMode.PADS) return;
+        float[] t = NpStemPadGains.targets(wantVocals, wantInstr);
+        for (int z = 0; z < STEM_COUNT; z++) {
+            setGain(z, t[z]);
+        }
+    }
+
+    /**
+     * Public seek for NP scrub — all audible feeds at matched playhead.
+     * 2026-07-21
+     */
+    public void seekTo(int ms) {
+        if (sourceMode == SourceMode.ORIGIN && originPlayer != null) {
+            try {
+                originPlayer.seekTo(Math.max(0, ms));
+            } catch (Exception ignored) {}
+            return;
+        }
+        seekAllPlaying(ms);
+    }
+
+    /**
+     * Magical swap to pad mix at matched playhead (gapless short crossfade).
+     * Layman: Stems turns on — song keeps its place, pads fade in.
+     * Technical: loadPads → seek → fade origin out / pads in. Host may pause SolarTransport.
+     * Was: hardCutToSoloFile. Reversal: drop; cut to transport layers.
+     * 2026-07-21
+     */
+    public void crossfadeToPads(final List<LalalClient.StemFile> stems, final File bassBodyWav,
+            final int positionMs, final boolean wantVocals, final boolean wantInstr,
+            final boolean autoStart) {
+        if (released || stems == null) return;
+        swapBusy = true;
+        final int pos = StemMixerSwapPolicy.matchedPositionMs(positionMs, getDurationMs());
+        final boolean wasPlaying = isPlaying() || autoStart;
+        autoStartPending = wasPlaying;
+        try {
+            final MediaPlayer keepOrigin = originPlayer;
+            final String keepPath = originPath;
+            originPlayer = null;
+            originPath = null;
+            // Wire swap listener before prepare so onReady cannot race. 2026-07-21
+            setListener(wrapReadyForPadSwap(pos, wantVocals, wantInstr, wasPlaying));
+            sourceMode = SourceMode.PADS;
+            load(stems, bassBodyWav);
+            originPlayer = keepOrigin;
+            originPath = keepPath;
+        } catch (Exception e) {
+            swapBusy = false;
+            if (listener != null) {
+                listener.onError(e.getMessage() != null ? e.getMessage() : "pad swap failed");
+            }
+        }
+    }
+
+    /**
+     * Magical swap back to origin file at matched playhead.
+     * Layman: Stems off — back to the real track without a jump.
+     * 2026-07-21
+     */
+    public void crossfadeToOrigin(final File track, final int positionMs, final boolean autoStart) {
+        if (released || track == null || !track.isFile()) return;
+        swapBusy = true;
+        final int pos = StemMixerSwapPolicy.matchedPositionMs(positionMs, getDurationMs());
+        final boolean wasPlaying = isPlaying() || autoStart;
+        autoStartPending = wasPlaying;
+        final float[] startPad = new float[STEM_COUNT];
+        for (int i = 0; i < STEM_COUNT; i++) startPad[i] = gains[i];
+        try {
+            MediaPlayer[] keepPlayers = players;
+            int[] keepZones = playerZones;
+            int keepCount = playerCount;
+            String[] keepPaths = playerPaths;
+            MediaPlayer keepBass = bassBodyPlayer;
+            players = new MediaPlayer[0];
+            playerZones = new int[0];
+            playerCount = 0;
+            playerPaths = new String[0];
+            bassBodyPlayer = null;
+            setListener(wrapReadyForOriginSwap(pos, startPad, wasPlaying));
+            loadOrigin(track);
+            players = keepPlayers;
+            playerZones = keepZones;
+            playerCount = keepCount;
+            playerPaths = keepPaths;
+            bassBodyPlayer = keepBass;
+            sourceMode = SourceMode.ORIGIN;
+            originGain = 0f;
+            applyOriginGain();
+        } catch (Exception e) {
+            swapBusy = false;
+            if (listener != null) {
+                listener.onError(e.getMessage() != null ? e.getMessage() : "origin swap failed");
+            }
+        }
+    }
+
+    /**
+     * After pads ready: seek both, start silent pads, fade to isolation targets.
+     * 2026-07-21
+     */
+    private Listener wrapReadyForPadSwap(final int posMs, final boolean wantVocals,
+            final boolean wantInstr, final boolean wasPlaying) {
+        final Listener outer = listener;
+        return new Listener() {
+            @Override
+            public void onReady() {
+                try {
+                    seekAllPlaying(posMs);
+                    if (originPlayer != null) {
+                        try { originPlayer.seekTo(posMs); } catch (Exception ignored) {}
+                    }
+                    float[] end = StemMixerSwapPolicy.padGainsAtSwapEnd(true, wantVocals, wantInstr);
+                    for (int z = 0; z < STEM_COUNT; z++) gains[z] = 0f;
+                    applyAllGains();
+                    if (wasPlaying) {
+                        started = true;
+                        for (int i = 0; i < playerCount; i++) {
+                            try {
+                                if (players[i] != null) players[i].start();
+                            } catch (Exception ignored) {}
+                        }
+                        if (bassBodyPlayer != null) {
+                            try { bassBodyPlayer.start(); } catch (Exception ignored) {}
+                        }
+                        if (originPlayer != null) {
+                            try {
+                                if (!originPlayer.isPlaying()) originPlayer.start();
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                    runCrossfadeTicks(/*fadeInPads*/ true, end, wasPlaying);
+                } catch (Exception e) {
+                    swapBusy = false;
+                    if (outer != null) outer.onError(e.getMessage());
+                }
+                if (outer != null) outer.onReady();
+            }
+
+            @Override
+            public void onError(String message) {
+                swapBusy = false;
+                if (outer != null) outer.onError(message);
+            }
+
+            @Override
+            public void onComplete() {
+                if (outer != null) outer.onComplete();
+            }
+        };
+    }
+
+    /**
+     * After origin ready: seek, fade pads out / origin in, then drop pads.
+     * 2026-07-21
+     */
+    private Listener wrapReadyForOriginSwap(final int posMs, final float[] startPad,
+            final boolean wasPlaying) {
+        final Listener outer = listener;
+        return new Listener() {
+            @Override
+            public void onReady() {
+                try {
+                    if (originPlayer != null) {
+                        try { originPlayer.seekTo(posMs); } catch (Exception ignored) {}
+                    }
+                    seekAllPlaying(posMs);
+                    for (int z = 0; z < STEM_COUNT; z++) {
+                        gains[z] = startPad != null && z < startPad.length ? startPad[z] : 1f;
+                    }
+                    applyAllGains();
+                    originGain = 0f;
+                    applyOriginGain();
+                    if (wasPlaying) {
+                        started = true;
+                        try {
+                            if (originPlayer != null) originPlayer.start();
+                        } catch (Exception ignored) {}
+                        for (int i = 0; i < playerCount; i++) {
+                            try {
+                                if (players[i] != null && !players[i].isPlaying()) {
+                                    players[i].start();
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                    runCrossfadeTicks(/*fadeInPads*/ false, new float[] {0f, 0f, 0f, 0f},
+                            wasPlaying);
+                } catch (Exception e) {
+                    swapBusy = false;
+                    if (outer != null) outer.onError(e.getMessage());
+                }
+                if (outer != null) outer.onReady();
+            }
+
+            @Override
+            public void onError(String message) {
+                swapBusy = false;
+                if (outer != null) outer.onError(message);
+            }
+
+            @Override
+            public void onComplete() {
+                if (outer != null) outer.onComplete();
+            }
+        };
+    }
+
+    /**
+     * Tick origin + pad gains toward swap end; then release the silent side.
+     * 2026-07-21
+     */
+    private void runCrossfadeTicks(final boolean fadeInPads, final float[] padEnd,
+            final boolean wasPlaying) {
+        final float originStart = fadeInPads ? 1f : 0f;
+        final float originEnd = fadeInPads ? 0f : 1f;
+        originGain = originStart;
+        applyOriginGain();
+        final float[] padCur = new float[STEM_COUNT];
+        for (int z = 0; z < STEM_COUNT; z++) padCur[z] = gains[z];
+        final Runnable tick = new Runnable() {
+            @Override
+            public void run() {
+                if (released) {
+                    swapBusy = false;
+                    return;
+                }
+                boolean done = SoloLayerGains.fadeDone(originGain, originEnd);
+                originGain = SoloLayerGains.stepToward(originGain, originEnd);
+                applyOriginGain();
+                for (int z = 0; z < STEM_COUNT; z++) {
+                    float t = padEnd != null && z < padEnd.length ? padEnd[z] : 0f;
+                    if (!SoloLayerGains.fadeDone(padCur[z], t)) done = false;
+                    padCur[z] = SoloLayerGains.stepToward(padCur[z], t);
+                    gains[z] = padCur[z];
+                    applyGain(z);
+                }
+                if (!done) {
+                    main.postDelayed(this, SoloLayerGains.FADE_TICK_MS);
+                    return;
+                }
+                // Landed — drop the silent side so only one feed remains. 2026-07-21
+                if (fadeInPads) {
+                    releaseOriginOnly();
+                    sourceMode = SourceMode.PADS;
+                } else {
+                    releasePadsOnly();
+                    sourceMode = SourceMode.ORIGIN;
+                    originGain = 1f;
+                    applyOriginGain();
+                }
+                swapBusy = false;
+                if (swapListener != null) swapListener.onSwapComplete(sourceMode);
+            }
+        };
+        main.post(tick);
+    }
+
+    /** Volume for the origin MediaPlayer. 2026-07-21 */
+    private void applyOriginGain() {
+        if (originPlayer == null) return;
+        float g = StemControls.clampGain(originGain);
+        try {
+            originPlayer.setVolume(g, g);
+        } catch (Exception ignored) {}
+    }
+
+    /** Tear down origin feed only (pads may keep playing). 2026-07-21 */
+    private void releaseOriginOnly() {
+        if (originPlayer != null) {
+            try { originPlayer.stop(); } catch (Exception ignored) {}
+            try { originPlayer.release(); } catch (Exception ignored) {}
+            originPlayer = null;
+        }
+        originPath = null;
+        originGain = 1f;
+    }
+
+    /** Tear down pad players only (origin may keep playing). 2026-07-21 */
+    private void releasePadsOnly() {
+        for (int i = 0; i < players.length; i++) {
+            MediaPlayer p = players[i];
+            players[i] = null;
+            if (p == null) continue;
+            try { p.stop(); } catch (Exception ignored) {}
+            try { p.release(); } catch (Exception ignored) {}
+        }
+        if (bassBodyPlayer != null) {
+            try { bassBodyPlayer.stop(); } catch (Exception ignored) {}
+            try { bassBodyPlayer.release(); } catch (Exception ignored) {}
+            bassBodyPlayer = null;
+        }
+        players = new MediaPlayer[0];
+        playerZones = new int[0];
+        playerPaths = new String[0];
+        playerCount = 0;
+        expectedPrepare = 0;
+        preparedCount = 0;
+        for (int i = 0; i < STEM_COUNT; i++) gains[i] = 0f;
     }
 
     public void setBpm(float bpmValue) {
@@ -249,6 +688,21 @@ public final class StemMixer {
     public void setTargetRate(float rate) {
         float r = rate > 0.1f ? rate : 1f;
         if (r < StemBpm.MIN_RATE) r = StemBpm.MIN_RATE;
+        if (r > StemBpm.MAX_RATE) r = StemBpm.MAX_RATE;
+        targetRate = r;
+        if (usingIjk) applyIjkSpeed(targetRate);
+    }
+
+    /**
+     * Apply hold beat-roll/screw playback rate (allows SCREW_RATES below tempo-match floor).
+     * Layman: slow the pad while you mash it for rolled-and-screwed feel.
+     * Technical: IJK setSpeed; MediaPlayer path stores only (no API 17 rate).
+     * Was: setTargetRate clamped to 0.85–1.15. Reversal: call setTargetRate only.
+     * 2026-07-19
+     */
+    public void setHoldScrewRate(float rate) {
+        float r = rate > 0.1f ? rate : 1f;
+        if (r < 0.5f) r = 0.5f;
         if (r > StemBpm.MAX_RATE) r = StemBpm.MAX_RATE;
         targetRate = r;
         if (usingIjk) applyIjkSpeed(targetRate);
@@ -307,8 +761,8 @@ public final class StemMixer {
             zoneHit[z] = true;
             ok.add(s);
         }
-        if (!zoneHit[0] || !zoneHit[1] || !zoneHit[2] || !zoneHit[3]) {
-            throw new IOException("Need vocals, drums, bass, and at least one Melody/Other stem");
+        if (ok.size() < 2 && (!zoneHit[0] || (!zoneHit[1] && !zoneHit[2] && !zoneHit[3]))) {
+            throw new IOException("Need vocals and instrumental/melody stems");
         }
         boolean wantBody = bassBodyWav != null && bassBodyWav.isFile() && bassBodyWav.length() > 1000;
         playerCount = ok.size();
@@ -337,7 +791,18 @@ public final class StemMixer {
                         ijk.setSpeed(speed);
                     } catch (Exception ignored) {}
                     applyGain(zone);
+                    if (started && !released && !ijk.isPlaying()) {
+                        int pos = getPositionMs();
+                        if (pos > 0) {
+                            try { ijk.seekTo(pos); } catch (Exception ignored) {}
+                        }
+                        try { ijk.start(); } catch (Exception ignored) {}
+                    } else if (preparedCount == 1 && autoStartPending && !released && !ijk.isPlaying()) {
+                        started = true;
+                        try { ijk.start(); } catch (Exception ignored) {}
+                    }
                     if (preparedCount >= expectedPrepare) {
+                        autoStartPending = false;
                         refineMsPerBar();
                         if (listener != null) listener.onReady();
                     }
@@ -347,6 +812,10 @@ public final class StemMixer {
                 @Override
                 public void onCompletion(tv.danmaku.ijk.media.player.IMediaPlayer mp) {
                     if (released) return;
+                    // Hard-muted — do not restart (volume-0 still audible on IJK). 2026-07-19
+                    if (zone >= 0 && zone < STEM_COUNT && StemControls.isGainSilent(gains[zone])) {
+                        return;
+                    }
                     if (stutterZone == zone) {
                         try {
                             ijk.seekTo(stutterAnchorMs);
@@ -361,7 +830,8 @@ public final class StemMixer {
                         } catch (Exception ignored) {}
                         return;
                     }
-                    if (zone == 0 && listener != null) listener.onComplete();
+                    // Whole-song end: any audible pad may signal (Vocals mute must not kill seat). 2026-07-21
+                    maybeFireSongComplete(zone);
                 }
             });
             ijkPlayers[index] = ijk;
@@ -381,7 +851,18 @@ public final class StemMixer {
                         ijkBassBody.setSpeed(targetRate);
                     } catch (Exception ignored) {}
                     applyGain(2);
+                    if (started && !released && !ijkBassBody.isPlaying()) {
+                        int pos = getPositionMs();
+                        if (pos > 0) {
+                            try { ijkBassBody.seekTo(pos); } catch (Exception ignored) {}
+                        }
+                        try { ijkBassBody.start(); } catch (Exception ignored) {}
+                    } else if (preparedCount == 1 && autoStartPending && !released && !ijkBassBody.isPlaying()) {
+                        started = true;
+                        try { ijkBassBody.start(); } catch (Exception ignored) {}
+                    }
                     if (preparedCount >= expectedPrepare) {
+                        autoStartPending = false;
                         refineMsPerBar();
                         if (listener != null) listener.onReady();
                     }
@@ -428,6 +909,8 @@ public final class StemMixer {
 
     public void load(List<LalalClient.StemFile> stems, File bassBodyWav) throws IOException {
         releasePlayersOnly();
+        // Pad mode unless a swap temporarily reattached origin. 2026-07-21
+        if (originPlayer == null) sourceMode = SourceMode.PADS;
         usingIjk = false;
         preparedCount = 0;
         started = false;
@@ -453,8 +936,8 @@ public final class StemMixer {
             zoneHit[z] = true;
             ok.add(s);
         }
-        if (!zoneHit[0] || !zoneHit[1] || !zoneHit[2] || !zoneHit[3]) {
-            throw new IOException("Need vocals, drums, bass, and at least one Melody/Other stem");
+        if (ok.size() < 2 && (!zoneHit[0] || (!zoneHit[1] && !zoneHit[2] && !zoneHit[3]))) {
+            throw new IOException("Need vocals and instrumental/melody stems");
         }
         boolean wantBody = bassBodyWav != null && bassBodyWav.isFile() && bassBodyWav.length() > 1000;
         playerCount = ok.size();
@@ -511,7 +994,18 @@ public final class StemMixer {
             public void onPrepared(MediaPlayer mediaPlayer) {
                 preparedCount++;
                 applyGain(zone);
+                if (started && !released && !mediaPlayer.isPlaying()) {
+                    int pos = getPositionMs();
+                    if (pos > 0) {
+                        try { mediaPlayer.seekTo(pos); } catch (Exception ignored) {}
+                    }
+                    try { mediaPlayer.start(); } catch (Exception ignored) {}
+                } else if (preparedCount == 1 && autoStartPending && !released && !mediaPlayer.isPlaying()) {
+                    started = true;
+                    try { mediaPlayer.start(); } catch (Exception ignored) {}
+                }
                 if (preparedCount >= expectedPrepare) {
+                    autoStartPending = false;
                     refineMsPerBar();
                     if (listener != null) listener.onReady();
                 }
@@ -524,6 +1018,10 @@ public final class StemMixer {
             @Override
             public void onCompletion(MediaPlayer mediaPlayer) {
                 if (released) return;
+                // Hard-muted pad — do not restart (would leak until next gain apply). 2026-07-19
+                if (zone >= 0 && zone < STEM_COUNT && StemControls.isGainSilent(gains[zone])) {
+                    return;
+                }
                 if (stutterZone == zone) {
                     try {
                         mediaPlayer.seekTo(stutterAnchorMs);
@@ -538,12 +1036,34 @@ public final class StemMixer {
                     } catch (Exception ignored) {}
                     return;
                 }
-                if (zone == 0 && !looping) {
-                    pause();
-                    if (listener != null) listener.onComplete();
-                }
+                // Whole-song end from any audible stem (pair-repeat needs both seats). 2026-07-21
+                maybeFireSongComplete(zone);
             }
         });
+    }
+
+    /**
+     * Notify host once when this mixer’s song ends (any audible stem).
+     * Layman: the track finished — restart or advance; don’t wait only on Vocals.
+     * Technical: debounce songCompleteFired; silent zones ignored; sibling mixer separate.
+     * Was: zone==0 only (+ silent Vocals swallowed end). Reversal: if (zone!=0) return.
+     * 2026-07-21
+     */
+    private void maybeFireSongComplete(int zone) {
+        if (released || songCompleteFired) return;
+        if (zone >= 0 && zone < STEM_COUNT && StemControls.isGainSilent(gains[zone])) {
+            return;
+        }
+        songCompleteFired = true;
+        try {
+            pause();
+        } catch (Exception ignored) {}
+        if (listener != null) listener.onComplete();
+    }
+
+    /** Allow another onComplete after seek/restart. 2026-07-21 */
+    private void clearSongCompleteLatch() {
+        songCompleteFired = false;
     }
 
     private void wireError(MediaPlayer mp) {
@@ -579,9 +1099,11 @@ public final class StemMixer {
     private void syncBassBodyToLead(int pos) {
         if (bassBodyPlayer == null || stutterZone == 2) return;
         if (looping && !loopCtrl[2]) return;
+        // Bass muted → body stays paused (same hard-mute as pad). 2026-07-19
+        if (StemControls.isGainSilent(gains[2])) return;
         try {
             int d = Math.abs(bassBodyPlayer.getCurrentPosition() - pos);
-            if (d > 50) {
+            if (d > 350) {
                 bassBodyPlayer.seekTo(pos);
                 if (!bassBodyPlayer.isPlaying() && started && !released) bassBodyPlayer.start();
             }
@@ -590,7 +1112,18 @@ public final class StemMixer {
 
     public void play() {
         if (released) return;
+        autoStartPending = true;
+        clearSongCompleteLatch();
         try {
+            // Origin-only feed (NP Stems off). 2026-07-21
+            if (sourceMode == SourceMode.ORIGIN && originPlayer != null && playerCount == 0) {
+                originPlayer.seekTo(0);
+                originGain = 1f;
+                applyOriginGain();
+                originPlayer.start();
+                started = true;
+                return;
+            }
             if (usingIjk && ijkPlayers != null) {
                 for (int i = 0; i < ijkPlayers.length; i++) {
                     if (ijkPlayers[i] != null) {
@@ -616,15 +1149,22 @@ public final class StemMixer {
                 }
             }
             started = true;
+            // Pause pads still at gain 0 — setVolume(0) alone still bleeds. 2026-07-19
+            applyAllGains();
             main.removeCallbacks(driftFix);
-            main.postDelayed(driftFix, 800);
+            main.postDelayed(driftFix, 3000);
         } catch (Exception e) {
             if (listener != null) listener.onError(e.getMessage());
         }
     }
 
     public void pause() {
-        stopStutter();
+        stopBeatRoll();
+        if (originPlayer != null) {
+            try {
+                if (originPlayer.isPlaying()) originPlayer.pause();
+            } catch (Exception ignored) {}
+        }
         if (usingIjk && ijkPlayers != null) {
             for (int i = 0; i < ijkPlayers.length; i++) {
                 try {
@@ -648,6 +1188,14 @@ public final class StemMixer {
     }
 
     public void resume() {
+        if (originPlayer != null && (sourceMode == SourceMode.ORIGIN || swapBusy)) {
+            try {
+                originPlayer.start();
+            } catch (Exception ignored) {}
+            started = true;
+            applyOriginGain();
+            if (sourceMode == SourceMode.ORIGIN && playerCount == 0) return;
+        }
         if (usingIjk && ijkPlayers != null) {
             for (int i = 0; i < ijkPlayers.length; i++) {
                 try {
@@ -658,6 +1206,7 @@ public final class StemMixer {
                 if (ijkBassBody != null) ijkBassBody.start();
             } catch (Exception ignored) {}
             started = true;
+            applyAllGains();
             return;
         }
         for (int i = 0; i < playerCount; i++) {
@@ -670,6 +1219,7 @@ public final class StemMixer {
             if (bassBodyPlayer != null) bassBodyPlayer.start();
         } catch (Exception ignored) {}
         started = true;
+        applyAllGains();
     }
 
     public boolean togglePlayPause() {
@@ -683,6 +1233,9 @@ public final class StemMixer {
 
     public boolean isPlaying() {
         try {
+            if (originPlayer != null && sourceMode == SourceMode.ORIGIN && playerCount == 0) {
+                return originPlayer.isPlaying();
+            }
             if (usingIjk && ijkPlayers != null && ijkPlayers.length > 0 && ijkPlayers[0] != null) {
                 return ijkPlayers[0].isPlaying();
             }
@@ -695,6 +1248,9 @@ public final class StemMixer {
 
     public int getPositionMs() {
         try {
+            if (originPlayer != null && sourceMode == SourceMode.ORIGIN && playerCount == 0) {
+                return originPlayer.getCurrentPosition();
+            }
             if (usingIjk && ijkPlayers != null && ijkPlayers.length > 0 && ijkPlayers[0] != null) {
                 return (int) ijkPlayers[0].getCurrentPosition();
             }
@@ -707,6 +1263,9 @@ public final class StemMixer {
 
     public int getDurationMs() {
         try {
+            if (originPlayer != null && sourceMode == SourceMode.ORIGIN && playerCount == 0) {
+                return originPlayer.getDuration();
+            }
             if (usingIjk && ijkPlayers != null && ijkPlayers.length > 0 && ijkPlayers[0] != null) {
                 return (int) ijkPlayers[0].getDuration();
             }
@@ -760,33 +1319,37 @@ public final class StemMixer {
     }
 
     /**
-     * Hold-stem stutter — hip-hop chop on one pad while key is held.
-     * Layman: mash the pad, it chatters on the beat; let go and it keeps going.
-     * Was: min delay 40ms + wheel called full restart (seek storm → Y1 native death).
-     * Reversal: Math.max(40,…) + startHoldStutter on every wheel notch.
-     * 2026-07-19
+     * Hold-stem beat roll — quantized slice retrigger while key is held.
+     * Layman: mash the pad, it chatters on the beat; let go and jump to where the song would be.
+     * Was: startHoldStutter frozen chop (release left playhead on anchor).
+     * Reversal: rename back + stop without catch-up seek.
+     * 2026-07-19 / 2026-07-20
      */
-    public void startHoldStutter(int zone, int sliceMs) {
+    public void startBeatRoll(int zone, int sliceMs) {
         if (released || zone < 0 || zone >= STEM_COUNT) return;
-        // Same zone already chopping — only resize slice (wheel), do not re-seek storm. 2026-07-19
+        // Same zone already rolling — only resize slice (wheel), keep catch-up origin. 2026-07-20
         if (stutterZone == zone && stutterSliceMs > 0) {
             setStutterSliceMs(sliceMs);
             return;
         }
-        stopStutter();
+        stopBeatRoll();
         stutterZone = zone;
         stutterTickCount = 0;
         stutterSliceMs = sliceMs > MIN_STUTTER_MS ? sliceMs : DEFAULT_STUTTER_MS;
         if (stutterSliceMs < MIN_STUTTER_MS) stutterSliceMs = MIN_STUTTER_MS;
-        stutterAnchorMs = positionForZone(zone);
+        // Snap roll to beat grid so slices land on the pulse. 2026-07-19
+        stutterAnchorMs = StemBpm.snapToBeatMs(positionForZone(zone), getBpm());
         if (looping && loopCtrl[zone]) {
-            // Keep stutter inside A–B window.
+            // Keep roll inside A–B window.
             if (stutterAnchorMs < loopStartMs || stutterAnchorMs >= loopEndMs) {
-                stutterAnchorMs = loopStartMs;
+                stutterAnchorMs = StemBpm.snapToBeatMs(loopStartMs, getBpm());
             }
             int maxSlice = Math.max(MIN_STUTTER_MS, loopEndMs - stutterAnchorMs);
             if (stutterSliceMs > maxSlice) stutterSliceMs = maxSlice;
         }
+        // Virtual timeline origin — wheel resize must not reset these. 2026-07-20
+        rollOriginElapsedRealtime = SystemClock.elapsedRealtime();
+        rollOriginPosMs = stutterAnchorMs;
         // #region agent log
         try {
             org.json.JSONObject d = new org.json.JSONObject();
@@ -794,7 +1357,7 @@ public final class StemMixer {
             d.put("sliceMs", stutterSliceMs);
             d.put("anchor", stutterAnchorMs);
             com.solar.launcher.Debug543e15Log.log(
-                    "StemMixer.startHoldStutter", "chop start", "F1", d);
+                    "StemMixer.startBeatRoll", "beat-roll start", "F1", d);
         } catch (Exception ignored) {}
         // #endregion
         seekZone(zone, stutterAnchorMs);
@@ -802,9 +1365,14 @@ public final class StemMixer {
         main.post(stutterTick);
     }
 
+    /** @deprecated Prefer {@link #startBeatRoll}. 2026-07-20 */
+    public void startHoldStutter(int zone, int sliceMs) {
+        startBeatRoll(zone, sliceMs);
+    }
+
     /**
-     * Resize active chop without resetting the anchor (wheel while held).
-     * 2026-07-19
+     * Resize active beat roll without resetting catch-up origin (wheel while held).
+     * 2026-07-19 / 2026-07-20
      */
     public void setStutterSliceMs(int sliceMs) {
         if (stutterZone < 0) return;
@@ -816,19 +1384,45 @@ public final class StemMixer {
         stutterSliceMs = s;
     }
 
-    public void stopStutter() {
+    /**
+     * End beat roll — seek catch-up then clear timer.
+     * Layman: let go and the song jumps ahead to “now”, not stuck on the chatter.
+     * Was: stopStutter cleared timer only (frozen chop). Reversal: clear without seekZone.
+     * 2026-07-20
+     */
+    public void stopBeatRoll() {
         if (stutterZone >= 0) {
+            int zone = stutterZone;
+            long elapsed = SystemClock.elapsedRealtime() - rollOriginElapsedRealtime;
+            int catchUp = StemBpm.beatRollCatchUpMs(
+                    rollOriginPosMs, elapsed, getTargetRate(), getDurationMs());
+            // Inside A–B: keep catch-up in the loop window for joined pads. 2026-07-20
+            if (looping && zone >= 0 && zone < STEM_COUNT && loopCtrl[zone]
+                    && loopEndMs > loopStartMs) {
+                if (catchUp < loopStartMs) catchUp = loopStartMs;
+                if (catchUp >= loopEndMs) catchUp = Math.max(loopStartMs, loopEndMs - 1);
+            }
+            try {
+                seekZone(zone, catchUp);
+            } catch (Exception ignored) {}
             // #region agent log
             try {
                 org.json.JSONObject d = new org.json.JSONObject();
-                d.put("zone", stutterZone);
+                d.put("zone", zone);
                 d.put("ticks", stutterTickCount);
+                d.put("catchUp", catchUp);
+                d.put("elapsed", elapsed);
                 com.solar.launcher.Debug543e15Log.log(
-                        "StemMixer.stopStutter", "chop stop", "F1", d);
+                        "StemMixer.stopBeatRoll", "beat-roll stop catch-up", "F1", d);
             } catch (Exception ignored) {}
             // #endregion
         }
         clearStutterInternal();
+    }
+
+    /** @deprecated Prefer {@link #stopBeatRoll}. 2026-07-20 */
+    public void stopStutter() {
+        stopBeatRoll();
     }
 
     public boolean isStuttering() {
@@ -845,6 +1439,8 @@ public final class StemMixer {
         stutterSliceMs = 0;
         stutterAnchorMs = 0;
         stutterTickCount = 0;
+        rollOriginElapsedRealtime = 0L;
+        rollOriginPosMs = 0;
     }
 
     private int positionForZone(int zone) {
@@ -871,16 +1467,18 @@ public final class StemMixer {
     }
 
     private void seekZone(int zone, int ms) {
+        // Silent pads stay paused unless this is an active chop (gain raised first). 2026-07-19
+        boolean allowStart = started && !StemControls.isGainSilent(gains[zone]);
         for (int i = 0; i < playerCount; i++) {
             if (playerZones[i] != zone) continue;
             try {
                 if (usingIjk && ijkPlayers != null && ijkPlayers[i] != null) {
                     ijkPlayers[i].seekTo(ms);
-                    if (started && !ijkPlayers[i].isPlaying()) ijkPlayers[i].start();
+                    if (allowStart && !ijkPlayers[i].isPlaying()) ijkPlayers[i].start();
                 } else if (players != null && players.length > i && players[i] != null) {
                     MediaPlayer p = players[i];
                     p.seekTo(ms);
-                    if (started && !p.isPlaying()) p.start();
+                    if (allowStart && !p.isPlaying()) p.start();
                 }
             } catch (IllegalStateException ise) {
                 // MediaPlayer in bad state — abort chop rather than native death. 2026-07-19
@@ -891,17 +1489,24 @@ public final class StemMixer {
             try {
                 if (usingIjk && ijkBassBody != null) {
                     ijkBassBody.seekTo(ms);
-                    if (started && !ijkBassBody.isPlaying()) ijkBassBody.start();
+                    if (allowStart && !ijkBassBody.isPlaying()) ijkBassBody.start();
                 } else if (bassBodyPlayer != null) {
                     bassBodyPlayer.seekTo(ms);
-                    if (started && !bassBodyPlayer.isPlaying()) bassBodyPlayer.start();
+                    if (allowStart && !bassBodyPlayer.isPlaying()) bassBodyPlayer.start();
                 }
             } catch (Exception ignored) {}
         }
     }
 
-    /** Sync this mixer’s playhead toward masterMs (multi-song drift). 2026-07-19 */
+    /**
+     * Seek every stem layer (+ bass body) on this mixer to the same ms.
+     * Layman: jump the whole song together so pads stay in sync.
+     * Hold-OK scrub must call this (or soft-blend that ends here) — never seek one zone alone.
+     * Sibling song = different StemMixer instance — untouched.
+     * 2026-07-19 / 2026-07-21
+     */
     public void seekAllPlaying(int ms) {
+        clearSongCompleteLatch();
         for (int i = 0; i < playerCount; i++) {
             int z = playerZones[i];
             if (z == stutterZone) continue;
@@ -944,20 +1549,45 @@ public final class StemMixer {
         return getGain(zone);
     }
 
+    /**
+     * Push pad gain to players — mute is volume 0 only (timeline keeps running).
+     * Layman: dial to silence and back up — song is still where it was.
+     * Was: pause when silent + seekTo(getPositionMs)/start on unmute (felt like restart).
+     * Reversal: restore pause/seek unmute path; ignore StemPadMutePolicy.
+     * 2026-07-19 / 2026-07-21
+     */
     private void applyGain(int zone) {
         float g = gains[zone];
+        boolean silent = StemControls.isGainSilent(g);
+        // Volume-only mute — never seek/restart on zero↔audible. 2026-07-21
+        boolean pauseSilent = StemPadMutePolicy.shouldPauseWhenSilent();
+        boolean seekUnmute = StemPadMutePolicy.shouldSeekOnUnmute();
         if (usingIjk && ijkPlayers != null) {
             for (int i = 0; i < ijkPlayers.length; i++) {
                 if (playerZones[i] != zone) continue;
                 if (ijkPlayers[i] == null) continue;
                 try {
-                    ijkPlayers[i].setVolume(g, g);
+                    ijkPlayers[i].setVolume(silent ? 0f : g, silent ? 0f : g);
+                    if (pauseSilent && silent) {
+                        if (ijkPlayers[i].isPlaying()) ijkPlayers[i].pause();
+                    } else if (pauseSilent && !silent && started && !released
+                            && !ijkPlayers[i].isPlaying()) {
+                        if (seekUnmute) ijkPlayers[i].seekTo(getPositionMs());
+                        ijkPlayers[i].start();
+                    }
                 } catch (Exception ignored) {}
             }
             if (zone == 2 && ijkBassBody != null) {
-                float bg = g * StemBassBody.BODY_GAIN_K;
+                float bg = silent ? 0f : g * StemBassBody.BODY_GAIN_K;
                 try {
                     ijkBassBody.setVolume(bg, bg);
+                    if (pauseSilent && silent) {
+                        if (ijkBassBody.isPlaying()) ijkBassBody.pause();
+                    } else if (pauseSilent && !silent && started && !released
+                            && !ijkBassBody.isPlaying()) {
+                        if (seekUnmute) ijkBassBody.seekTo(getPositionMs());
+                        ijkBassBody.start();
+                    }
                 } catch (Exception ignored) {}
             }
             return;
@@ -967,14 +1597,34 @@ public final class StemMixer {
             MediaPlayer p = players[i];
             if (p == null) continue;
             try {
-                p.setVolume(g, g);
+                p.setVolume(silent ? 0f : g, silent ? 0f : g);
+                if (pauseSilent && silent) {
+                    if (p.isPlaying()) p.pause();
+                } else if (pauseSilent && !silent && started && !released && !p.isPlaying()) {
+                    if (seekUnmute) p.seekTo(getPositionMs());
+                    p.start();
+                }
             } catch (Exception ignored) {}
         }
         if (zone == 2 && bassBodyPlayer != null) {
-            float bg = g * StemBassBody.BODY_GAIN_K;
+            float bg = silent ? 0f : g * StemBassBody.BODY_GAIN_K;
             try {
                 bassBodyPlayer.setVolume(bg, bg);
+                if (pauseSilent && silent) {
+                    if (bassBodyPlayer.isPlaying()) bassBodyPlayer.pause();
+                } else if (pauseSilent && !silent && started && !released
+                        && !bassBodyPlayer.isPlaying()) {
+                    if (seekUnmute) bassBodyPlayer.seekTo(getPositionMs());
+                    bassBodyPlayer.start();
+                }
             } catch (Exception ignored) {}
+        }
+    }
+
+    /** Re-apply every zone after play/resume so zeroed pads stay paused. 2026-07-19 */
+    private void applyAllGains() {
+        for (int z = 0; z < STEM_COUNT; z++) {
+            applyGain(z);
         }
     }
 
@@ -1080,6 +1730,7 @@ public final class StemMixer {
     }
 
     private void releasePlayersOnly() {
+        releaseOriginOnly();
         for (int i = 0; i < players.length; i++) {
             MediaPlayer p = players[i];
             players[i] = null;

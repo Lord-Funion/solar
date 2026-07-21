@@ -19,8 +19,8 @@ public final class PowerActions {
 
     /**
      * 2026-07-15 — Power off via root.
-     * 2026-07-16 — When {@code ctx} is set: toast "Getting ready…", ship diagnostics if online,
-     * silently notify Solar Development on Soulseek, then power off.
+     * 2026-07-20 — Toast "Shutting down…", ship diagnostics if online (time-boxed), then power off.
+     * Was: "Getting ready…" + Soulseek notice (hang risk). Reversal: old toast + notify-only prep.
      */
     public static void shutdown() {
         shutdown(null);
@@ -32,7 +32,7 @@ public final class PowerActions {
 
     /**
      * 2026-07-15 — Reboot via root.
-     * 2026-07-16 — Same prep path as {@link #shutdown(Context)} (diag ship + silent notice).
+     * 2026-07-20 — Same prep as {@link #shutdown(Context)} with "Restarting…" toast.
      */
     public static void restart() {
         restart(null);
@@ -43,8 +43,8 @@ public final class PowerActions {
     }
 
     /**
-     * User-initiated power transition: optional log export + silent Soulseek notice, then shell.
-     * Immediate when offline or ctx null (e.g. inactivity auto-shutdown should call shell path only).
+     * User-initiated or idle auto power transition: optional log export when online, then shell.
+     * Immediate when offline or ctx null.
      */
     private static void runPowerWithDiagPrep(final Context ctx, final boolean restart) {
         final Runnable shell = new Runnable() {

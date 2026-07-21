@@ -17,6 +17,13 @@ public final class XposedModuleEnsurer {
     private static final String INIT_HOOK = "/system/etc/init.d/99XposedInit.sh";
     private static final String RUNTIME_JAR = XposedModuleStore.XPOSED_DATA + "/bin/XposedBridge.jar";
     private static final String PKG_POWERMENU_TEST = "com.solar.launcher.xposed.powermenu";
+    /**
+     * 2026-07-20 — Lab A/B: skip all Xposed self-heal when set (Solar-only perf check).
+     * Layman: turns off “put Xposed back” so we can feel plain Solar speed.
+     * Technical: persist.solar.lab.noxposed=1; adb: setprop + uninstall-xposed-adb.sh.
+     * Reversal: setprop persist.solar.lab.noxposed 0; re-run install-xposed-adb.sh.
+     */
+    public static final String PROP_LAB_NO_XPOSED = "persist.solar.lab.noxposed";
     /** Min gap between resume-time repair passes — avoids root storms during wheel nav. */
     private static final long RESUME_ENSURE_MIN_MS = 120_000L;
 
@@ -24,6 +31,22 @@ public final class XposedModuleEnsurer {
     private static volatile long lastResumeEnsureAt;
 
     private XposedModuleEnsurer() {}
+
+    /**
+     * 2026-07-20 — True when lab wants Solar without Xposed framework/modules.
+     * Layman: performance A/B switch — no hooks in zygote.
+     * Technical: SystemProperties persist.solar.lab.noxposed == 1.
+     */
+    public static boolean isLabNoXposed() {
+        try {
+            Class<?> sp = Class.forName("android.os.SystemProperties");
+            String v = (String) sp.getMethod("get", String.class, String.class)
+                    .invoke(null, PROP_LAB_NO_XPOSED, "0");
+            return "1".equals(v);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
 
     /** Boot-time check — no-op without root; runs even before zygote hook so installer can seed framework. */
     public static void ensureRequiredModulesAsync(final Context ctx) {
@@ -36,6 +59,8 @@ public final class XposedModuleEnsurer {
      */
     public static void ensureRequiredModulesOnResume(final Context ctx) {
         if (ctx == null || !RootShell.canRun()) return;
+        // 2026-07-20 — Lab Solar-only: never re-stage Xposed after uninstall-xposed-adb.sh.
+        if (isLabNoXposed()) return;
         long now = System.currentTimeMillis();
         if (now - lastResumeEnsureAt < RESUME_ENSURE_MIN_MS) return;
         lastResumeEnsureAt = now;
@@ -45,6 +70,8 @@ public final class XposedModuleEnsurer {
     private static void ensureRequiredModulesAsync(final Context ctx, final boolean allowReboot) {
         if (ctx == null || repairScheduled) return;
         if (!RootShell.canRun()) return;
+        // 2026-07-20 — Same lab gate as onResume (boot bootstrap path).
+        if (isLabNoXposed()) return;
         repairScheduled = true;
         new Thread(new Runnable() {
             @Override
@@ -93,6 +120,8 @@ public final class XposedModuleEnsurer {
 
     /** Blocking repair — platform prep owns reboot UX when allowReboot false. */
     public static boolean repairModulesBlocking(Context ctx) {
+        // 2026-07-20 — Lab Solar-only: prep ladder must not re-enable modules.
+        if (isLabNoXposed()) return false;
         RepairResult r = repairModules(ctx, true);
         return r.rebootRequired;
     }
@@ -100,6 +129,7 @@ public final class XposedModuleEnsurer {
     private static RepairResult repairModules(Context ctx, boolean allowReboot) {
         RepairResult out = new RepairResult();
         if (!RootShell.canRun()) return out;
+        if (isLabNoXposed()) return out;
 
         XposedModuleStore.bindResolveContext(ctx);
         try {

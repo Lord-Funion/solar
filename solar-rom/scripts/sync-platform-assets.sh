@@ -52,7 +52,21 @@ fi
 [ -d "$VENDOR/api19-arm" ] || die "missing $VENDOR/api19-arm"
 [ -f "$INIT_SRC" ] || die "missing $INIT_SRC"
 
-mkdir -p "$DST/xposed/api17-arm" "$DST/xposed/api19-arm" "$DST/init" "$DST/scripts" "$DST/companion" "$DST/thirdparty"
+mkdir -p "$DST/xposed/api17-arm" "$DST/xposed/api19-arm" "$DST/init" "$DST/scripts" "$DST/companion" "$DST/thirdparty" "$DST/bluetooth"
+
+# 2026-07-19 — AirPods RTP proxy for APK self-heal (Y1 MD5-gated installer).
+RTP_PROXY="$ROOT/solar-rom/patches/bluetooth-rtp/prebuilt/libbluetoothdrv.so"
+if [ ! -f "$RTP_PROXY" ]; then
+    chmod +x "$ROOT/solar-rom/patches/bluetooth-rtp/build-airpods-rtp-proxy.sh" || true
+    "$ROOT/solar-rom/patches/bluetooth-rtp/build-airpods-rtp-proxy.sh" || true
+fi
+if [ -f "$RTP_PROXY" ]; then
+    cp "$RTP_PROXY" "$DST/bluetooth/libbluetoothdrv.so"
+    echo "==> Bundled AirPods RTP proxy for platform self-heal"
+else
+    echo "==> WARN: AirPods RTP proxy not built — self-heal will soft-skip" >&2
+    rm -f "$DST/bluetooth/libbluetoothdrv.so"
+fi
 
 # 2026-07-19 — Do not bundle org.rockbox APK/libs into Solar APK (Solar-only; launch-if-present).
 # Was: sync_rockbox_platform_assets fetched/patched Rockbox into assets/platform/rockbox/.
@@ -131,10 +145,11 @@ GC_VC="$(apk_version_code "$DST/companion/SolarGlobalContextModal.apk")"
 HELPER_VC="$(apk_version_code "$DST/companion/SolarHomeHelper.apk")"
 
 # manifest.json — parsed by PlatformPrepManifest.java at runtime.
-# 2026-07-19 — prepVersion 19: drop rockbox APK bundle (Solar-only install policy).
+# 2026-07-19 — prepVersion 22: AirPods RTP proxy self-heal + bluetooth pairing conf (20).
+# Was 20: bluetooth pairing conf only. Was 19: drop rockbox APK bundle.
 cat > "$DST/manifest.json" <<EOF
 {
-  "prepVersion": 19,
+  "prepVersion": 22,
   "framework": {
     "api17": {
       "appProcess": "xposed/api17-arm/app_process",

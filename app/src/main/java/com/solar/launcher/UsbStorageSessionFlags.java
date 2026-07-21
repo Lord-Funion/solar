@@ -4,14 +4,16 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 /**
- * Cross-process USB plug-in prompt prefs and overlay dismiss handoff for {@link MainActivity}.
- * 2026-07-19 — Skip-prompt (without auto-connect) = let Android UsbStorageActivity handle it
- * (lighter than Solar concierge wake/finish/reclaim).
+ * Cross-process USB plug-in prefs and overlay dismiss handoff for {@link MainActivity}.
+ * 2026-07-19 — Android owns USB unless Auto-Connect or explicit Enable USB storage.
+ * Layman: Solar does not fight the PC cable; SystemUI can show its own disk dialog.
+ * Was: optional Solar connect prompt via suppress-toggle. Reversal: restore skip-pref gate.
  */
 public final class UsbStorageSessionFlags {
 
     /** Same store as {@link MainActivity} settings — readable from Solar :overlay process. */
     static final String PREFS = "SOLAR_SETTINGS";
+    /** Legacy pref — always forced true; Solar no longer offers a plug-in prompt (2026-07-19). */
     static final String PREF_USB_SUPPRESS_CONNECT_PROMPT = "usb_suppress_connect_prompt";
     static final String PREF_USB_AUTO_CONNECT = "usb_auto_connect";
     static final String PREF_USB_MANUAL_DISABLE = "usb_manual_disable";
@@ -26,53 +28,60 @@ public final class UsbStorageSessionFlags {
     public static final String SYSPROP_AUTO_CONNECT = "sys.solar.usb.auto_connect";
     /**
      * 1 = leave stock UsbStorageActivity alone (no finish / no Solar wake).
-     * Set when skip-prompt && !auto-connect. 2026-07-19
+     * Set whenever Auto-Connect is off. 2026-07-19
      */
     public static final String SYSPROP_STOCK_UI = "sys.solar.usb.stock_ui";
 
     /**
-     * Default On — Android owns the plug-in dialog unless user wants Solar’s prompt.
-     * Was: false (Solar always intercepted). Reversal: default false.
+     * Always skip Solar plug-in prompt — Android SystemUI owns the cable dialog.
+     * Was: user toggle. Reversal: DEFAULT false + Settings row for Solar prompt.
      * 2026-07-19
      */
     public static final boolean DEFAULT_SKIP_SOLAR_PROMPT = true;
 
     /**
-     * True when Solar must not steal USB UI — stock SystemUI dialog / MTP path only.
-     * Layman: cable in → Android asks, Solar stays out of the way (faster).
-     * 2026-07-19
+     * True — Solar must not steal USB UI or tear down stock UMS dialogs.
+     * Layman: PC cable → Android handles the USB screen; Solar never fights it.
+     * Tech: always stock (2026-07-19). Auto-Connect uses silent enable without finishing SystemUI.
+     * Was: stock iff Auto-Connect off.
      */
     public static boolean preferStockUsbUi(Context ctx) {
-        if (isAutoConnectEnabled(ctx)) return false;
-        if (isStockUiFromSysprop()) return true;
-        if (ctx == null) return DEFAULT_SKIP_SOLAR_PROMPT;
-        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        return prefs.getBoolean(PREF_USB_SUPPRESS_CONNECT_PROMPT, DEFAULT_SKIP_SOLAR_PROMPT);
+        return true;
     }
 
-    /** Test hook — skip && !auto ⇒ stock. 2026-07-19 */
-    static boolean preferStockUsbUiFromPrefs(boolean skipSolarPrompt, boolean autoConnect) {
-        return skipSolarPrompt && !autoConnect;
+    /** Test hook — always stock after 2026-07-19 policy. */
+    static boolean preferStockUsbUiFromPrefs(boolean autoConnect) {
+        return true;
     }
 
+    /**
+     * @deprecated kept for call sites; always false — no Solar plug-in prompt (2026-07-19).
+     */
     public static boolean shouldOfferUsbConnectPrompt(Context ctx) {
-        if (preferStockUsbUi(ctx)) return false;
-        if (isSkipPromptFromSysprop()) return false;
-        if (ctx == null) return !DEFAULT_SKIP_SOLAR_PROMPT;
-        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        return !prefs.getBoolean(PREF_USB_SUPPRESS_CONNECT_PROMPT, DEFAULT_SKIP_SOLAR_PROMPT);
+        // Auto-Connect uses silent enable; Enable Now is explicit menu — never nag on plug.
+        return false;
     }
 
     /**
      * 2026-07-06 — Settings skip + boot-settle gate for all USB enable prompts.
      * 2026-07-16 — Also wait until Solar home is ready (no setup / prep face).
-     * Layman: honors Skip prompt; waits after reboot-with-cable; never nags during setup.
-     * Tech: boot settle + {@link FirstSessionReadyGate#isHomeReadyForUsbPrompt}.
+     * 2026-07-19 — Plug-in prompt removed; this stays false. Auto-Connect uses
+     * {@link #isAutoConnectAllowedAfterBootSettle} instead.
      */
     public static boolean shouldOfferUsbConnectPromptAfterBootSettle(Context ctx) {
         if (!shouldOfferUsbConnectPrompt(ctx)) return false;
         if (!UsbHostSessionPolicy.isPromptAllowedAfterBootSettle(ctx)) return false;
-        // 2026-07-16 — Defer enable prompt until home is usable (setup overlay / prep wizard gone).
+        return FirstSessionReadyGate.isHomeReadyForUsbPrompt(ctx);
+    }
+
+    /**
+     * 2026-07-19 — Auto-Connect may enable UMS after boot settle + home ready.
+     * Layman: car-stereo auto disk mode waits until Solar finished waking up.
+     * Tech: same settle gates as the old prompt, without requiring Solar UI.
+     */
+    public static boolean isAutoConnectAllowedAfterBootSettle(Context ctx) {
+        if (!isAutoConnectEnabled(ctx)) return false;
+        if (!UsbHostSessionPolicy.isPromptAllowedAfterBootSettle(ctx)) return false;
         return FirstSessionReadyGate.isHomeReadyForUsbPrompt(ctx);
     }
 
@@ -87,19 +96,24 @@ public final class UsbStorageSessionFlags {
         }
     }
 
-    /** Root setprop so :overlay + SystemUI Xposed see Skip pref without stale SP cache (2026-07-05). */
+    /**
+     * Pin skip=1 + stock=(!auto) so Xposed never finishes UsbStorageActivity unless Auto-Connect.
+     * 2026-07-19 — Also migrates legacy suppress pref to always-on.
+     */
     public static void syncSkipPromptSysprop(Context ctx) {
         if (ctx == null) return;
-        boolean skip = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean(PREF_USB_SUPPRESS_CONNECT_PROMPT, DEFAULT_SKIP_SOLAR_PROMPT);
-        writeSysprop(SYSPROP_SKIP_PROMPT, skip ? "1" : "0");
-        // Stock UI when skipping Solar prompt and not auto-connecting.
-        boolean stock = preferStockUsbUiFromPrefs(skip, isAutoConnectEnabled(ctx));
+        // Force legacy pref so old builds/readers stay hands-off.
+        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (!prefs.getBoolean(PREF_USB_SUPPRESS_CONNECT_PROMPT, DEFAULT_SKIP_SOLAR_PROMPT)) {
+            prefs.edit().putBoolean(PREF_USB_SUPPRESS_CONNECT_PROMPT, true).commit();
+        }
+        writeSysprop(SYSPROP_SKIP_PROMPT, "1");
+        boolean stock = preferStockUsbUi(ctx);
         writeSysprop(SYSPROP_STOCK_UI, stock ? "1" : "0");
         // #region agent log
         try {
             org.json.JSONObject d = new org.json.JSONObject();
-            d.put("skip", skip);
+            d.put("skip", true);
             d.put("stock", stock);
             d.put("auto", isAutoConnectEnabled(ctx));
             Debug543e15Log.log("UsbStorageSessionFlags.syncSkipPromptSysprop",
@@ -117,15 +131,19 @@ public final class UsbStorageSessionFlags {
 
     /**
      * 2026-07-06 — Auto-connect implies skip plug-in prompts (user opted into silent attach).
-     * Layman: turning on auto USB disk mode also hides repeated nag dialogs.
+     * 2026-07-19 — Turning Auto-Connect off restores stock UI ownership (no Solar steal).
+     * Layman: auto = Solar mounts the disk for car stereos; off = Android owns the cable.
      */
     public static void applyAutoConnectSideEffects(Context ctx, boolean autoConnect) {
         if (ctx == null) return;
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (autoConnect) {
-            prefs.edit().putBoolean(PREF_USB_SUPPRESS_CONNECT_PROMPT, true).commit();
-        }
+        // Always leave suppress on — Solar never shows a plug-in nag dialog.
+        prefs.edit().putBoolean(PREF_USB_SUPPRESS_CONNECT_PROMPT, true).commit();
         syncUsbSessionSysprops(ctx);
+        if (!autoConnect) {
+            // Drop Solar-armed session so stock SystemUI can own the next plug.
+            UsbMassStorageController.clearUserSession();
+        }
     }
 
     /** Root setprop — bridge reads auto-connect; unset pref = off (2026-07-06). */
@@ -138,14 +156,6 @@ public final class UsbStorageSessionFlags {
     /** Test hook — sysprop skip without shell (2026-07-05). */
     static boolean isSkipPromptFromSyspropForTest(String propValue) {
         return "1".equals(propValue);
-    }
-
-    private static boolean isSkipPromptFromSysprop() {
-        return isSkipPromptFromSyspropForTest(readSysprop(SYSPROP_SKIP_PROMPT));
-    }
-
-    private static boolean isStockUiFromSysprop() {
-        return "1".equals(readSysprop(SYSPROP_STOCK_UI));
     }
 
     /** getprop — no su; readable from main and :overlay (2026-07-05). */

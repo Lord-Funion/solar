@@ -43,6 +43,19 @@ public class StemMashupPolicyTest {
         assertEquals(0.7f, StemBassBody.BODY_GAIN_K, 0.001f);
     }
 
+    /** Cold jam: tempoRate defaults 1; chop screw separate. 2026-07-20 */
+    @Test
+    public void songStateTempoVsScrew() {
+        StemSession.SongState st = new StemSession.SongState();
+        st.resetJam();
+        assertEquals(1f, st.tempoRate, 0.001f);
+        assertEquals(1f, st.screwRate, 0.001f);
+        assertFalse(st.chopOn);
+        st.tempoRate = 1.1f;
+        st.screwRate = 0.7f;
+        assertEquals(0.77f, StemTempoSync.composePadRate(st.tempoRate, st.screwRate), 0.01f);
+    }
+
     @Test
     public void soundTouchFlag() {
         assertTrue(StemSoundTouch.isSoundTouchEnabled(1L));

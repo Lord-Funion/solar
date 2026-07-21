@@ -29,12 +29,9 @@ public class FlowCoverResolverTest {
     }
 
     @Test
-    public void likelyPlaceholderFileUsesSmallJpegHeuristic() {
-        if (AlbumArtCache.isLikelyPlaceholderFile(null)) {
-            throw new AssertionError("null is not a placeholder file");
-        }
-        if (AlbumArtCache.isLikelyPlaceholderFile(new java.io.File("missing.jpg"))) {
-            throw new AssertionError("missing file is not a placeholder file");
-        }
+    public void decodeByteArraySampledNullSafe() {
+        // 2026-07-19 — Sampled decode must not throw on empty/null (OOM guard path).
+        assertNull(FlowCoverResolver.decodeByteArraySampled(null, 240));
+        assertNull(FlowCoverResolver.decodeByteArraySampled(new byte[0], 240));
     }
 }

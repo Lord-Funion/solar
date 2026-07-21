@@ -727,6 +727,7 @@
         </LinearLayout>
 
         <!-- 2026-07-11 — Match transport height to bottom chrome band (times/scrub sit inside). -->
+        <!-- 2026-07-20 — 66dp = scrub 34 + tip 32 so hold-Back/Flow tips are not AT_MOST-clipped. -->
         <include
             android:id="@+id/player_transport_bar"
             layout="@layout/layout_media_transport_bar"

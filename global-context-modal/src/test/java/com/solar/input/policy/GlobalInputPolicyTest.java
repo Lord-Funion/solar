@@ -27,7 +27,7 @@ public class GlobalInputPolicyTest {
                 GlobalInputPolicy.ROCKBOX_PKG));
         assertEquals(300L, GlobalInputPolicy.powerModalHoldMsForPackage(
                 GlobalInputPolicy.JJ_PKG));
-        assertEquals(350L, GlobalInputPolicy.powerModalHoldMsForPackage(
+        assertEquals(280L, GlobalInputPolicy.powerModalHoldMsForPackage(
                 "com.android.settings"));
     }
 

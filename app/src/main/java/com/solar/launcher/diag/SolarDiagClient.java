@@ -108,7 +108,9 @@ public final class SolarDiagClient {
                 return Result.fail(root.optString("error", "server_rejected"));
             }
             return Result.success(root.optInt("issue_number", 0), root.optString("html_url", ""));
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // 2026-07-20 — OOM/Error on huge payloads must not escape as uncaught (kills Solar).
+            // Was: catch (Exception) only. Reversal: catch Exception again.
             return Result.fail(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
         }
     }

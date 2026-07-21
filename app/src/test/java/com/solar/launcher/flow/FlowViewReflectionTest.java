@@ -44,6 +44,30 @@ public class FlowViewReflectionTest {
         assertEquals(center, sideMidCover, 0.001f);
     }
 
+    /** 2026-07-20 — Settled carousel: center and side same band count (Y1 matched Y2 gloss). */
+    @Test
+    public void settledReflectionBandsMatchCenterAndSide() {
+        int center = FlowView.reflectionBandCountForSlot(true, false);
+        int side = FlowView.reflectionBandCountForSlot(false, false);
+        assertEquals(center, side);
+        assertEquals(FlowView.CENTER_REFLECTION_MAX_BANDS, center);
+    }
+
+    /** 2026-07-20 — Scroll can coarsen every slot together; never center-only fine vs side coarse. */
+    @Test
+    public void scrollingReflectionBandsUniformAcrossSlots() {
+        int center = FlowView.reflectionBandCountForSlot(true, true);
+        int side = FlowView.reflectionBandCountForSlot(false, true);
+        assertEquals(center, side);
+        assertEquals(FlowView.SIDE_REFLECTION_MAX_BANDS, center);
+    }
+
+    /** 2026-07-20 — Y1/Y2 share one floor gloss strength (was Y1 half → uneven with coarse sides). */
+    @Test
+    public void reflectionBaseAlphaMatchesY2Gloss() {
+        assertEquals(0.50f, FlowView.flowReflectionBaseAlpha(), 0.001f);
+    }
+
     @Test
     public void scrollingDoesNotSuppressReflections() {
         assertFalse(FlowView.shouldSkipCoverReflection(false, false, true, true));

@@ -79,6 +79,51 @@ public final class LibraryCategoryIndex {
         years = Collections.unmodifiableList(yOut);
     }
 
+    /**
+     * 2026-07-20 — Tier-0 genre/year from SQL DISTINCT (no SongRow walk).
+     * Layman: fill Genre/Year menus from the DB when the full song list is not in RAM.
+     * Technical: SEGMENTED hydrate companion to LibraryRamCache.rebuildFromDistinct.
+     * Reversal: rebuild(gen, flowLibraryRows()) only.
+     */
+    public synchronized void rebuildFromDistinct(int gen,
+            List<String> genreNames, List<String> yearNames) {
+        libraryGen = gen;
+        Set<String> genreSet = new HashSet<String>();
+        if (genreNames != null) {
+            for (int i = 0; i < genreNames.size(); i++) {
+                String g = genreNames.get(i);
+                if (g == null) continue;
+                g = g.trim();
+                if (!g.isEmpty() && !"Unknown Genre".equalsIgnoreCase(g)) genreSet.add(g);
+            }
+        }
+        Set<String> yearSet = new HashSet<String>();
+        if (yearNames != null) {
+            for (int i = 0; i < yearNames.size(); i++) {
+                String y = yearNames.get(i);
+                if (y == null) continue;
+                y = y.trim();
+                if (y.isEmpty()) continue;
+                try {
+                    if (Integer.parseInt(y) > 0) yearSet.add(y);
+                } catch (NumberFormatException e) {
+                    yearSet.add(y);
+                }
+            }
+        }
+        List<String> gOut = new ArrayList<String>(genreSet);
+        Collections.sort(gOut, String.CASE_INSENSITIVE_ORDER);
+        genres = Collections.unmodifiableList(gOut);
+        List<String> yOut = new ArrayList<String>(yearSet);
+        Collections.sort(yOut, new Comparator<String>() {
+            @Override
+            public int compare(String a, String b) {
+                return a.compareToIgnoreCase(b);
+            }
+        });
+        years = Collections.unmodifiableList(yOut);
+    }
+
     public synchronized void invalidate() {
         libraryGen = -1;
         genres = Collections.emptyList();
@@ -101,5 +146,16 @@ public final class LibraryCategoryIndex {
         idx.rebuild(1, rows);
         if (idx.years(1).isEmpty()) throw new AssertionError("year");
         if (idx.genres(1).isEmpty()) throw new AssertionError("genre");
+        // 2026-07-20 — DISTINCT path fills Genre/Year without SongRows.
+        LibraryCategoryIndex d = new LibraryCategoryIndex();
+        List<String> gens = new ArrayList<String>();
+        gens.add("Jazz");
+        gens.add("Unknown Genre");
+        List<String> yrs = new ArrayList<String>();
+        yrs.add("2001");
+        yrs.add("0");
+        d.rebuildFromDistinct(2, gens, yrs);
+        if (d.genres(2).size() != 1) throw new AssertionError("distinct genre filter");
+        if (d.years(2).size() != 1) throw new AssertionError("distinct year filter");
     }
 }

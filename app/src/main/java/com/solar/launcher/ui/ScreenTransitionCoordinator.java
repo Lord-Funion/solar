@@ -81,6 +81,17 @@ public final class ScreenTransitionCoordinator {
         final Runnable complete = new Runnable() {
             @Override
             public void run() {
+                // #region agent log
+                try {
+                    JSONObject d = new JSONObject();
+                    d.put("from", from);
+                    d.put("to", to);
+                    d.put("outVis", outView != null ? outView.getVisibility() : -1);
+                    d.put("inVis", inView != null ? inView.getVisibility() : -1);
+                    com.solar.launcher.Debug54d8beLog.log("ScreenTransitionCoordinator.complete",
+                            "transition complete", "H1", d);
+                } catch (Exception ignored) {}
+                // #endregion
                 if (outView != null && outView != inView) {
                     outView.setVisibility(View.GONE);
                     ScreenTransition.resetView(outView);
@@ -88,7 +99,17 @@ public final class ScreenTransitionCoordinator {
                 host.commitTransitionBackdrop(to);
                 host.finalizeScreenVisibility(to);
                 // Destination interactive — drop transition spinner (library may re-arm library_load).
-                UiBusy.clear(UiBusy.REASON_TRANSITION);
+                // #region agent log
+                try {
+                    org.json.JSONObject d = new org.json.JSONObject();
+                    d.put("from", from);
+                    d.put("to", to);
+                    d.put("reasons", UiBusy.snapshotReasons());
+                    com.solar.launcher.DebugCb4747Log.log("ScreenTransitionCoordinator.complete",
+                            "clear TRANSITION after anim", "D", d);
+                } catch (Exception ignored) {}
+                // #endregion
+                UiBusy.clearNextFrame(UiBusy.REASON_TRANSITION);
             }
         };
 
@@ -130,7 +151,7 @@ public final class ScreenTransitionCoordinator {
                         host.applyScreenChange(to, false);
                         host.commitTransitionBackdrop(to);
                         host.finalizeScreenVisibility(to);
-                        UiBusy.clear(UiBusy.REASON_TRANSITION);
+                        UiBusy.clearNextFrame(UiBusy.REASON_TRANSITION);
                         break;
                 }
             }

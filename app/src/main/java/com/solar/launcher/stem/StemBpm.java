@@ -1,17 +1,18 @@
 package com.solar.launcher.stem;
 
 /**
- * BPM + beatgrid helpers for Stem mashup / chop.
- * Layman: guess the song’s pulse so chops land on the beat and songs can match tempo.
- * Technical: duration heuristic → BPM; rate clamp for SoundTouch; chop slice ms from bar fraction.
+ * BPM + beatgrid helpers for Stem mashup / beat roll.
+ * Layman: guess the song’s pulse so rolls land on the beat and songs can match tempo.
+ * Technical: duration heuristic → BPM; rate clamp for SoundTouch; roll slice ms from bar fraction.
  * Was: fixed 2000 ms/bar only. Reversal: ignore StemBpm, keep DEFAULT_MS_PER_BAR.
  * 2026-07-19
+ * 2026-07-20 — beat-roll catch-up math (was frozen chop release).
  */
 public final class StemBpm {
     public static final float DEFAULT_BPM = 120f;
     public static final float MIN_RATE = 0.85f;
     public static final float MAX_RATE = 1.15f;
-    /** Chop ladder as fraction of one bar (0 = stutter off / whole). */
+    /** Beat-roll ladder as fraction of one bar (0 = roll off / whole). */
     public static final float[] CHOP_FRAC = { 0f, 1f / 16f, 1f / 8f, 1f / 4f, 1f / 2f };
     /** Classic screw rates (pitch follows). */
     public static final float[] SCREW_RATES = { 1f, 0.85f, 0.7f, 0.55f };
@@ -22,6 +23,27 @@ public final class StemBpm {
     public static int msPerBar(float bpm) {
         float b = bpm > 30f && bpm < 300f ? bpm : DEFAULT_BPM;
         return Math.max(200, Math.round(240000f / b));
+    }
+
+    /** ms per beat (quarter note in 4/4). 2026-07-19 */
+    public static int msPerBeat(float bpm) {
+        return Math.max(50, Math.round(msPerBar(bpm) / 4f));
+    }
+
+    /**
+     * Snap a playhead to the nearest beat for beat-roll anchors.
+     * Layman: land the roll on the pulse, not between the notes.
+     * Technical: round positionMs to beat grid from BPM estimate.
+     * Was: free playhead anchor. Reversal: return positionMs unchanged.
+     * 2026-07-19
+     */
+    public static int snapToBeatMs(int positionMs, float bpm) {
+        int beat = msPerBeat(bpm);
+        if (beat < 1) return Math.max(0, positionMs);
+        int pos = Math.max(0, positionMs);
+        int nearest = Math.round(pos / (float) beat) * beat;
+        if (nearest < 0) nearest = 0;
+        return nearest;
     }
 
     /**
@@ -60,12 +82,29 @@ public final class StemBpm {
         return clampChopStep(current + steps);
     }
 
-    /** Slice length in ms; 0 = chop stutter off. */
+    /** Slice length in ms; 0 = beat roll off. */
     public static int chopSliceMs(float bpm, int chopStep) {
         int step = clampChopStep(chopStep);
         float frac = CHOP_FRAC[step];
         if (frac <= 0.001f) return 0;
         return Math.max(40, Math.round(msPerBar(bpm) * frac));
+    }
+
+    /**
+     * Where the song should be after a beat-roll hold ends.
+     * Layman: while you mash the pad the slice chatters; let go and jump ahead to “now”.
+     * Technical: originPosMs + elapsedWallMs * rate, clamped to [0, durationMs].
+     * Was: release left playhead on frozen chop anchor. Reversal: return originPosMs.
+     * 2026-07-20
+     */
+    public static int beatRollCatchUpMs(int originPosMs, long elapsedWallMs, float rate,
+            int durationMs) {
+        float r = rate > 0.01f ? rate : 1f;
+        long elapsed = elapsedWallMs > 0L ? elapsedWallMs : 0L;
+        int catchUp = originPosMs + Math.round(elapsed * r);
+        if (catchUp < 0) catchUp = 0;
+        if (durationMs > 0 && catchUp > durationMs) catchUp = durationMs;
+        return catchUp;
     }
 
     public static int screwIndexForRate(float rate) {
@@ -88,12 +127,22 @@ public final class StemBpm {
         return SCREW_RATES[idx];
     }
 
-    public static String chopLabel(int chopStep) {
+    /**
+     * Status label for beat-roll slice size.
+     * Was: "Chop off" / fractions via chopLabel. Reversal: call chopLabel alias.
+     * 2026-07-20
+     */
+    public static String rollLabel(int chopStep) {
         int s = clampChopStep(chopStep);
-        if (s == 0) return "Chop off";
+        if (s == 0) return "Roll off";
         if (s == 1) return "1/16";
         if (s == 2) return "1/8";
         if (s == 3) return "1/4";
         return "1/2";
+    }
+
+    /** Thin alias — prefer {@link #rollLabel}. 2026-07-20 */
+    public static String chopLabel(int chopStep) {
+        return rollLabel(chopStep);
     }
 }

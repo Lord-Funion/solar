@@ -81,27 +81,29 @@ public class GlobalInputPolicyTest {
 
     @Test
     public void timingTiersMatchDocumentedHoldGuard() {
-        // 2026-07-18 — 350/300 modal tiers; tap max 280.
+        // 2026-07-20 — 280/300 modal tiers; tap max 220.
         assertEquals(300L, GlobalInputPolicy.THIRD_PARTY_LAUNCHER_MODAL_HOLD_MS);
         assertEquals(300L, GlobalInputPolicy.NAV_OWNED_LAUNCHER_MODAL_HOLD_MS);
         assertEquals(300L, GlobalInputPolicy.ROCKBOX_BACK_PASSTHROUGH_MS);
-        assertEquals(350L, GlobalInputPolicy.GLOBAL_MODAL_HOLD_MS);
-        assertEquals(350L, GlobalInputPolicy.THIRD_PARTY_MODAL_HOLD_MS);
-        assertEquals(350L, GlobalInputPolicy.MODAL_HOLD_MS);
-        assertEquals(350L, GlobalInputPolicy.CENTER_MENU_HOLD_MS);
-        assertEquals(350L, GlobalInputPolicy.SOLAR_BACK_CONTEXT_HOLD_MS);
+        assertEquals(280L, GlobalInputPolicy.GLOBAL_MODAL_HOLD_MS);
+        assertEquals(280L, GlobalInputPolicy.THIRD_PARTY_MODAL_HOLD_MS);
+        assertEquals(280L, GlobalInputPolicy.MODAL_HOLD_MS);
+        assertEquals(280L, GlobalInputPolicy.CENTER_MENU_HOLD_MS);
+        assertEquals(280L, GlobalInputPolicy.SOLAR_BACK_CONTEXT_HOLD_MS);
+        assertEquals(220L, GlobalInputPolicy.POWER_TAP_MAX_MS);
         assertEquals(7000L, GlobalInputPolicy.HUD_COUNTDOWN_START_MS);
         assertEquals(10000L, GlobalInputPolicy.RESCUE_EXECUTE_MS);
         assertEquals(10000L, GlobalInputPolicy.RESCUE_HOLD_MS);
-        assertEquals(26, GlobalInputPolicy.POLICY_REV);
+        assertEquals(27, GlobalInputPolicy.POLICY_REV);
     }
 
     @Test
     public void thirdPartyBackModalAtFourHundredTwentyMs() {
-        assertEquals(350L, GlobalInputPolicy.backModalHoldMsForPackage("com.android.settings"));
-        assertEquals(350L, GlobalInputPolicy.powerModalHoldMsForPackage("com.mediatek.camera"));
-        assertEquals(175L, GlobalInputPolicy.overlayDismissGraceMsForPackage("com.android.settings"));
-        assertEquals(350L, GlobalInputPolicy.backModalHoldMsForPackage("com.android.systemui"));
+        // 2026-07-20 — name kept; values are GLOBAL_MODAL_HOLD / half grace.
+        assertEquals(280L, GlobalInputPolicy.backModalHoldMsForPackage("com.android.settings"));
+        assertEquals(280L, GlobalInputPolicy.powerModalHoldMsForPackage("com.mediatek.camera"));
+        assertEquals(140L, GlobalInputPolicy.overlayDismissGraceMsForPackage("com.android.settings"));
+        assertEquals(280L, GlobalInputPolicy.backModalHoldMsForPackage("com.android.systemui"));
     }
 
     /** 2026-07-08 — JJ/stock HOME targets arm the wheel remap even with Solar disabled. */
@@ -203,8 +205,8 @@ public class GlobalInputPolicyTest {
 
     @Test
     public void genericHomeLauncherUsesStandardModalHold() {
-        // 2026-07-18 — Generic HOME uses 350 ms like stock apps (not nav-owned 300).
-        assertEquals(350L, GlobalInputPolicy.backModalHoldMsForPackage("com.example.home"));
+        // 2026-07-20 — Generic HOME uses GLOBAL_MODAL_HOLD like stock apps (not nav-owned 300).
+        assertEquals(280L, GlobalInputPolicy.backModalHoldMsForPackage("com.example.home"));
         assertFalse(GlobalInputPolicy.isThirdPartyHomeLauncher("com.example.home"));
         assertFalse(GlobalInputPolicy.isNavOwnedHomeLauncher("com.example.home"));
     }

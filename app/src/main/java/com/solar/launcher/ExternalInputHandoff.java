@@ -56,6 +56,9 @@ public final class ExternalInputHandoff {
     /** Saved handoff mode while Solar IME tray owns keys — restored on IME dismiss. */
     private static volatile int dpadModeBeforeIme = MODE_OFF;
 
+    /** Saved handoff mode while Stem/Mix jam owns keys — restored when jam ends. 2026-07-19 */
+    private static volatile int dpadModeBeforeStemMix = MODE_OFF;
+
     /** Arm/disarm from MainActivity.onWindowFocusChanged — the Rockbox setDpadMode twin. */
     public static void setDpadMode(int mode) {
         dpadMode = mode;
@@ -89,9 +92,38 @@ public final class ExternalInputHandoff {
         return SolarImeRouteArbiter.isActive();
     }
 
+    /** True when Solar Stem/Mix jam owns keys — block inject + MEDIA_BUTTON remap. 2026-07-19 */
+    public static boolean isBlockedByStemMix() {
+        return StemOrMixSession.isActive();
+    }
+
     /** True when overlay or IME owns keys — shared inject gate. */
     public static boolean isBlockedBySolarInputCapture() {
-        return isBlockedByGlobalOverlay() || isBlockedByIme();
+        return isBlockedByGlobalOverlay() || isBlockedByIme() || isBlockedByStemMix();
+    }
+
+    /**
+     * StemOrMixSession.setActive(true) — pause stock-app inject while jam owns pads.
+     * 2026-07-19
+     */
+    public static void pauseForStemMix() {
+        if (dpadMode != MODE_OFF && dpadModeBeforeStemMix == MODE_OFF) {
+            dpadModeBeforeStemMix = dpadMode;
+        }
+        dpadMode = MODE_OFF;
+        syncHandoffActiveProperty();
+    }
+
+    /** StemOrMixSession.setActive(false) — restore prior handoff after jam. 2026-07-19 */
+    public static void resumeFromStemMix() {
+        if (StemOrMixSession.isActive()) return;
+        if (OverlayKeyGate.isOverlayKeysActive()) return;
+        if (SolarImeRouteArbiter.isActive()) return;
+        if (dpadModeBeforeStemMix != MODE_OFF) {
+            dpadMode = dpadModeBeforeStemMix;
+        }
+        dpadModeBeforeStemMix = MODE_OFF;
+        syncHandoffActiveProperty();
     }
 
     /** OverlayKeyGate.arm — pause stock-app inject until modal closes (:overlay process). */

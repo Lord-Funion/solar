@@ -4,6 +4,7 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 
+import com.solar.launcher.Debug712c71Log;
 import com.solar.launcher.youtube.api.InstancePool;
 import com.solar.launcher.youtube.api.InstancesUpdater;
 import com.solar.launcher.youtube.api.YoutubeBackend;
@@ -28,7 +29,7 @@ public final class YouTubeClient {
         void onError(String message);
     }
 
-    private static final long DEFAULT_TIMEOUT_MS = 12000L;
+    private static final long DEFAULT_TIMEOUT_MS = 22000L;
     private static final long RESOLVE_TIMEOUT_MS = 28000L;
     private static final long PROBE_TIMEOUT_MS = 3000L;
 
@@ -96,10 +97,31 @@ public final class YouTubeClient {
     }
 
     public void search(final String query, final Callback cb) {
+        // #region agent log
+        try {
+            org.json.JSONObject d = new org.json.JSONObject();
+            d.put("query", query != null ? query : "");
+            d.put("poolSize", pool.size());
+            d.put("timeoutMs", DEFAULT_TIMEOUT_MS);
+            Debug712c71Log.log(appCtx, "YouTubeClient.search", "search start", "A", d);
+        } catch (Exception ignored) {}
+        // #endregion
         runTimed(DEFAULT_TIMEOUT_MS, cb, new Work() {
             @Override
             public String call() throws Exception {
-                return videosToJson(pool.search(query != null ? query : ""));
+                List<YouTubeVideo> videos = pool.search(query != null ? query : "");
+                String json = videosToJson(videos);
+                // #region agent log
+                try {
+                    org.json.JSONObject d = new org.json.JSONObject();
+                    d.put("query", query != null ? query : "");
+                    d.put("n", videos != null ? videos.size() : -1);
+                    d.put("jsonLen", json != null ? json.length() : 0);
+                    Debug712c71Log.log(appCtx, "YouTubeClient.search",
+                            "search work done", "B", d);
+                } catch (Exception ignored) {}
+                // #endregion
+                return json;
             }
         });
     }
@@ -162,6 +184,9 @@ public final class YouTubeClient {
         if (cb == null) return;
         final Object gate = new Object();
         final boolean[] done = new boolean[] { false };
+        // #region agent log
+        final long timedT0 = System.currentTimeMillis();
+        // #endregion
         main.postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -169,6 +194,15 @@ public final class YouTubeClient {
                     if (done[0]) return;
                     done[0] = true;
                 }
+                // #region agent log
+                try {
+                    org.json.JSONObject d = new org.json.JSONObject();
+                    d.put("timeoutMs", timeoutMs);
+                    d.put("elapsedMs", System.currentTimeMillis() - timedT0);
+                    Debug712c71Log.log(appCtx, "YouTubeClient.runTimed",
+                            "client timeout fired", "A", d);
+                } catch (Exception ignored) {}
+                // #endregion
                 cb.onError("timeout");
             }
         }, timeoutMs);
@@ -178,7 +212,18 @@ public final class YouTubeClient {
                 try {
                     final String json = work.call();
                     synchronized (gate) {
-                        if (done[0]) return;
+                        if (done[0]) {
+                            // #region agent log
+                            try {
+                                org.json.JSONObject d = new org.json.JSONObject();
+                                d.put("jsonLen", json != null ? json.length() : 0);
+                                d.put("elapsedMs", System.currentTimeMillis() - timedT0);
+                                Debug712c71Log.log(appCtx, "YouTubeClient.runTimed",
+                                        "success discarded after timeout", "D", d);
+                            } catch (Exception ignored) {}
+                            // #endregion
+                            return;
+                        }
                         done[0] = true;
                     }
                     main.post(new Runnable() {
@@ -190,7 +235,18 @@ public final class YouTubeClient {
                 } catch (Exception e) {
                     final String msg = e.getMessage() != null ? e.getMessage() : "error";
                     synchronized (gate) {
-                        if (done[0]) return;
+                        if (done[0]) {
+                            // #region agent log
+                            try {
+                                org.json.JSONObject d = new org.json.JSONObject();
+                                d.put("err", msg);
+                                d.put("elapsedMs", System.currentTimeMillis() - timedT0);
+                                Debug712c71Log.log(appCtx, "YouTubeClient.runTimed",
+                                        "error discarded after timeout", "D", d);
+                            } catch (Exception ignored) {}
+                            // #endregion
+                            return;
+                        }
                         done[0] = true;
                     }
                     main.post(new Runnable() {

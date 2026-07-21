@@ -10,6 +10,7 @@ import java.util.List;
 /**
  * 2026-07-06: Cached {@link FlowCatalog.SongRow} list — avoids realloc on every Flow/catalog call.
  * Layman: we copy the music list once per scan instead of on every carousel scroll.
+ * 2026-07-20 — Also holds SEGMENTED Flow-only rows loaded from SQLite (customLibrary stays empty).
  */
 public final class FlowLibraryRows {
 
@@ -35,6 +36,35 @@ public final class FlowLibraryRows {
         return cached;
     }
 
+    /**
+     * 2026-07-20 — Warm cache hit for SEGMENTED Flow (no rebuild from empty customLibrary).
+     * Layman: “do we already have the Flow song list for this library generation?”
+     * Technical: non-empty cached + gen match; null when cold. Reversal: always null.
+     */
+    public synchronized List<FlowCatalog.SongRow> peekWarm(int gen) {
+        if (cached != null && !cached.isEmpty() && libraryGen == gen) return cached;
+        return null;
+    }
+
+    /**
+     * 2026-07-20 — Install SongRows built off-thread (e.g. MusicLibraryStore.loadAll → Flow).
+     * Layman: remember the Flow list after a background DB read without filling customLibrary.
+     * Technical: replaces cache + searchCached; MemoryRelease.dropFlowDuplicates → {@link #invalidate}.
+     * Reversal: only {@link #rows(List, int)} from customLibrary.
+     */
+    public synchronized List<FlowCatalog.SongRow> replace(List<FlowCatalog.SongRow> rows, int gen) {
+        if (rows == null) rows = Collections.emptyList();
+        List<FlowCatalog.SongRow> copy = new ArrayList<FlowCatalog.SongRow>(rows.size());
+        for (int i = 0; i < rows.size(); i++) {
+            FlowCatalog.SongRow r = rows.get(i);
+            if (r != null) copy.add(r);
+        }
+        cached = Collections.unmodifiableList(copy);
+        searchCached = buildSearchRows(cached, null);
+        libraryGen = gen;
+        return cached;
+    }
+
     /** Rows with genre for {@link LibrarySearch#searchWithGenre}. */
     public synchronized List<LibrarySearch.SearchRow> searchRows(List<MainActivity.SongItem> library, int gen) {
         rows(library, gen);
@@ -50,9 +80,13 @@ public final class FlowLibraryRows {
     static FlowCatalog.SongRow toRow(MainActivity.SongItem song) {
         String genre = song.genre != null ? song.genre : "";
         String yearLabel = song.year > 0 ? String.valueOf(song.year) : "";
-        return new FlowCatalog.SongRow(song.file, song.title, song.artist, song.album,
-                song.albumArtist, song.file != null ? song.file.lastModified() : 0L,
+        // 2026-07-19 — Use SongItem.mtimeMs; was file.lastModified() on every row-cache rebuild.
+        FlowCatalog.SongRow row = new FlowCatalog.SongRow(song.file, song.title, song.artist, song.album,
+                song.albumArtist, song.effectiveMtimeMs(),
                 song.trackNumber, genre, song.year, yearLabel);
+        // 2026-07-20 — Carry length for Flow Length sort.
+        row.durationMs = song.durationMs != null ? song.durationMs : "";
+        return row;
     }
 
     private static List<LibrarySearch.SearchRow> buildSearchRows(List<FlowCatalog.SongRow> rows,

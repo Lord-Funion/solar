@@ -1,8 +1,0 @@
-com.solar.launcher.globalcontext.global-context-modal-pngs-0 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/global-context-modal/build/generated/res/pngs/debug
-com.solar.launcher.globalcontext.global-context-modal-resValues-1 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/global-context-modal/build/generated/res/resValues/debug
-com.solar.launcher.globalcontext.global-context-modal-packageDebugResources-2 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/global-context-modal/build/intermediates/incremental/debug/packageDebugResources/merged.dir
-com.solar.launcher.globalcontext.global-context-modal-packageDebugResources-3 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/global-context-modal/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
-com.solar.launcher.globalcontext.global-context-modal-debug-4 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/global-context-modal/build/intermediates/merged_res/debug/mergeDebugResources
-com.solar.launcher.globalcontext.global-context-modal-debug-5 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/global-context-modal/src/debug/res
-com.solar.launcher.globalcontext.global-context-modal-main-6 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/global-context-modal/src/main/res
-com.solar.launcher.globalcontext.global-context-modal-debug-7 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/packaged_res/debug/packageDebugResources

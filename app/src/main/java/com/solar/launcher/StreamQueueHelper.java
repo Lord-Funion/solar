@@ -2,6 +2,7 @@ package com.solar.launcher;
 
 import com.solar.launcher.deezer.DeezerCache;
 import com.solar.launcher.soulseek.ReachCache;
+import com.solar.launcher.youtube.YouTubePlayCache;
 
 import java.io.File;
 
@@ -9,9 +10,17 @@ import java.io.File;
 public final class StreamQueueHelper {
     private StreamQueueHelper() {}
 
+    /**
+     * True for Reach / Deezer / YouTube play-cache temps (not library Keep/Save files).
+     * Layman: streaming downloads that should vanish when off the queue.
+     * Was: Reach + Deezer only. Reversal: drop YouTubePlayCache check.
+     * 2026-07-21
+     */
     public static boolean isStreamTempFile(File appCacheRoot, File f) {
         if (f == null || appCacheRoot == null) return false;
-        return ReachCache.isTempFile(appCacheRoot, f) || DeezerCache.isTempFile(appCacheRoot, f);
+        return ReachCache.isTempFile(appCacheRoot, f)
+                || DeezerCache.isTempFile(appCacheRoot, f)
+                || YouTubePlayCache.isTempFile(appCacheRoot, f);
     }
 
     public static boolean isLibraryMusicFile(File musicRoot, File appCacheRoot, File f) {

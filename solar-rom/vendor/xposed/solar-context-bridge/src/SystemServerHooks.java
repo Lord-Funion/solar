@@ -432,6 +432,10 @@ final class SystemServerHooks {
     }
 
     private static void clearPowerLongPressState() {
+        // 2026-07-20 — Snapshot before clear: cancel spinner only if menu never opened.
+        boolean wasTracking = powerTracking;
+        boolean menuOpened = powerLongFired;
+        Context ctxForCancel = resolveContext(phoneWindowManagerRef);
         boolean restartWasFired = powerRestartFired;
         powerLongFired = false;
         powerRestartFired = false;
@@ -446,6 +450,12 @@ final class SystemServerHooks {
         }
         if (!restartWasFired) {
             SolarRescueHoldClient.disarm();
+        }
+        // Layman: let go of Power before Options → stop the status spinner.
+        // Tech: mirror ContextHoldThrobberGate.shouldClearOnHoldCancel (bridge APK has no app class).
+        // Reversal: drop cancel broadcast; spinner stays until auto-end timeout.
+        if (wasTracking && !menuOpened) {
+            SolarOverlayClient.cancelInAppContextHoldThrobber(ctxForCancel);
         }
     }
 
@@ -574,6 +584,10 @@ final class SystemServerHooks {
                 if (forceSleep) {
                     triggerGoToSleep(pwmThis);
                 }
+                // 2026-07-20 — Short Power tap: drop Options hold spinner (menu never opened).
+                // Layman: quick press-and-release stops the spinner like a cancelled Back-hold.
+                // Reversal: leave spinner until auto-end; only clearPowerLongPressState cancels.
+                SolarOverlayClient.cancelInAppContextHoldThrobber(ctx);
                 powerTracking = false;
                 cachedPowerLongFg = null;
                 powerDownAt = 0L;
@@ -610,6 +624,10 @@ final class SystemServerHooks {
         // Solar fg only — never schedule modal arms that set powerLongFired over 3P apps.
         if (com.solar.input.policy.GlobalInputPolicy.shouldOfferPowerLongModal(
                 fg, allowRockboxPowerLongOverlay)) {
+            // 2026-07-20 — Spinner during Power-hold wait (parity with Back KEY_DOWN arm).
+            // Layman: press Power for Options and the status spinner starts right away.
+            // Was: spinner only after OPEN_CONTEXT_MENU. Reversal: drop armInApp call.
+            SolarOverlayClient.armInAppContextHoldThrobber(ctx);
             mainHandler.postDelayed(powerLongRunnable,
                     com.solar.input.policy.GlobalInputPolicy.powerModalHoldMsForPackage(fg));
         }

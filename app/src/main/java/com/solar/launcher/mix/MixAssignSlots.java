@@ -3,10 +3,11 @@ package com.solar.launcher.mix;
 import java.io.File;
 
 /**
- * Assign-browse slot math — PREV/NEXT/PLAY bind tracks 1–3.
- * Layman: pick up to three songs before the mix starts.
+ * Assign-browse slot math — PREV/NEXT bind tracks 1–2 (DECK_COUNT).
+ * Layman: pick up to two songs before the mix starts.
  * Technical: pure helpers for unit tests; no UI.
- * 2026-07-19
+ * Was: PREV/NEXT/PLAY bind 1–3. Reversal: slot 2 + Play bind.
+ * 2026-07-19 / 2026-07-21 Stems/Mix sanity
  */
 public final class MixAssignSlots {
     public static final int SLOT_COUNT = MixSession.DECK_COUNT;
@@ -16,7 +17,7 @@ public final class MixAssignSlots {
     private MixAssignSlots() {}
 
     /**
-     * Bind file into slot (0..2). Replaces existing. Null clears.
+     * Bind file into slot (0..DECK_COUNT-1). Replaces existing. Null clears.
      * @return toast-friendly 1-based slot, or 0 if invalid
      */
     public static int bind(File[] slots, int slotIndex, File track) {

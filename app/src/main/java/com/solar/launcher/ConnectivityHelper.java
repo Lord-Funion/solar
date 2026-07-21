@@ -144,15 +144,19 @@ public final class ConnectivityHelper {
         return reachPeerOk;
     }
 
-    /** Get Music home shortcut: Deezer and/or Reach when configured and reachable. */
+    /**
+     * Get Music home shortcut: Deezer and/or Reach when configured and reachable.
+     * 2026-07-19 — Null prefs: Soulseek treated OFF (hard opt-in); Deezer from runtime flags only.
+     * Was: also (reachEnabled && login && peer). Reversal: restore that OR branch.
+     */
     public static boolean isGetMusicShortcutAvailable(SharedPreferences prefs) {
         if (prefs != null) {
             return GetMusicSources.anyAvailable(prefs,
                     ReachPolicy.isSoulseekActive(prefs),
                     ReachPolicy.isDeezerActive(prefs));
         }
-        return (deezerEnabled && deezerLoginOk)
-                || (reachEnabled && reachLoginOk && reachPeerOk);
+        // No prefs snapshot — do not unlock via Soulseek runtime flags alone.
+        return deezerEnabled && deezerLoginOk;
     }
 
     /** Active route is cellular — Soulseek peer TCP is usually blocked (CG-NAT). */
@@ -199,19 +203,30 @@ public final class ConnectivityHelper {
 
     public static boolean shouldShowHomeShortcut(Context context, String id) {
         if (context == null) return shouldShowHomeShortcut(id, false, false, false);
+        SharedPreferences prefs = context.getSharedPreferences("SOLAR_SETTINGS", Context.MODE_PRIVATE);
         return shouldShowHomeShortcut(id,
                 isOnline(context),
                 hasLocalNetwork(context),
-                PodcastLibrary.hasSavedContent());
+                PodcastLibrary.hasSavedContent(),
+                prefs);
     }
 
     static boolean shouldShowHomeShortcut(String id, boolean internetAvailable,
             boolean localNetworkAvailable, boolean podcastsSaved) {
+        return shouldShowHomeShortcut(id, internetAvailable, localNetworkAvailable, podcastsSaved, null);
+    }
+
+    /**
+     * 2026-07-19 — Get Music shortcut uses prefs when present (Soulseek hard opt-in).
+     * Was: isGetMusicShortcutAvailable(null) always. Reversal: null-only path.
+     */
+    static boolean shouldShowHomeShortcut(String id, boolean internetAvailable,
+            boolean localNetworkAvailable, boolean podcastsSaved, SharedPreferences prefs) {
         if (id == null) return false;
         id = HomeMenuConfig.migrateIdStatic(id);
         if (HomeMenuConfig.ID_MORE.equals(id)) return true;
         if (HomeMenuConfig.ID_SOULSEEK.equals(id)) {
-            return internetAvailable && isGetMusicShortcutAvailable(null);
+            return internetAvailable && isGetMusicShortcutAvailable(prefs);
         }
         if (itemNeedsInternetForDiscovery(id)) return internetAvailable;
         if (itemNeedsLocalNetwork(id)) return localNetworkAvailable;

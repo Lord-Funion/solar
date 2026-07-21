@@ -123,4 +123,69 @@ public class UsbMassStorageControllerTest {
             throw new AssertionError("session should clear without device");
         }
     }
+
+    /**
+     * 2026-07-20 — After confirmed unplug, residual export must not re-lock eject UI.
+     * 2026-07-20 — Android owns USB UI unless Solar Turn on / auto-connect armed the session.
+     * Layman: leftover disk mode after unplug must not bounce the “USB storage on” screen.
+     */
+    @Test
+    public void kernelExportAloneDoesNotLockUi_solarOwnsOnly() {
+        // Export without Solar session → Android SystemUI owns the dialog; Solar stays out.
+        if (UsbMassStorageController.isUiActiveForTest(
+                false, false, false, false, true, false, false)) {
+            throw new AssertionError("kernel export alone must not lock Solar UI");
+        }
+        if (UsbMassStorageController.isUiActiveForTest(
+                false, false, false, true, false, false, false)) {
+            throw new AssertionError("cached export alone must not lock Solar UI");
+        }
+        if (UsbMassStorageController.isUiActiveForTest(
+                false, false, false, true, true, true, false)) {
+            throw new AssertionError("post-unplug ignore + export must stay unlocked");
+        }
+        if (!UsbMassStorageController.isUiActiveForTest(
+                false, false, true, false, false, false, false)) {
+            throw new AssertionError("Solar user session must lock UI");
+        }
+        if (!UsbMassStorageController.isUiActiveForTest(
+                true, false, false, false, false, false, false)) {
+            throw new AssertionError("explicit Solar lock flag must lock UI");
+        }
+        if (!UsbMassStorageController.isUiActiveForTest(
+                false, true, false, false, false, false, false)) {
+            throw new AssertionError("Solar eject screen must count as UI-active");
+        }
+    }
+
+    /** 2026-07-20 — Discharging means cable power is gone; never keep Solar USB UI blocked. */
+    @Test
+    public void dischargingForcesUiInactiveEvenWithStaleSolarFlags() {
+        if (UsbMassStorageController.isUiActiveForTest(
+                true, true, true, true, true, false, true)) {
+            throw new AssertionError("discharging must unlock Solar USB UI blocks");
+        }
+        if (UsbMassStorageController.isUiActiveForTest(
+                false, false, true, false, true, false, true)) {
+            throw new AssertionError("discharging must clear armed-session UI lock");
+        }
+    }
+
+    /** 2026-07-20 — Unplug ignore arms/clears without needing Android SystemClock mocks. */
+    @Test
+    public void exportUiIgnoreArmsOnUnplugAndClears() {
+        UsbMassStorageController.clearExportUiIgnoreAfterUnplug();
+        if (UsbMassStorageController.shouldIgnoreExportForUi()) {
+            throw new AssertionError("ignore starts off");
+        }
+        UsbMassStorageController.markExportUiIgnoredAfterUnplug();
+        if (!UsbMassStorageController.shouldIgnoreExportForUi()) {
+            throw new AssertionError("confirmed unplug must ignore residual export");
+        }
+        // markUserSessionActive also clears this (Turn on); host tests cannot call SystemClock.
+        UsbMassStorageController.clearExportUiIgnoreAfterUnplug();
+        if (UsbMassStorageController.shouldIgnoreExportForUi()) {
+            throw new AssertionError("clear must drop export ignore");
+        }
+    }
 }

@@ -20,9 +20,11 @@ import com.solar.launcher.platform.PlatformPrepWizardActivity;
 /**
  * 2026-07-14 — Portrait splash that preloads MainActivity off the UI thread on weak A5 SoCs.
  * 2026-07-16 — Full-screen “Getting things ready…”; routes first-boot prep to visible wizard.
+ * 2026-07-20 — Phone chrome phones stay portrait (was: forced landscape like Y1).
  * Layman: never leave a blank black box while Solar sets itself up.
  * Tech: Class.forName on worker; optional PlatformPrepWizard before MainActivity.
- * Reversal: handOff always starts MainActivity; splash text “Solar” only.
+ * Rooted phones: same PlatformPrep ladder as Y1/Y2 (no A5-style skip) when wizard gates.
+ * Reversal: handOff always starts MainActivity; splash text “Solar” only; drop chrome portrait.
  */
 public class SolarLaunchActivity extends Activity {
 
@@ -36,16 +38,9 @@ public class SolarLaunchActivity extends Activity {
         // #region agent log
         Log.e(TAG, "SolarLaunchActivity.onCreate ENTER isA5=" + DeviceFeatures.isA5());
         // #endregion
-        if (DeviceFeatures.isA5()) {
-            try {
-                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-            } catch (Exception ignored) {}
-            LandscapeOrientationGuard.enforceA5Orientation(this);
-        } else {
-            try {
-                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-            } catch (Exception ignored) {}
-        }
+        // 2026-07-20 — Tall ClassiPod shell / A5: portrait; Y1/Y2 panel: landscape.
+        // Was: non-A5 always landscape (phones spun sideways before MainActivity).
+        applyLaunchOrientation();
         super.onCreate(savedInstanceState);
         setContentView(buildSplash());
         // #region agent log
@@ -96,6 +91,31 @@ public class SolarLaunchActivity extends Activity {
                 });
             }
         }, "SolarMainPreload").start();
+    }
+
+    /**
+     * 2026-07-20 — Lock splash the same way MainActivity will (chrome portrait / A5 / Y1 landscape).
+     * Layman: phone shell stays upright; tiny Y1 panel stays sideways.
+     * Tech: PhoneChromePolicy → portrait; else A5 guard or landscape.
+     * Reversal: restore isA5? portrait : landscape only.
+     */
+    private void applyLaunchOrientation() {
+        try {
+            if (com.solar.launcher.phone.PhoneChromePolicy.active(this)) {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                return;
+            }
+        } catch (Throwable ignored) {}
+        if (DeviceFeatures.isA5()) {
+            try {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            } catch (Exception ignored) {}
+            LandscapeOrientationGuard.enforceA5Orientation(this);
+            return;
+        }
+        try {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        } catch (Exception ignored) {}
     }
 
     /**

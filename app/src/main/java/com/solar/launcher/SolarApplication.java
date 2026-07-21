@@ -38,15 +38,45 @@ public class SolarApplication extends Application {
     public void onCreate() {
         super.onCreate();
         sApp = this;
-        // 2026-07-16 — Y1 RAM gate: init + process thrash log + system trim callbacks.
-        // Reversal: remove LowMemoryGate block; drop onTrimMemory/onLowMemory overrides.
+        // #region agent log
+        // 2026-07-20 — Tag wheel samples with family + short serial so 3-device A/B is readable.
+        try {
+            String serial = android.os.Build.SERIAL;
+            if (serial == null) serial = "?";
+            String shortSerial = serial.length() > 6 ? serial.substring(serial.length() - 6) : serial;
+            String fam = DeviceFeatures.isY2() ? "Y2" : (DeviceFeatures.isA5() ? "A5" : "Y1");
+            String tag = fam + "-" + shortSerial;
+            DebugFb1dc1Log.setDeviceTag(tag);
+            // #region agent log
+            // 2026-07-20 — a177c4 scroll hunt: same device tag + poison-logger snapshot.
+            DebugA177c4Log.setDeviceTag(tag);
+            DebugA177c4Log.logPoisonFlags();
+            // 2026-07-20 — 0705ff large-lib dial hunt: residency + applyMs vs empty lib.
+            Debug0705ffLog.setDeviceTag(tag);
+            Debug0705ffLog.logPoisonFlags();
+            // 2026-07-20 — 9d0a7a: long-list hop / refresh (segment notify + section index).
+            Debug9d0a7aLog.setDeviceTag(tag);
+            Debug9d0a7aLog.logBoot();
+            // #endregion
+        } catch (Throwable ignored) {}
+        // #endregion
+        // 2026-07-16/20 — RAM gate + real MemoryRelease eviction ladder.
+        // Reversal: remove LowMemoryGate + MemoryRelease; drop onTrimMemory/onLowMemory overrides.
         try {
             LowMemoryGate.init(this);
             LowMemoryGate.noteProcessStart();
+            // Warm solar-audio looper early so solo fades never wait on first get(). 2026-07-20
+            try {
+                com.solar.launcher.audio.SolarTransport.get();
+            } catch (Throwable ignored) {}
             registerComponentCallbacks(new ComponentCallbacks2() {
                 @Override
                 public void onTrimMemory(int level) {
                     LowMemoryGate.onSystemTrim(level);
+                    // 2026-07-20 — Free rebuildable caches (was pressure-gen only).
+                    try {
+                        MemoryRelease.release(level);
+                    } catch (Throwable ignored) {}
                     if (level >= TRIM_MEMORY_RUNNING_LOW
                             || level == TRIM_MEMORY_MODERATE
                             || level == TRIM_MEMORY_COMPLETE) {
@@ -64,6 +94,9 @@ public class SolarApplication extends Application {
                 @Override
                 public void onLowMemory() {
                     LowMemoryGate.onLowMemory();
+                    try {
+                        MemoryRelease.release(TRIM_MEMORY_COMPLETE);
+                    } catch (Throwable ignored) {}
                     try {
                         com.solar.launcher.diag.SolarDiagFeatureLog.warn("app",
                                 "onLowMemory " + LowMemoryGate.snapshotOneLine(SolarApplication.this));
@@ -101,6 +134,14 @@ public class SolarApplication extends Application {
             d.put("propValue", prop);
             d.put("overlayProcess", isOverlayProcess());
             DebugB4208eLog.log("SolarApplication.onCreate", "boot family probe", "A,F", d);
+            // #region agent log
+            org.json.JSONObject boot = new org.json.JSONObject();
+            boot.put("isY1", DeviceFeatures.isY1());
+            boot.put("isY2", DeviceFeatures.isY2());
+            boot.put("overlayProcess", isOverlayProcess());
+            boot.put("uptimeMs", android.os.SystemClock.elapsedRealtime());
+            DebugA1f293Log.log(this, "SolarApplication.onCreate", "app boot", "A,D", boot);
+            // #endregion
         } catch (Throwable ignored) {}
         // #endregion
         // 2026-07-14 — A5: lock system rotation to natural portrait before heavy Application I/O.

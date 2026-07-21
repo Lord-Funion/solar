@@ -85,8 +85,13 @@ public final class UsbStorageOverlayReceiver extends BroadcastReceiver {
             d.put("lockOnly", lockOnly);
             d.put("fg", ExternalInputHandoff.getForegroundPackageName(context));
             d.put("exported", UsbMassStorageController.isMassStorageExported());
+            d.put("stockUi", UsbStorageSessionFlags.preferStockUsbUi(context));
+            d.put("auto", UsbStorageSessionFlags.isAutoConnectEnabled(context));
+            d.put("offerPrompt", UsbStorageSessionFlags.shouldOfferUsbConnectPrompt(context));
             Debug266f21Log.log(context, "UsbStorageOverlayReceiver.routeToSolar",
                     "MainActivity USB handoff", "USB-SOLAR", d);
+            Debug050a40Log.log(context, "UsbStorageOverlayReceiver.routeToSolar",
+                    "handoff entry", "H2,H3", d);
         } catch (Exception ignored) {}
         // #endregion
 
@@ -102,9 +107,24 @@ public final class UsbStorageOverlayReceiver extends BroadcastReceiver {
         }
 
         if (UsbHostSessionPolicy.hasUserDismissedThisSession(context)) {
+            // #region agent log
+            try {
+                Debug050a40Log.log(context, "UsbStorageOverlayReceiver.routeToSolar",
+                        "skip dismissed session", "H3", new org.json.JSONObject());
+            } catch (Exception ignored) {}
+            // #endregion
             return;
         }
         if (!UsbStorageSessionFlags.shouldOfferUsbConnectPrompt(context)) {
+            // #region agent log
+            try {
+                org.json.JSONObject d = new org.json.JSONObject();
+                d.put("stockUi", UsbStorageSessionFlags.preferStockUsbUi(context));
+                d.put("offerPrompt", false);
+                Debug050a40Log.log(context, "UsbStorageOverlayReceiver.routeToSolar",
+                        "skip — Solar prompt off (stock expected)", "H2", d);
+            } catch (Exception ignored) {}
+            // #endregion
             return;
         }
         if (!UsbHostSessionPolicy.isPromptAllowedAfterBootSettle(context)) {

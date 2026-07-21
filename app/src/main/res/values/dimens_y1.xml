@@ -48,11 +48,12 @@
     <dimen name="y1_player_art_cover_height">225dp</dimen>
     <dimen name="y1_player_progress_height">34dp</dimen>
     <dimen name="y1_transport_volume_height">12dp</dimen>
-    <!-- 2026-07-18 — Larger NP tip + marquee; was 14dp cramped above scrub. -->
-    <dimen name="y1_transport_hint_height">20dp</dimen>
+    <!-- 2026-07-20 — Tip band tall enough for 15sp + ImageSpan glyphs (was 20dp → AT_MOST 14dp clip). -->
+    <!-- Reversal: 20dp hint + 48dp transport (progress+14 empty — sliced letters). -->
+    <dimen name="y1_transport_hint_height">32dp</dimen>
     <dimen name="y1_transport_hint_text_size">15sp</dimen>
-    <!-- Bottom chrome band — scrub gravity-bottom. -->
-    <dimen name="y1_player_transport_height">48dp</dimen>
+    <!-- Bottom chrome = scrub 34 + tip 32 (TransportHintChromePolicy.requiredTransportHeight). -->
+    <dimen name="y1_player_transport_height">66dp</dimen>
     <!-- Video: scrub row only -->
     <dimen name="y1_video_transport_height">34dp</dimen>
     <dimen name="y1_settings_menu_width">218dp</dimen>

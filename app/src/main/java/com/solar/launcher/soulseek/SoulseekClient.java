@@ -527,13 +527,13 @@ public final class SoulseekClient extends Thread {
       }
       return "NAT-PMP: port " + r.publicPort + " mapped";
     }
-    if ("no_gateway".equals(r.status)) return "NAT-PMP: no gateway — check Wi‑Fi";
-    if ("no_local_ip".equals(r.status)) return "NAT-PMP: no local IP — connect Wi‑Fi";
+    if ("no_gateway".equals(r.status)) return "NAT-PMP: no gateway: check Wi‑Fi";
+    if ("no_local_ip".equals(r.status)) return "NAT-PMP: no local IP: connect Wi‑Fi";
     if ("map_failed".equals(r.status)) {
       if (r.gatewayIp != null) return "NAT-PMP: router declined (gw " + r.gatewayIp + ")";
-      return "NAT-PMP: router declined — forward manually";
+      return "NAT-PMP: router declined: forward manually";
     }
-    return "NAT-PMP: unavailable — forward port " + listenPort;
+    return "NAT-PMP: unavailable: forward port " + listenPort;
   }
 
   public boolean isPeerDenied(String peerUser) {
@@ -1462,7 +1462,7 @@ public final class SoulseekClient extends Thread {
     while (System.currentTimeMillis() < deadline && !downloadCancelled) {
       if (cantConnectTokens.contains(connectToken)) {
         phaseLog("dl3", false, "CantConnectToPeer");
-        throw new IOException("Peer cannot connect — check NAT / port forward");
+        throw new IOException("Peer cannot connect: check NAT / port forward");
       }
       Socket peer = directWinner.poll();
       if (peer != null) return peer;
@@ -1575,7 +1575,7 @@ public final class SoulseekClient extends Thread {
             && !downloadFinished && !xferInProgress) {
           pendingDownload = null;
           phaseLog("dl7", false, "inbound F timeout");
-          throw new IOException("File transfer timed out — forward TCP port " + reportedListenPort);
+          throw new IOException("File transfer timed out: forward TCP port " + reportedListenPort);
         }
         downloadLock.wait(500);
       }

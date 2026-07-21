@@ -90,21 +90,20 @@ public final class FlowView extends View {
     /** Debug: skip floor reflection draws — compare carousel perf on device. */
     private boolean noReflections = false;
     /** Gloss peak for floor mirror — uniform via {@link #reflectionAlphaForDraw}. */
-    private static final float FLOW_REFLECTION_ALPHA_Y2 = 0.50f;
-    /** 2026-07-11 — Y1 half of Y2 gloss (MT6572 / dimmer LCD); Y2 stays at {@link #FLOW_REFLECTION_ALPHA_Y2}. */
-    private static final float FLOW_REFLECTION_ALPHA_Y1 = 0.25f;
+    private static final float FLOW_REFLECTION_ALPHA = 0.50f;
 
     /**
-     * 2026-07-11 — Base floor-reflection opacity for Flow + NP.
-     * Y1 = half of Y2 (was shared 0.50 — too hot on Y1). Reversal: always return 0.50f.
+     * 2026-07-20 — Base floor-reflection opacity for Flow + NP (Y1 + Y2 same).
+     * Was: Y1 half (0.25) for dimmer LCD — made fine center bands look weaker than coarse sides.
+     * Reversal: return DeviceFeatures.isY1() ? 0.25f : 0.50f.
      */
     public static float flowReflectionBaseAlpha() {
-        return DeviceFeatures.isY1() ? FLOW_REFLECTION_ALPHA_Y1 : FLOW_REFLECTION_ALPHA_Y2;
+        return FLOW_REFLECTION_ALPHA;
     }
-    /** Side slots use fewer bands — center keeps full gloss; cuts drawBitmap cost while scrolling. */
-    /** Center cover reflection bands — full quality on the focused carousel slot. */
-    private static final int CENTER_REFLECTION_MAX_BANDS = 36;
-    private static final int SIDE_REFLECTION_MAX_BANDS = 12;
+    /** Full-quality floor bands when carousel is settled (center + sides match). */
+    static final int CENTER_REFLECTION_MAX_BANDS = 36;
+    /** Coarse bands while scrolling — every visible slot uses this together. */
+    static final int SIDE_REFLECTION_MAX_BANDS = 12;
     /** 2026-07-05: Y1 uses same in-slot floor gloss as Y2 — screen-space path looked coarse on MT6572. Rollback: SDK_INT <= 17. */
     private static final boolean REFLECTION_SCREEN_SPACE = false;
     private boolean debugTheme;
@@ -238,6 +237,16 @@ public final class FlowView extends View {
         bakeCache.setListener(new FlowCoverBakeCache.BakeListener() {
             @Override
             public void onBaked(String bakeKey) {
+                // 2026-07-20 — Under RAM pressure drop raw cover once bake exists (one residency).
+                // Layman: keep the shiny tile, free the plain picture when memory is tight.
+                // Reversal: always keep both; remove LowMemoryGate + cache.drop.
+                try {
+                    if (cache != null
+                            && com.solar.launcher.LowMemoryGate.shouldDeferHeavyWork(null)) {
+                        String coverKey = FlowCoverBakeCache.coverKeyFromBakeKey(bakeKey);
+                        if (coverKey != null) cache.drop(coverKey);
+                    }
+                } catch (Throwable ignored) {}
                 postInvalidateOnAnimation();
                 if (callback != null) callback.onCoverBakeReady(bakeKey);
             }
@@ -347,6 +356,15 @@ public final class FlowView extends View {
             scheduleBakesAround(engine.getFocusIndex(), 2);
         }
         invalidate();
+    }
+
+    /**
+     * 2026-07-20 — MemoryRelease: drop bake cache only (covers owned by FlowCoverCache).
+     * Layman: free pre-drawn Flow tiles when RAM is tight.
+     * Reversal: no-op.
+     */
+    public void releaseBakeCacheForMemory() {
+        bakeCache.releaseForMemoryPressure();
     }
 
     public boolean isNoReflections() {
@@ -1800,6 +1818,11 @@ public final class FlowView extends View {
             }
         }
         canvas.restore();
+        // 2026-07-20 — Edge tip above flipped cover (view space, after 3D restore).
+        // Layman: when you scroll to the first/last song, arrows tip you to keep going for covers.
+        if (backFace && isVisualCenter) {
+            drawBackListEdgeHint(canvas, drawRect);
+        }
         // 2026-07-05: Y1 — floor mirror after restore; slotMatrix maps clip bands to tilted side covers.
         if (deferScreenReflection && bmp != null && !bmp.isRecycled()) {
             float reflectionAlpha = reflectionAlphaForDraw(slotAlpha, handoffReflectRevealAlpha, isVisualCenter);
@@ -1808,6 +1831,31 @@ public final class FlowView extends View {
                     reflectH, metrics.reflectTable, reflectionPaint, matrix, bands);
         }
         coverPaint.setAlpha(255);
+    }
+
+    /**
+     * 2026-07-20 — Paint ↻/↺ “covers” just above the flipped album card.
+     * Layman: tip sits on top of the open track list, not inside it.
+     * Tech: only after userScrolledBack + at edge (FlowListEdgeHintPolicy).
+     * Reversal: no-op; remove call from drawCoverAt.
+     */
+    private void drawBackListEdgeHint(Canvas canvas, RectF coverRect) {
+        if (coverRect == null) return;
+        String mode = flip.edgeHintMode();
+        String label = FlowListEdgeHintPolicy.hintLabel(mode);
+        if (label == null || label.length() == 0) return;
+        float density = getResources().getDisplayMetrics().density;
+        float textPx = Math.max(11f * density, coverRect.width() * 0.055f);
+        textPaint.setTextAlign(Paint.Align.CENTER);
+        textPaint.setTextSize(textPx);
+        textPaint.setTypeface(Typeface.create(ThemeManager.getFlowFont(debugTheme), Typeface.NORMAL));
+        textPaint.setColor(ThemeManager.getTextColorSecondary());
+        textPaint.setAlpha(230);
+        float y = coverRect.top - textPx * 0.35f;
+        if (y < textPx) y = textPx; // keep on-screen under status
+        canvas.drawText(label, coverRect.centerX(), y, textPaint);
+        textPaint.setAlpha(255);
+        textPaint.setColor(0xFFFFFFFF);
     }
 
     private void drawDynamicCoverAndReflection(Canvas canvas, Bitmap bmp, RectF rect, float slotAlpha,
@@ -1965,13 +2013,23 @@ public final class FlowView extends View {
         return handoffSideRevealAlpha;
     }
 
-    /** Side slots use fewer bands; while scrolling all slots use side count — MT6572 draw budget. */
-    private int reflectionBandCount(boolean isVisualCenter) {
-        // 2026-07-05 — Cheap coarse mirror during wheel scroll; full center gloss when settled.
-        if (engine.isCarouselScrolling()) {
+    /**
+     * 2026-07-20 — Band count for a carousel slot.
+     * Settled: same full gloss on center and sides (Y1 coarse sides looked brighter than center).
+     * Scrolling: every slot uses the cheap band count together.
+     * Reversal: settled side → SIDE_REFLECTION_MAX_BANDS (center-only fine).
+     */
+    static int reflectionBandCountForSlot(boolean isVisualCenter, boolean carouselScrolling) {
+        if (carouselScrolling) {
             return SIDE_REFLECTION_MAX_BANDS;
         }
-        return isVisualCenter ? CENTER_REFLECTION_MAX_BANDS : SIDE_REFLECTION_MAX_BANDS;
+        // Keep isVisualCenter in the signature for callers; settled gloss is slot-uniform.
+        return CENTER_REFLECTION_MAX_BANDS;
+    }
+
+    /** Side slots use fewer bands; while scrolling all slots use side count — MT6572 draw budget. */
+    private int reflectionBandCount(boolean isVisualCenter) {
+        return reflectionBandCountForSlot(isVisualCenter, engine.isCarouselScrolling());
     }
 
     /** Floor reflection on every visible cover unless debug No Reflections is on. */

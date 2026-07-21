@@ -1,16 +1,20 @@
 package com.solar.launcher.soulseek;
 
 import android.app.Activity;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AbsListView;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import com.solar.launcher.A5FocusConfirm;
 import com.solar.launcher.R;
 import com.solar.launcher.theme.ThemeManager;
+import com.solar.launcher.ui.RowBusyChrome;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,22 +52,34 @@ public final class SoulseekBrowseAdapter extends BaseAdapter {
     private int selectedPosition = -1;
     private String statusText = "";
     private boolean statusMode = false;
+    /** 2026-07-20 — Inline spinner only while network load (not empty/error status). */
+    private boolean statusBusy = false;
 
     public SoulseekBrowseAdapter(Activity activity, Listener listener) {
         this.activity = activity;
         this.listener = listener;
     }
 
+    /**
+     * 2026-07-20 — Placeholder row with inline throbber while peer library fetches.
+     * Layman: show “Loading…” with a tiny spinner until folders arrive.
+     */
     public void setLoading(String message) {
         statusMode = true;
+        statusBusy = true;
         statusText = message != null ? message : "";
         allEntries.clear();
         visibleCount = PAGE_SIZE;
         notifyDataSetChanged();
     }
 
+    /**
+     * 2026-07-20 — Idle status (empty / error) — text only, no spinner.
+     * Was: same chrome as loading. Reversal: set statusBusy=true here too.
+     */
     public void setStatus(String message) {
         statusMode = true;
+        statusBusy = false;
         statusText = message != null ? message : "";
         allEntries.clear();
         notifyDataSetChanged();
@@ -71,6 +87,7 @@ public final class SoulseekBrowseAdapter extends BaseAdapter {
 
     public void setFolders(List<SoulseekWire.BrowseFolder> folders) {
         statusMode = false;
+        statusBusy = false;
         statusText = "";
         allEntries.clear();
         if (folders != null) {
@@ -169,14 +186,29 @@ public final class SoulseekBrowseAdapter extends BaseAdapter {
     public View getView(int position, View convertView, ViewGroup parent) {
         int type = getItemViewType(position);
         if (type == TYPE_STATUS) {
+            // 2026-07-20 — Title + optional small spinner (RowBusyChrome); recycle LinearLayout.
+            LinearLayout row;
             TextView tv;
-            if (convertView instanceof TextView) {
-                tv = (TextView) convertView;
+            ProgressBar spin;
+            if (convertView instanceof LinearLayout
+                    && convertView.findViewWithTag(RowBusyChrome.TAG_SPIN) != null) {
+                row = (LinearLayout) convertView;
+                tv = (TextView) row.getChildAt(0);
+                spin = (ProgressBar) row.findViewWithTag(RowBusyChrome.TAG_SPIN);
             } else {
-                tv = new TextView(activity);
-                tv.setLayoutParams(new AbsListView.LayoutParams(
+                row = new LinearLayout(activity);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setLayoutParams(new AbsListView.LayoutParams(
                         AbsListView.LayoutParams.MATCH_PARENT,
                         AbsListView.LayoutParams.WRAP_CONTENT));
+                tv = new TextView(activity);
+                LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                tv.setLayoutParams(titleLp);
+                row.addView(tv);
+                spin = RowBusyChrome.newSmallSpinner(activity);
+                row.addView(spin);
             }
             String text = statusText;
             if (text == null || text.isEmpty()) {
@@ -184,7 +216,10 @@ public final class SoulseekBrowseAdapter extends BaseAdapter {
             }
             tv.setText(text);
             ThemeManager.applyThemedTextStyle(tv, ThemeManager.getSubtitleTextColor());
-            return tv;
+            if (spin != null) {
+                spin.setVisibility(statusBusy ? View.VISIBLE : View.GONE);
+            }
+            return row;
         }
         if (type == TYPE_SHOW_MORE) {
             TextView tv;

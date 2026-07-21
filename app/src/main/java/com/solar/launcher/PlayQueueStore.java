@@ -101,6 +101,10 @@ public final class PlayQueueStore {
             if (seekMs >= 0) root.put("seekMs", seekMs);
             root.put("playing", playing);
             if (epoch > 0) root.put("epoch", epoch);
+            // Keep volatile in sync for same-process readers (overlay uses restore). 2026-07-20
+            lastRestoredPlaying = playing;
+            if (seekMs >= 0) lastRestoredSeekMs = seekMs;
+            if (epoch > 0) lastRestoredEpoch = epoch;
             File f = new File(dir, FILE);
             File tmp = new File(dir, FILE + ".tmp");
             BufferedWriter w = new BufferedWriter(new FileWriter(tmp));

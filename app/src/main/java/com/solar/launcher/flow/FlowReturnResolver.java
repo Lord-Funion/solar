@@ -31,6 +31,11 @@ public final class FlowReturnResolver {
 
     public interface Host {
         List<FlowCatalog.SongRow> libraryRows();
+        /**
+         * 2026-07-20 — Tier-0 album titles when libraryRows empty (SEGMENTED Flow shells).
+         * Reversal: return emptyList.
+         */
+        List<String> tier0AlbumTitles();
         LibraryBrowsePrefs libraryBrowsePrefs();
         List<ArtistBrowsePolicy.Track> policyTracks();
         boolean flowMultiTrackAlbumsOnly();
@@ -68,6 +73,11 @@ public final class FlowReturnResolver {
             if (origin.flowMode == FlowMode.ALBUM) {
                 catalog = FlowCatalog.buildAlbums(host.libraryRows(), host.libraryBrowsePrefs(),
                         host.policyTracks(), host.flowMultiTrackAlbumsOnly());
+                // 2026-07-20 — SEGMENTED: shells when SongRows empty.
+                if (catalog == null || catalog.isEmpty()) {
+                    catalog = com.solar.launcher.LibraryAlbumRack.buildShellsFromTitles(
+                            host.tier0AlbumTitles());
+                }
             } else {
                 catalog = FlowCatalog.build(origin.flowMode, host.libraryRows(),
                         host.libraryBrowsePrefs(), host.policyTracks(), host.musicRoot(),

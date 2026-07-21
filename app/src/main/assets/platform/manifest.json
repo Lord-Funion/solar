@@ -1,5 +1,5 @@
 {
-  "prepVersion": 19,
+  "prepVersion": 22,
   "framework": {
     "api17": {
       "appProcess": "xposed/api17-arm/app_process",
@@ -30,8 +30,8 @@
       "systemApk": "/system/app/SolarContextBridgeY1.apk",
       "required": true,
       "device": "y1",
-      "versionCode": 1,
-      "sha256": "0e3805118318e5427c803d3d1bddfafbdd221e003ee726e03ce87f032728b00a"
+      "versionCode": 2,
+      "sha256": "3fa0303455a364496351760eae0709e686b2cf41c1cb06c41a2e8424eac092c7"
     },
     {
       "pkg": "com.solar.launcher.xposed.bridge.y2",
@@ -39,8 +39,8 @@
       "systemApk": "/system/app/SolarContextBridgeY2.apk",
       "required": true,
       "device": "y2",
-      "versionCode": 1,
-      "sha256": "132c5e2a25ce0bf2ba3e3e105b2f30ff73e2a808b90a202127099950b5fefd94"
+      "versionCode": 2,
+      "sha256": "fec091995ebf4d0549a8ef0f8d82f597afdee04e4916a8cb5566bd79e5f9ecfb"
     },
     {
       "pkg": "com.solar.launcher.xposed.themefont",

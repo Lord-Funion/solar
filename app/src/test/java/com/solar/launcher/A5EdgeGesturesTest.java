@@ -79,8 +79,8 @@ public class A5EdgeGesturesTest {
 
     @Test
     public void holdContextAtLeastSystemLongPress() {
-        // 2026-07-18 — Must be ≥ policy (350); system long-press is ~500
-        // so short taps do not open context.
+        // 2026-07-20 — Must be ≥ policy (~280); system long-press is ~500
+        // so short taps do not open context. Floor 350 keeps deliberate hold-still.
         long policy = com.solar.input.policy.GlobalInputPolicy.SOLAR_BACK_CONTEXT_HOLD_MS;
         if (A5EdgeGestures.HOLD_CONTEXT_MS < policy) {
             throw new AssertionError("hold shorter than policy " + A5EdgeGestures.HOLD_CONTEXT_MS);
@@ -103,6 +103,23 @@ public class A5EdgeGesturesTest {
         // 2026-07-14 — Menu row OnLongClick owns focus+context; edge must not steal.
         if (A5EdgeGestures.shouldArmHoldContext(true)) {
             throw new AssertionError("defer hold when child owns long-press");
+        }
+    }
+
+    @Test
+    public void contextHoldThrobberArmActionsDefined() {
+        // 2026-07-20 — Power/edge hold use these broadcasts for spinner parity with Back.
+        if (OverlayTriggers.ACTION_CONTEXT_HOLD_ARM == null
+                || OverlayTriggers.ACTION_CONTEXT_HOLD_ARM.length() == 0) {
+            throw new AssertionError("CONTEXT_HOLD_ARM action missing");
+        }
+        if (OverlayTriggers.ACTION_CONTEXT_HOLD_CANCEL == null
+                || OverlayTriggers.ACTION_CONTEXT_HOLD_CANCEL.length() == 0) {
+            throw new AssertionError("CONTEXT_HOLD_CANCEL action missing");
+        }
+        if (OverlayTriggers.ACTION_CONTEXT_HOLD_ARM.equals(
+                OverlayTriggers.ACTION_CONTEXT_HOLD_CANCEL)) {
+            throw new AssertionError("arm and cancel actions must differ");
         }
     }
 

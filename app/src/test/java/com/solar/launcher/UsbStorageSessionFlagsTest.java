@@ -21,16 +21,13 @@ public class UsbStorageSessionFlagsTest {
     }
 
     @Test
-    public void preferStockUsbUiWhenSkipAndNotAuto() {
-        // Skip Solar prompt + no auto-connect → leave Android USB dialog alone.
-        if (!UsbStorageSessionFlags.preferStockUsbUiFromPrefs(true, false)) {
-            throw new AssertionError("stock UI expected");
+    public void preferStockUsbUiAlways() {
+        // 2026-07-19 — Android always owns UsbStorageActivity (auto on or off).
+        if (!UsbStorageSessionFlags.preferStockUsbUiFromPrefs(false)) {
+            throw new AssertionError("stock UI expected when auto off");
         }
-        if (UsbStorageSessionFlags.preferStockUsbUiFromPrefs(true, true)) {
-            throw new AssertionError("auto-connect uses Solar silent path");
-        }
-        if (UsbStorageSessionFlags.preferStockUsbUiFromPrefs(false, false)) {
-            throw new AssertionError("Solar prompt path is not stock");
+        if (!UsbStorageSessionFlags.preferStockUsbUiFromPrefs(true)) {
+            throw new AssertionError("stock UI expected when auto on");
         }
     }
 

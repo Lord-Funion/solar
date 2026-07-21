@@ -111,12 +111,11 @@ public final class SolarImeFullscreenOverlay {
     /** Sync strip + input preview from controller buffer. */
     public void refresh(String title) {
         if (shellHost == null || controller == null) return;
-        String statusTitle = title != null && title.length() > 0
-                ? title : context.getString(R.string.solar_ime_label);
-        shellHost.applyShellTheme(statusTitle);
+        // 2026-07-20 — Status clock via shell; no purpose subtitle; type hint only in field.
+        shellHost.applyShellTheme(title != null ? title : "");
         String buffer = controller.getBuffer();
         String placeholder = context.getString(R.string.solar_ime_type_hint);
         String display = buffer.length() == 0 ? placeholder : buffer;
-        shellHost.getKeyboardUi().refresh(controller, statusTitle, display, buffer.length() == 0);
+        shellHost.getKeyboardUi().refresh(controller, null, display, buffer.length() == 0);
     }
 }

@@ -14,6 +14,7 @@ import android.widget.TextView;
 
 import org.json.JSONObject;
 
+import com.solar.launcher.LandscapeOrientationGuard;
 import com.solar.launcher.MainActivity;
 import com.solar.launcher.PowerActions;
 import com.solar.launcher.R;
@@ -22,8 +23,10 @@ import com.solar.launcher.theme.ThemeManager;
 /**
  * 2026-07-05 — Blocking prep wizard UI; runs SolarPlatformPrep ladder before MainActivity.
  * APK/ROM parity: user-facing face of APK self-heal; ROM flash already baked most steps at build time.
+ * 2026-07-20 — Phone chrome: portrait via LandscapeOrientationGuard (was manifest landscape only).
+ * Rooted phones: same SolarPlatformPrep ladder as Y1/Y2 — not skipped like A5.
  * When changing: SolarPlatformPrep ladder order; wheel keys via Y1InputKeys; markDismissed vs prepVersion bump.
- * Reversal: remove activity; boot goes straight to MainActivity again.
+ * Reversal: remove activity; boot goes straight to MainActivity again; hardcode landscape.
  */
 public class PlatformPrepWizardActivity extends Activity {
 
@@ -58,10 +61,26 @@ public class PlatformPrepWizardActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // 2026-07-20 — Match MainActivity: chrome phones portrait; Y1/Y2 landscape.
+        // Was: android:screenOrientation=landscape always (phones sideways during prep).
+        try {
+            LandscapeOrientationGuard.enforceForDevice(this);
+        } catch (Throwable ignored) {}
         super.onCreate(savedInstanceState);
         final boolean manual = getIntent().getBooleanExtra(EXTRA_MANUAL_REPAIR, false);
         final boolean rebootOnly = getIntent().getBooleanExtra(EXTRA_REBOOT_ONLY, false);
         firstBoot = getIntent().getBooleanExtra(EXTRA_FIRST_BOOT, false);
+        // #region agent log
+        try {
+            org.json.JSONObject d = new org.json.JSONObject();
+            d.put("manual", manual);
+            d.put("rebootOnly", rebootOnly);
+            d.put("firstBoot", firstBoot);
+            d.put("pid", android.os.Process.myPid());
+            com.solar.launcher.DebugA1f293Log.log(this, "PlatformPrepWizardActivity.onCreate",
+                    "wizard shown", "A", d);
+        } catch (Exception ignored) {}
+        // #endregion
         if (rebootOnly) {
             setContentView(R.layout.activity_platform_prep);
             bindWizardViews();
@@ -190,6 +209,18 @@ public class PlatformPrepWizardActivity extends Activity {
         }, "PlatformPrepWizard").start();
     }
 
+    /**
+     * 2026-07-20 — Re-lock portrait on chrome phones if another app twisted the panel.
+     * Layman: keep the prep screen upright on phones.
+     */
+    @Override
+    protected void onResume() {
+        super.onResume();
+        try {
+            LandscapeOrientationGuard.enforceForDevice(this);
+        } catch (Throwable ignored) {}
+    }
+
     private void updateProgress(int percent, String message) {
         if (progressBar != null) progressBar.setProgress(percent);
         if (percentView != null) percentView.setText(percent + "%");
@@ -226,16 +257,17 @@ public class PlatformPrepWizardActivity extends Activity {
             finishIntoSolar(false);
             return;
         }
-        actionReady = true;
-        actionButton.setVisibility(View.VISIBLE);
-        actionButton.requestFocus();
         switch (prepResult.outcome) {
             case REBOOT_PENDING:
-                titleView.setText(R.string.update_device_restarting);
-                subtitleView.setText(R.string.update_reboot_eta);
-                actionButton.setText(R.string.platform_prep_restart);
+                // 2026-07-19 — Auto-restart; keep “Getting things ready…” (no Restart button).
+                // Layman: player reboots itself; user just waits on the same ready screen.
+                // Was: “Restart to finish setup” + Restart now. Reversal: restore button path.
+                beginAutoRestart();
                 break;
             case PARTIAL:
+                actionReady = true;
+                actionButton.setVisibility(View.VISIBLE);
+                actionButton.requestFocus();
                 titleView.setText(R.string.platform_prep_title);
                 subtitleView.setText(getString(R.string.platform_prep_partial_message) + "\n\n"
                         + getString(R.string.platform_prep_continuing_soon));
@@ -243,6 +275,9 @@ public class PlatformPrepWizardActivity extends Activity {
                 scheduleAutoContinue();
                 break;
             case LIMITED:
+                actionReady = true;
+                actionButton.setVisibility(View.VISIBLE);
+                actionButton.requestFocus();
                 titleView.setText(R.string.platform_prep_title);
                 subtitleView.setText(getString(R.string.platform_prep_limited_message) + "\n\n"
                         + getString(R.string.platform_prep_continuing_soon));
@@ -253,6 +288,41 @@ public class PlatformPrepWizardActivity extends Activity {
                 finishIntoSolar(false);
                 return;
         }
+    }
+
+    /**
+     * Keep the getting-ready face and reboot without asking.
+     * Short delay so the UI paints before {@code reboot} kills the process.
+     */
+    private void beginAutoRestart() {
+        actionReady = false;
+        if (actionButton != null) {
+            actionButton.setVisibility(View.GONE);
+        }
+        if (titleView != null) {
+            titleView.setText(R.string.getting_things_ready);
+        }
+        if (subtitleView != null) {
+            subtitleView.setText(R.string.getting_things_ready_detail);
+        }
+        if (progressBar != null) {
+            progressBar.setProgress(100);
+        }
+        if (percentView != null) {
+            percentView.setText("100%");
+        }
+        // #region agent log
+        PlatformPrepDebugLog.log(this, "PlatformPrepWizardActivity.beginAutoRestart",
+                "auto reboot scheduled", "H-REBOOT", null);
+        // #endregion
+        mainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (isFinishing()) return;
+                // No diag prep — keep ready face until reboot; root shell restarts immediately.
+                PowerActions.restart();
+            }
+        }, 900L);
     }
 
     private void scheduleAutoContinue() {
@@ -329,6 +399,11 @@ public class PlatformPrepWizardActivity extends Activity {
     }
 
     private void dismissWizard() {
+        // 2026-07-19 — Do not leave mid auto-restart; keep getting-ready until reboot.
+        if (prepResult != null
+                && prepResult.outcome == SolarPlatformPrep.PrepOutcome.REBOOT_PENDING) {
+            return;
+        }
         finishIntoSolar(true);
     }
 

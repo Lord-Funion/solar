@@ -3,6 +3,7 @@ package com.solar.launcher.media;
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -20,10 +21,12 @@ import com.solar.launcher.ui.HardwareButtonGlyph;
  * Layman: the thin bar under Now Playing / video with time, scrub, and the “hold for Options” tip.
  * Technical: one include per screen (player + video); bind via root view to avoid duplicate IDs.
  * 2026-07-18 — Options tip uses Back glyph (+ “Power” text on Y2). Was: plain string resources.
- * Reversal: restore hint.setText(R.string.context_hold_back_*) and drop HardwareButtonGlyph call.
+ * 2026-07-20 — Tip band height via dimens (66=34+32); live hold fades + min on-screen time.
+ * Reversal: restore hint.setText(R.string.context_hold_back_*) and drop HardwareButtonGlyph call;
+ * instant show/hide live tip; 48dp transport.
  */
 public final class MediaTransportBar {
-    private static final long OVERLAY_FADE_MS = 200L;
+    private static final long OVERLAY_FADE_MS = TransportHintChromePolicy.LIVE_HOLD_FADE_MS;
     private static final long VIDEO_OVERLAY_DISMISS_MS = 3000L;
 
     private final Context ctx;
@@ -56,6 +59,8 @@ public final class MediaTransportBar {
      */
     public enum HintMode {
         NONE,
+        /** 2026-07-20 — First-play: ↻ Volume Up / ↺ Volume Down. */
+        VOLUME_ARROWS,
         HOLD_BACK_OPTIONS,
         HOLD_PLAY_FLOW
     }
@@ -67,10 +72,28 @@ public final class MediaTransportBar {
     }
 
     private OnFlowHintPresentedListener flowHintPresentedListener;
+    /**
+     * 2026-07-20 — Fired when volume-arrow tip is shown (session or volume pulse).
+     * Layman: remember “I already taught volume arrows.”
+     */
+    public interface OnVolumeTipPresentedListener {
+        void onVolumeTipPresented();
+    }
+
+    private OnVolumeTipPresentedListener volumeTipPresentedListener;
+    /** 2026-07-20 — Auto-dismiss for first-play session tip (not live hold). */
+    private Runnable sessionTipHideRunnable;
+    private boolean sessionTipActive;
     /** 2026-07-18 — Ear icon at Hearing Safety display max (keep scrolling for more). */
     private boolean lastVolShowEar;
     /** 2026-07-18 — NP live “keep holding…” tip while Back/PP is down (not volume pulse). */
     private boolean liveHoldHintActive;
+    /** 2026-07-20 — When live tip became visible (elapsedRealtime); for min on-screen time. */
+    private long liveHoldHintShownAtElapsed;
+    /** 2026-07-20 — Deferred fade-out after short Play/Pause taps. */
+    private Runnable liveHoldHideRunnable;
+    /** 2026-07-20 — Bumps on show/cancel so fade endAction cannot GONE a re-shown tip. */
+    private int liveHoldFadeGen;
 
     public MediaTransportBar(Context context, View transportRoot) {
         ctx = context;
@@ -114,14 +137,22 @@ public final class MediaTransportBar {
 
     /**
      * 2026-07-18 — Rebuild tip spannable for current HintMode (theme tint).
+     * 2026-07-20 — VOLUME_ARROWS + Press-Back Options copy (was hold-only Options/Flow).
      * Layman: Options Back glyph or Flow Play/Pause glyph above the scrub bar.
      */
     private void refreshHintText() {
         if (hint == null) return;
-        if (hintMode == HintMode.HOLD_PLAY_FLOW) {
-            hint.setText(HardwareButtonGlyph.holdPlayPauseOpenFlow(ctx));
+        // 2026-07-20 — Lock glyph height to tip TextView font metrics (was tipSizePx only).
+        int sizePx = HardwareButtonGlyph.sizePxMatchingTextView(hint);
+        if (hintMode == HintMode.VOLUME_ARROWS) {
+            HardwareButtonGlyph.bindGlyphText(hint,
+                    HardwareButtonGlyph.volumeUpDownHint(ctx, sizePx));
+        } else if (hintMode == HintMode.HOLD_PLAY_FLOW) {
+            HardwareButtonGlyph.bindGlyphText(hint,
+                    HardwareButtonGlyph.holdPlayPauseOpenFlow(ctx, sizePx));
         } else if (hintMode == HintMode.HOLD_BACK_OPTIONS) {
-            hint.setText(HardwareButtonGlyph.holdBackOptionsHint(ctx, DeviceFeatures.isY2()));
+            HardwareButtonGlyph.bindGlyphText(hint,
+                    HardwareButtonGlyph.pressBackOptionsHint(ctx, DeviceFeatures.isY2(), sizePx));
         }
         // NONE: leave text; visibility stays gated by ensureVolumeHintVisible
     }
@@ -150,6 +181,83 @@ public final class MediaTransportBar {
 
     public void setOnFlowHintPresentedListener(OnFlowHintPresentedListener listener) {
         flowHintPresentedListener = listener;
+    }
+
+    /** 2026-07-20 — Prefs: mark volume tip seen after first show. */
+    public void setOnVolumeTipPresentedListener(OnVolumeTipPresentedListener listener) {
+        volumeTipPresentedListener = listener;
+    }
+
+    /**
+     * 2026-07-20 — First-play / session tip: fade in current HintMode, then auto fade-out.
+     * Layman: calm loading-style line above the scrub when you open Now Playing.
+     * Tech: same hint TextView as volume pulse; does not arm volume mode.
+     * Reversal: no-op; tips only on volume adjust / live hold.
+     */
+    public void showSessionTip() {
+        if (hint == null || hintMode == HintMode.NONE) return;
+        if (liveHoldHintActive) return;
+        cancelSessionTipHide();
+        sessionTipActive = true;
+        refreshHintText();
+        hint.animate().cancel();
+        configureHintMarquee();
+        hint.setVisibility(View.VISIBLE);
+        hint.setSelected(true);
+        hint.setAlpha(0f);
+        notifyTipPresentedOnce();
+        long fade = NowPlayingTipPolicy.SESSION_TIP_FADE_MS;
+        hint.animate().alpha(1f).setDuration(fade).start();
+        if (dismissHandler != null) {
+            sessionTipHideRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    fadeSessionTipOut();
+                }
+            };
+            dismissHandler.postDelayed(sessionTipHideRunnable,
+                    NowPlayingTipPolicy.SESSION_TIP_VISIBLE_MS);
+        }
+    }
+
+    /** 2026-07-20 — Fade session tip; leave live-hold alone. */
+    private void fadeSessionTipOut() {
+        if (hint == null || !sessionTipActive) return;
+        if (liveHoldHintActive || volumeModeActive) {
+            sessionTipActive = false;
+            return;
+        }
+        sessionTipActive = false;
+        hint.animate().cancel();
+        hint.animate().alpha(0f).setDuration(NowPlayingTipPolicy.SESSION_TIP_FADE_MS)
+                .withEndAction(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (liveHoldHintActive || volumeModeActive || volumeHintVisible) return;
+                        hint.setVisibility(View.GONE);
+                        hint.setAlpha(1f);
+                        hint.setSelected(false);
+                    }
+                }).start();
+    }
+
+    private void cancelSessionTipHide() {
+        if (dismissHandler != null && sessionTipHideRunnable != null) {
+            dismissHandler.removeCallbacks(sessionTipHideRunnable);
+        }
+        sessionTipHideRunnable = null;
+    }
+
+    /** 2026-07-20 — One-shot prefs callbacks when a tip becomes visible. */
+    private void notifyTipPresentedOnce() {
+        if (hintMode == HintMode.VOLUME_ARROWS && volumeTipPresentedListener != null) {
+            try {
+                volumeTipPresentedListener.onVolumeTipPresented();
+            } catch (Throwable ignored) {}
+        }
+        if (hintMode == HintMode.HOLD_PLAY_FLOW && flowHintPresentedListener != null) {
+            // Flow tip session show does not exhaust remaining — dismiss is open-from-NP.
+        }
     }
 
     /** @deprecated name kept; now refreshes any active tip mode. */
@@ -222,17 +330,29 @@ public final class MediaTransportBar {
      * 2026-07-18 — Show keep-holding tip immediately on NP (Back / Play-Pause down).
      * Layman: as soon as you press, tell you to keep holding for Options or Flow.
      * Tech: forces hint VISIBLE above scrub; does not arm volume pulse.
-     * Reversal: no-op; only volume-pulse tips remain.
+     * 2026-07-20 — Fade in; cancel pending short-tap hide. Was: alpha=1 instant.
+     * Reversal: no-op; only volume-pulse tips remain. Instant alpha=1 / GONE hide.
      */
     public void showLiveHoldHint(CharSequence text) {
         if (hint == null || text == null) return;
+        cancelLiveHoldHide();
+        liveHoldFadeGen++; // invalidate any in-flight fade-out endAction
+        boolean alreadyUp = liveHoldHintActive && hint.getVisibility() == View.VISIBLE
+                && hint.getAlpha() >= 0.99f;
         liveHoldHintActive = true;
+        liveHoldHintShownAtElapsed = SystemClock.elapsedRealtime();
         hint.animate().cancel();
         configureHintMarquee();
-        hint.setText(text);
+        HardwareButtonGlyph.bindGlyphText(hint, text);
         hint.setVisibility(View.VISIBLE);
-        hint.setAlpha(1f);
         hint.setSelected(true);
+        if (alreadyUp) {
+            hint.setAlpha(1f);
+        } else {
+            // Soft fade so short taps still feel intentional, not a flash.
+            hint.setAlpha(0f);
+            hint.animate().alpha(1f).setDuration(OVERLAY_FADE_MS).start();
+        }
         // #region agent log
         try {
             org.json.JSONObject d = new org.json.JSONObject();
@@ -240,6 +360,7 @@ public final class MediaTransportBar {
             d.put("hintH", hint.getHeight());
             d.put("rootH", root != null ? root.getHeight() : -1);
             d.put("textSizePx", hint.getTextSize());
+            d.put("alreadyUp", alreadyUp);
             com.solar.launcher.Debug0f5debLog.log(ctx, "MediaTransportBar.showLiveHoldHint",
                     "live hold tip on", "NP-LIVE", d);
         } catch (Exception ignored) {}
@@ -248,22 +369,75 @@ public final class MediaTransportBar {
 
     /**
      * 2026-07-18 — Hide live hold tip; restore policy tip text (still hidden until volume).
+     * 2026-07-20 — Wait out min on-screen time, then fade out (short PP taps stay readable).
+     * Was: instant GONE. Reversal: drop deferral + fade; GONE immediately.
      */
     public void hideLiveHoldHint() {
         if (hint == null) return;
         if (!liveHoldHintActive) return;
+        cancelLiveHoldHide();
+        long delay = TransportHintChromePolicy.hideDelayMs(
+                liveHoldHintShownAtElapsed,
+                SystemClock.elapsedRealtime(),
+                TransportHintChromePolicy.LIVE_HOLD_MIN_VISIBLE_MS);
+        liveHoldHideRunnable = new Runnable() {
+            @Override
+            public void run() {
+                liveHoldHideRunnable = null;
+                fadeLiveHoldHintOutNow();
+            }
+        };
+        if (delay <= 0L) {
+            liveHoldHideRunnable.run();
+        } else if (hint != null) {
+            hint.postDelayed(liveHoldHideRunnable, delay);
+        }
+    }
+
+    /** 2026-07-20 — Drop scheduled live-tip hide (new press or leave NP). */
+    private void cancelLiveHoldHide() {
+        if (liveHoldHideRunnable != null && hint != null) {
+            hint.removeCallbacks(liveHoldHideRunnable);
+        }
+        liveHoldHideRunnable = null;
+    }
+
+    /**
+     * 2026-07-20 — Fade live tip away, then restore volume-policy copy (still GONE).
+     * Layman: tip gently disappears after you let go.
+     */
+    private void fadeLiveHoldHintOutNow() {
+        if (hint == null) return;
+        if (!liveHoldHintActive) return;
         liveHoldHintActive = false;
+        liveHoldHintShownAtElapsed = 0L;
+        final int gen = ++liveHoldFadeGen;
         hint.animate().cancel();
-        hint.setSelected(false);
-        hint.setVisibility(View.GONE);
-        hint.setAlpha(1f);
-        refreshHintText();
+        hint.animate()
+                .alpha(0f)
+                .setDuration(OVERLAY_FADE_MS)
+                .withEndAction(
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                if (hint == null) return;
+                                // Show/cancel bumped gen — leave the tip alone.
+                                if (gen != liveHoldFadeGen) return;
+                                if (liveHoldHintActive) return;
+                                hint.setSelected(false);
+                                hint.setVisibility(View.GONE);
+                                hint.setAlpha(1f);
+                                refreshHintText();
+                            }
+                        })
+                .start();
         // #region agent log
         try {
             org.json.JSONObject d = new org.json.JSONObject();
             d.put("mode", hintMode != null ? hintMode.name() : "");
-            com.solar.launcher.Debug0f5debLog.log(ctx, "MediaTransportBar.hideLiveHoldHint",
-                    "live hold tip off", "NP-LIVE", d);
+            d.put("gen", gen);
+            com.solar.launcher.Debug0f5debLog.log(ctx, "MediaTransportBar.fadeLiveHoldHintOutNow",
+                    "live hold tip fade out", "NP-LIVE", d);
         } catch (Exception ignored) {}
         // #endregion
     }
@@ -676,6 +850,8 @@ public final class MediaTransportBar {
         if (hintMode == HintMode.NONE || hint == null) return;
         // 2026-07-18 — Live keep-holding tip owns the label until key-up.
         if (liveHoldHintActive) return;
+        cancelSessionTipHide();
+        sessionTipActive = false;
         hint.animate().cancel();
         if (volumeHintVisible) {
             if (hint.getVisibility() != View.VISIBLE) {
@@ -689,9 +865,15 @@ public final class MediaTransportBar {
         }
         volumeHintVisible = true;
         // 2026-07-18 — Count Flow tip shows once per volume session (first fade-in).
+        // 2026-07-20 — Also mark volume-arrow tip seen on first pulse.
         if (hintMode == HintMode.HOLD_PLAY_FLOW && flowHintPresentedListener != null) {
             try {
                 flowHintPresentedListener.onFlowHintPresented();
+            } catch (Throwable ignored) {}
+        }
+        if (hintMode == HintMode.VOLUME_ARROWS && volumeTipPresentedListener != null) {
+            try {
+                volumeTipPresentedListener.onVolumeTipPresented();
             } catch (Throwable ignored) {}
         }
         refreshHintText();

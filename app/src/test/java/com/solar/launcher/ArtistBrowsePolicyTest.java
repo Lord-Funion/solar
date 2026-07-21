@@ -68,4 +68,16 @@ public class ArtistBrowsePolicyTest {
         prefs.cycleGuestBrowseMode();
         assertTrue(ArtistBrowsePolicy.shouldSkipAlbumPicker("Snoop Dogg", prefs, ownerTracks));
     }
+
+    @Test
+    public void albumOwnerIndexMatchesLinearWalk() {
+        ArtistBrowsePolicy.AlbumOwnerIndex idx =
+                ArtistBrowsePolicy.AlbumOwnerIndex.build(guestTracks, prefs);
+        assertEquals(
+                ArtistBrowsePolicy.albumOwnerForBrowse("2001", "Snoop Dogg", guestTracks, prefs),
+                idx.albumOwnerForBrowse("2001", "Snoop Dogg", prefs));
+        assertFalse(idx.hasOwnAlbum("Snoop Dogg"));
+        assertTrue(ArtistBrowsePolicy.AlbumOwnerIndex.build(ownerTracks, prefs)
+                .hasOwnAlbum("Snoop Dogg"));
+    }
 }

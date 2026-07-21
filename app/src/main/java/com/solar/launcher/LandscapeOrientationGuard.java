@@ -53,6 +53,15 @@ public final class LandscapeOrientationGuard {
             enforceForcedLandscape(activity);
             return;
         }
+        // 2026-07-20 — Phone chrome is a tall ClassiPod shell; lock portrait.
+        // Was: misclassified phones got Y1 landscape. Reversal: drop chrome branch.
+        try {
+            if (com.solar.launcher.phone.PhoneChromePolicy.active(activity)) {
+                activity.setRequestedOrientation(
+                        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                return;
+            }
+        } catch (Throwable ignored) {}
         if (DeviceFeatures.isA5()) {
             enforceA5Orientation(activity);
             return;
@@ -136,6 +145,14 @@ public final class LandscapeOrientationGuard {
             enforceForcedLandscape(activity);
             return;
         }
+        // 2026-07-20 — Phone chrome stays portrait (do not yank to landscape).
+        try {
+            if (com.solar.launcher.phone.PhoneChromePolicy.active(activity)) {
+                activity.setRequestedOrientation(
+                        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                return;
+            }
+        } catch (Throwable ignored) {}
         if (DeviceFeatures.isA5()) {
             enforceA5Orientation(activity);
             return;
@@ -195,6 +212,14 @@ public final class LandscapeOrientationGuard {
             enforceForcedLandscape(activity);
             return;
         }
+        // 2026-07-20 — Phone chrome is meant to stay tall.
+        try {
+            if (com.solar.launcher.phone.PhoneChromePolicy.active(activity)) {
+                activity.setRequestedOrientation(
+                        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                return;
+            }
+        } catch (Throwable ignored) {}
         // 2026-07-11 — A5 may be portrait intentionally or via sensor; re-enforce pref.
         if (DeviceFeatures.isA5()) {
             enforceA5Orientation(activity);

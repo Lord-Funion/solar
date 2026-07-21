@@ -15,6 +15,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_PRIVILEGED" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.INJECT_EVENTS" tools:ignore="ProtectedPermissions" />
@@ -79,12 +80,14 @@
             <!-- 2026-07-14 — No longer LAUNCHER; entered via SolarLaunchActivity.
                  Reversal: restore MAIN/LAUNCHER intent-filter here. -->
         </activity>
+        <!-- 2026-07-20 — sensor + LandscapeOrientationGuard (chrome portrait / Y1 landscape).
+             Was: hardcoded landscape — phones spun during rooted prep wizard. -->
         <activity
             android:name=".platform.PlatformPrepWizardActivity"
             android:exported="false"
             android:launchMode="singleTop"
             android:noHistory="true"
-            android:screenOrientation="landscape"
+            android:screenOrientation="sensor"
             android:theme="@style/Theme.Solar" />
         <activity
             android:name=".EmergencyRecoveryActivity"

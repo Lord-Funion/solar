@@ -51,4 +51,23 @@ public class FlowNowPlayingFocusTest {
         assertEquals(0, FlowNowPlayingFocus.carouselIndexForMatchKey(items, probe));
         assertTrue(probe.toLowerCase(java.util.Locale.US).contains("radiohead"));
     }
+
+    /**
+     * 2026-07-20 — SEGMENTED handoff cover keys prefer store row over ID3.
+     * Layman: scanned library labels win so flying art matches the rack without customLibrary.
+     */
+    @Test
+    public void preferLibraryAlbumArtistPrefersScannedRow() {
+        String[] fromLib = FlowNowPlayingFocus.preferLibraryAlbumArtist(
+                "Lib Album", "Lib Artist", "Tag Album", "Tag Artist");
+        assertEquals("Lib Album", fromLib[0]);
+        assertEquals("Lib Artist", fromLib[1]);
+        String[] fromTags = FlowNowPlayingFocus.preferLibraryAlbumArtist(
+                "", null, "Tag Album", "Tag Artist");
+        assertEquals("Tag Album", fromTags[0]);
+        assertEquals("Tag Artist", fromTags[1]);
+        String[] blank = FlowNowPlayingFocus.preferLibraryAlbumArtist(null, null, "  ", null);
+        assertEquals("", blank[0]);
+        assertEquals("", blank[1]);
+    }
 }

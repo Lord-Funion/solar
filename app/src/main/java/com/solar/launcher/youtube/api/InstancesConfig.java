@@ -30,11 +30,22 @@ public final class InstancesConfig {
     public static final String DEFAULT_YTAPI = "http://45.132.96.44:2823";
 
     // 2026-07-15 — Fail-open Invidious seeds when remote JSON unreachable.
+    // Prefer http:// so Y2/A5 still resolve when system CA / Conscrypt trust drifts (2026-07-19).
     private static final String[] SEED_INVIDIOUS = new String[] {
             "http://76.82.152.76:3000",
             "http://82.65.13.217:7601",
             "http://87.106.60.151:3000"
     };
+
+    /** 2026-07-19 — Package seeds for InstancesUpdater merge (HTTP fail-open). */
+    public static List<String> seedInvidious() {
+        return listOf(SEED_INVIDIOUS);
+    }
+
+    /** 2026-07-19 — YtApi legacy seed host(s) for merge after remote refresh. */
+    public static List<String> seedYtApi() {
+        return listOf(new String[] { DEFAULT_YTAPI });
+    }
 
     private final SharedPreferences prefs;
 

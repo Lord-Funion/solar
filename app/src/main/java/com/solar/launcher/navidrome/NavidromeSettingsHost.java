@@ -131,15 +131,15 @@ public final class NavidromeSettingsHost {
         if (prefs == null) return "";
         if (RowKeys.NAVIDROME_URL.equals(rowKey)) {
             String u = prefs.getString("navidrome_url", "");
-            return u != null && !u.isEmpty() ? u : "—";
+            return u != null && !u.isEmpty() ? u : "-";
         }
         if (RowKeys.NAVIDROME_USER.equals(rowKey)) {
             String u = prefs.getString("navidrome_user", "");
-            return u != null && !u.isEmpty() ? u : "—";
+            return u != null && !u.isEmpty() ? u : "-";
         }
         if (RowKeys.NAVIDROME_PASS.equals(rowKey)) {
             String p = prefs.getString("navidrome_pass", "");
-            return p != null && !p.isEmpty() ? "••••" : "—";
+            return p != null && !p.isEmpty() ? "••••" : "-";
         }
         return "";
     }

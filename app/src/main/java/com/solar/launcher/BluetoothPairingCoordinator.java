@@ -5,15 +5,18 @@ import android.bluetooth.BluetoothDevice;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import java.lang.reflect.Method;
 
 /**
  * 2026-07-05 — Single owner for Bluetooth pairing UI and API calls (Y1 + Y2).
- * Layman: when a gadget asks to pair, Solar shows our wheel-friendly screens or uses a saved PIN.
- * Technical: routes PAIRING_REQUEST variants to :overlay tiers or silent setPin; de-dupes sessions.
- * Reversal: delete class; receivers fall back to stock Holo pairing dialogs.
+ * 2026-07-19 — Silent Just Works + deferred PIN: 15s Connecting window before PIN overlay.
+ * Layman: AirPods/Beats pair without a PIN screen; only stubborn gadgets get a keyboard later.
+ * Technical: CONSENT/confirm → setPairingConfirmation; PIN → silent setPin then delayed MODE_PIN.
+ * Reversal: restore immediate consent overlay + MainActivity setPin(0000) dual handler.
  */
 public final class BluetoothPairingCoordinator {
 
@@ -25,20 +28,64 @@ public final class BluetoothPairingCoordinator {
     public static final int MODE_PASSKEY_DISPLAY = 2;
     /** Overlay tier — passkey on screen; user confirms it matches the remote. */
     public static final int MODE_PASSKEY_CONFIRM = 3;
-    /** Overlay tier — Just Works / consent confirm. */
+    /** Overlay tier — Just Works / consent confirm (legacy UI; silent path preferred). */
     public static final int MODE_CONSENT = 4;
 
     /** {@link BluetoothDevice#PAIRING_VARIANT_PIN} = 0, passkey display = 1 (API 17 lacks named constant). */
     private static final int PAIRING_VARIANT_PASSKEY = 1;
     private static final int PAIRING_VARIANT_CONSENT = 3;
+
+    /** Hold silent PIN negotiation before showing overlay keyboard (plan: 15s Connecting…). */
+    public static final long NEGOTIATION_WINDOW_MS = 15_000L;
+
     private static volatile String activeSessionAddress;
     private static volatile long activeSessionAt;
+    /** Address waiting on silent PIN — PIN overlay arms when this timer fires. */
+    private static volatile String pendingPinAddress;
+    private static volatile String pendingPinName;
+    private static volatile Context pendingPinAppContext;
+    private static Handler mainHandler;
+    private static final Runnable delayedPinRunnable = new Runnable() {
+        @Override
+        public void run() {
+            Context app = pendingPinAppContext;
+            String address = pendingPinAddress;
+            String name = pendingPinName;
+            if (app == null || address == null) return;
+            BluetoothDevice device = BluetoothAudioRepair.deviceForAddress(address);
+            // Already bonded — nothing to ask the user.
+            if (device != null) {
+                try {
+                    if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
+                        Log.i(TAG, "delayed PIN skipped — bonded " + address);
+                        clearPendingPin();
+                        clearSession();
+                        return;
+                    }
+                } catch (Exception ignored) {}
+            }
+            Log.i(TAG, "negotiation window elapsed — PIN overlay " + address);
+            showPinOverlay(app, address, name != null ? name : address,
+                    BluetoothAudioRepair.pairingPinForAddress(app, address));
+        }
+    };
 
     private BluetoothPairingCoordinator() {}
 
+    /** Lazy main-looper handler — unit tests may lack a prepared Looper at class init. */
+    private static Handler mainHandler() {
+        if (mainHandler == null) {
+            synchronized (BluetoothPairingCoordinator.class) {
+                if (mainHandler == null) {
+                    mainHandler = new Handler(Looper.getMainLooper());
+                }
+            }
+        }
+        return mainHandler;
+    }
     /**
      * Entry from PAIRING_REQUEST broadcast — returns true when Solar owns the request
-     * (silent PIN, overlay shown, or de-duped); caller should abortBroadcast().
+     * (silent auth, delayed PIN armed, overlay shown, or de-duped); caller should abortBroadcast().
      */
     @SuppressLint("MissingPermission")
     public static boolean onPairingRequest(Context context, BluetoothDevice device,
@@ -46,35 +93,58 @@ public final class BluetoothPairingCoordinator {
         if (context == null || device == null) return false;
         String address = safeAddress(device);
         if (address == null) return false;
-        if (isDuplicateSession(address)) {
+        if (isDuplicateSession(address) && !forcePinUi) {
             Log.d(TAG, "pairing de-dupe " + address);
             return true;
         }
         markSession(address);
+        Context app = context.getApplicationContext();
+
+        // PIN — silent first; only forcePinUi / timeout shows keyboard.
         if (variant == BluetoothDevice.PAIRING_VARIANT_PIN) {
-            if (!forcePinUi) {
-                String pin = BluetoothAudioRepair.pairingPinForDevice(context, device);
-                if (submitPin(context, device, pin)) {
-                    BluetoothAudioRepair.rememberLastAudioDevice(context, device);
-                    clearSession();
-                    return true;
-                }
+            String pin = BluetoothAudioRepair.pairingPinForDevice(context, device);
+            if (forcePinUi) {
+                cancelDelayedPin();
+                return showPinOverlay(app, address, safeName(device), pin);
             }
-            return showPinOverlay(context, address, safeName(device),
-                    BluetoothAudioRepair.pairingPinForDevice(context, device));
+            boolean submitted = submitPin(context, device, pin);
+            Log.i(TAG, "silent setPin submitted=" + submitted + " addr=" + address);
+            BluetoothAudioRepair.rememberLastAudioDevice(context, device);
+            // Keep session; arm 15s PIN fallback if bond does not complete.
+            scheduleDelayedPin(app, address, safeName(device));
+            return true;
         }
+
+        // Passkey display — remote must type digits; user needs to see them.
         if (variant == PAIRING_VARIANT_PASSKEY) {
-            return showPasskeyOverlay(context, address, safeName(device), passkey, MODE_PASSKEY_DISPLAY);
+            cancelDelayedPin();
+            return showPasskeyOverlay(app, address, safeName(device), passkey, MODE_PASSKEY_DISPLAY);
         }
-        if (variant == BluetoothDevice.PAIRING_VARIANT_PASSKEY_CONFIRMATION) {
-            return showPasskeyOverlay(context, address, safeName(device), passkey, MODE_PASSKEY_CONFIRM);
+
+        // Passkey confirm + Just Works consent — silent accept (AirPods / Beats / most headsets).
+        if (variant == BluetoothDevice.PAIRING_VARIANT_PASSKEY_CONFIRMATION
+                || variant == PAIRING_VARIANT_CONSENT) {
+            submitConfirmation(device, true);
+            BluetoothAudioRepair.rememberLastAudioDevice(context, device);
+            Log.i(TAG, "silent setPairingConfirmation(true) variant=" + variant + " addr=" + address);
+            // Brief session hold for de-dupe; no overlay.
+            return true;
         }
-        if (variant == PAIRING_VARIANT_CONSENT) {
-            return showPasskeyOverlay(context, address, safeName(device), passkey, MODE_CONSENT);
-        }
+
         Log.d(TAG, "unknown variant=" + variant + " deferring to stock");
         clearSession();
         return false;
+    }
+
+    /** Bond succeeded — cancel deferred PIN keyboard. */
+    public static void onBonded(BluetoothDevice device) {
+        String address = safeAddress(device);
+        if (address == null) return;
+        if (address.equals(pendingPinAddress) || address.equals(activeSessionAddress)) {
+            Log.i(TAG, "bonded — clear pending PIN " + address);
+            clearPendingPin();
+            clearSession();
+        }
     }
 
     /** Auth failure during bond — force PIN keyboard even when a default PIN exists. */
@@ -83,9 +153,21 @@ public final class BluetoothPairingCoordinator {
         if (context == null || device == null) return;
         String address = safeAddress(device);
         if (address == null) return;
+        cancelDelayedPin();
         markSession(address);
-        showPinOverlay(context, address, safeName(device),
+        showPinOverlay(context.getApplicationContext(), address, safeName(device),
                 BluetoothAudioRepair.pairingPinForDevice(context, device));
+    }
+
+    /**
+     * Connect throbber timed out still unpaired — escalate to PIN overlay if a silent PIN
+     * session was armed for this address.
+     */
+    public static void onNegotiationTimeout(Context context, String address) {
+        if (context == null || address == null) return;
+        if (pendingPinAddress == null || !address.equals(pendingPinAddress)) return;
+        mainHandler().removeCallbacks(delayedPinRunnable);
+        delayedPinRunnable.run();
     }
 
     /** User finished PIN entry on overlay keyboard — save and submit to stack. */
@@ -98,6 +180,7 @@ public final class BluetoothPairingCoordinator {
         BluetoothAudioRepair.savePairingPin(context, address, cleaned);
         submitPin(context, device, cleaned);
         BluetoothAudioRepair.rememberLastAudioDevice(context, device);
+        clearPendingPin();
         clearSession();
     }
 
@@ -117,6 +200,7 @@ public final class BluetoothPairingCoordinator {
     /** Back / Cancel on pairing overlay — reject bond attempt. */
     @SuppressLint("MissingPermission")
     public static void cancelPairing(Context context, String address) {
+        cancelDelayedPin();
         BluetoothDevice device = BluetoothAudioRepair.deviceForAddress(address);
         if (device != null) {
             submitConfirmation(device, false);
@@ -148,21 +232,34 @@ public final class BluetoothPairingCoordinator {
         return MODE_CONSENT;
     }
 
+    /** True when silent PIN negotiation is still waiting on this address. */
+    static boolean isPendingPinNegotiation(String address) {
+        return address != null && address.equals(pendingPinAddress);
+    }
+
+    private static void scheduleDelayedPin(Context app, String address, String name) {
+        cancelDelayedPin();
+        pendingPinAppContext = app;
+        pendingPinAddress = address;
+        pendingPinName = name;
+        mainHandler().postDelayed(delayedPinRunnable, NEGOTIATION_WINDOW_MS);
+        Log.d(TAG, "armed delayed PIN in " + NEGOTIATION_WINDOW_MS + "ms for " + address);
+    }
+
+    private static void cancelDelayedPin() {
+        mainHandler().removeCallbacks(delayedPinRunnable);
+        clearPendingPin();
+    }
+
+    private static void clearPendingPin() {
+        pendingPinAddress = null;
+        pendingPinName = null;
+        pendingPinAppContext = null;
+    }
+
+    /** PIN keyboard via overlay MODE_PIN (not MainActivity Settings keyboard). */
     private static boolean showPinOverlay(Context context, String address, String name, String prefill) {
-        try {
-            Intent intent = new Intent(context, MainActivity.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            intent.putExtra(BluetoothAudioRepair.EXTRA_PAIR_PIN_PROMPT, true);
-            intent.putExtra(BluetoothAudioRepair.EXTRA_PAIR_PIN_ADDRESS, address);
-            intent.putExtra(BluetoothAudioRepair.EXTRA_PAIR_PIN_NAME, name);
-            context.startActivity(intent);
-            Log.i(TAG, "pairing pin intent launched for " + address);
-            return true;
-        } catch (Exception e) {
-            Log.w(TAG, "pairing pin intent failed", e);
-            clearSession();
-            return false;
-        }
+        return startPairingOverlay(context, address, name, 0, MODE_PIN, prefill);
     }
 
     private static boolean showPasskeyOverlay(Context context, String address, String name,
@@ -250,12 +347,13 @@ public final class BluetoothPairingCoordinator {
         }
     }
 
-    /** Unit-test guard — variant → overlay mode mapping. */
+    /** Unit-test guard — variant → overlay mode mapping + passkey pad. */
     static void selfCheck() {
         if (overlayModeForVariant(BluetoothDevice.PAIRING_VARIANT_PIN) != MODE_PIN) {
             throw new AssertionError("pin mode");
         }
         if (!"012345".equals(formatPasskey(12345))) throw new AssertionError("passkey pad");
         if (!"000042".equals(formatPasskey(42))) throw new AssertionError("passkey pad2");
+        if (NEGOTIATION_WINDOW_MS != 15_000L) throw new AssertionError("negotiation window");
     }
 }

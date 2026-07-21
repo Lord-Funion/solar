@@ -3,10 +3,11 @@ package com.solar.launcher;
 import android.content.Context;
 
 /**
- * 2026-07-06 — Tear down kernel UMS when user has not opted into auto-connect or explicit enable.
- * Layman: stops the player from silently becoming a USB disk on boot or cable plug-in.
- * Technical: disable when {@link UsbMassStorageController#isKernelMassStorageMode()} without consent.
- * Reversal: delete callers; rely on boot-only reset in {@link BootReceiver}.
+ * 2026-07-06 — Tear down kernel UMS when Solar owned disk mode without consent.
+ * 2026-07-19 — No-op when Android owns USB (Auto-Connect off): do not fight SystemUI / stock UMS.
+ * Layman: PC cable stays with Android unless you turned on Auto-Connect or Enable Now.
+ * Technical: skip disable when {@link UsbStorageSessionFlags#preferStockUsbUi}.
+ * Reversal: restore always-disable-without-auto path (caused Y1 stall when PC-tethered).
  */
 public final class UsbUnauthorizedUmsGuard {
 
@@ -15,6 +16,8 @@ public final class UsbUnauthorizedUmsGuard {
     /** Background-safe — idempotent disable when UMS mode active without user consent. */
     public static void teardownIfUnauthorizedAsync(final Context context) {
         if (context == null) return;
+        // Stock path: never spawn root UMS work on every USB_STATE (Y1 startup stall).
+        if (UsbStorageSessionFlags.preferStockUsbUi(context)) return;
         final Context app = context.getApplicationContext();
         new Thread(new Runnable() {
             @Override
@@ -27,6 +30,10 @@ public final class UsbUnauthorizedUmsGuard {
     /** Blocking teardown for boot / tests. */
     public static boolean teardownIfUnauthorizedBlocking(Context context) {
         if (context == null) return false;
+        // Android owns the cable — leave kernel / SystemUI mass storage alone.
+        if (UsbStorageSessionFlags.preferStockUsbUi(context)) {
+            return false;
+        }
         if (!UsbMassStorageExperiment.isEnabled(context)) {
             return UsbMassStorageController.disableIfExported(context);
         }

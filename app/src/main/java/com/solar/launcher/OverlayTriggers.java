@@ -104,6 +104,21 @@ public final class OverlayTriggers {
     /** Y2 power-hold in Solar — open in-app quick bar at power tier (skip screen-specific rows). */
     public static final String EXTRA_CONTEXT_POWER_HOLD = "context_power_hold";
 
+    /**
+     * 2026-07-20 — Xposed/root → MainActivity: Power DOWN while Solar fg — arm Options hold spinner.
+     * Layman: same status spinner as hold-Back, as soon as you press Power for the menu.
+     * Reversal: drop receiver; spinner only arms in handleContextPowerHoldIntent after hold fires.
+     */
+    public static final String ACTION_CONTEXT_HOLD_ARM =
+            "com.solar.launcher.action.CONTEXT_HOLD_ARM";
+
+    /**
+     * 2026-07-20 — Xposed/root → MainActivity: Power UP before menu opened — clear hold spinner.
+     * Layman: let go early and the spinner goes away like a cancelled Back-hold.
+     */
+    public static final String ACTION_CONTEXT_HOLD_CANCEL =
+            "com.solar.launcher.action.CONTEXT_HOLD_CANCEL";
+
     /** SystemUI USB enable prompt — global overlay over any foreground app. */
     public static final String ACTION_SHOW_OVERLAY_USB_STORAGE =
             "com.solar.launcher.action.SHOW_OVERLAY_USB_STORAGE";

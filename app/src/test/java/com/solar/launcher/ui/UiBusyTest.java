@@ -38,4 +38,22 @@ public class UiBusyTest {
         UiBusy.clear(UiBusy.REASON_DOWNLOAD);
         if (UiBusy.isBusy()) throw new AssertionError("idle");
     }
+
+    /** 2026-07-20 — Cold-start throbber reason must arm/clear like other busy tokens. */
+    @Test
+    public void startupReason() {
+        UiBusy.begin(UiBusy.REASON_STARTUP);
+        if (!UiBusy.isBusy(UiBusy.REASON_STARTUP)) throw new AssertionError("startup busy");
+        UiBusy.clear(UiBusy.REASON_STARTUP);
+        if (UiBusy.isBusy(UiBusy.REASON_STARTUP)) throw new AssertionError("startup cleared");
+    }
+
+    /** 2026-07-20 — Stem prep shares status throbber. */
+    @Test
+    public void stemPrepareReason() {
+        UiBusy.begin(UiBusy.REASON_STEM_PREPARE);
+        if (!UiBusy.isBusy(UiBusy.REASON_STEM_PREPARE)) throw new AssertionError("stem busy");
+        UiBusy.clear(UiBusy.REASON_STEM_PREPARE);
+        if (UiBusy.isBusy(UiBusy.REASON_STEM_PREPARE)) throw new AssertionError("stem cleared");
+    }
 }

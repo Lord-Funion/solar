@@ -4,7 +4,7 @@ import android.view.KeyEvent;
 
 /**
  * 2026-07-14 — A5 keyboard / IME hardware map while the tray is open.
- * Layman: Volume types space/delete; side Back submits; hold Back flips Aa/#; face mid picks a letter.
+ * Layman: Volume types space/delete; side Back submits; hold Back flips Capitals/Symbols; face mid picks a letter.
  * Tech: VolUp→space, VolDown→delete; Back (scan≠158) short→Enter / long→charset; face mid stays CENTER.
  * Was: volume = loudness HUD; Back dismissed tray; charset = Play/Center long only.
  * Reversal: drop callers; restore volume HUD + Back-dismiss + Play-long charset on A5 keyboard.

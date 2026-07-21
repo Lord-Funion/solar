@@ -279,6 +279,18 @@ public final class PodcastIjkPlayer {
         } catch (IllegalStateException ignored) {}
     }
 
+    /**
+     * Stereo volume 0..1 — used for original→stem crossfade.
+     * Layman: turn this engine down while the stem mix turns up.
+     * 2026-07-20
+     */
+    public void setVolume(float gain) {
+        float g = gain < 0f ? 0f : (gain > 1f ? 1f : gain);
+        try {
+            player.setVolume(g, g);
+        } catch (Exception ignored) {}
+    }
+
     /** Playback rate; SoundTouch keeps pitch natural when soundtouch=1 is set. */
     public void setSpeed(float speed) {
         this.speed = speed > 0f ? speed : 1f;

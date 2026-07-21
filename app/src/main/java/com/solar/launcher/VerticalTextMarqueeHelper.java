@@ -10,6 +10,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import com.solar.launcher.theme.ThemeManager;
+import com.solar.launcher.ui.HardwareButtonGlyph;
 
 /** Compact capped scrollable text panel for context-menu message / dialog bodies. */
 public final class VerticalTextMarqueeHelper {
@@ -143,6 +144,11 @@ public final class VerticalTextMarqueeHelper {
         body.setText(text != null ? text : "");
         ThemeManager.applyReadableThemedTextStyle(body, ThemeManager.getTextColorPrimary(),
                 ThemeManager.getContextMenuPanelColor());
+        // 2026-07-20 — Glyph ImageSpans need system face after theme style (TTF → □).
+        // Was: always customFont + setText. Reversal: drop bindGlyphText branch.
+        if (HardwareButtonGlyph.hasGlyphSpans(text)) {
+            HardwareButtonGlyph.bindGlyphText(body, text);
+        }
         // Wheel-scroll only — no horizontal or auto vertical marquee.
         body.setSingleLine(false);
         body.setEllipsize(null);

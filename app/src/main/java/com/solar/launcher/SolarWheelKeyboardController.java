@@ -171,7 +171,7 @@ public final class SolarWheelKeyboardController {
         notifyChanged();
     }
 
-    /** Play long-press — flip case or jump charset block (Aa / #). */
+    /** 2026-07-20 — Play long-press: Capitals ↔ Symbols blocks (was Aa / # label). */
     public void playPauseLongPress() {
         if (ppLongDoCase) {
             int flipped = KeyboardCharset.flipCaseIndex(index);

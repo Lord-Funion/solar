@@ -1,7 +1,0 @@
-com.solar.launcher.homehelper.launcher-helper-pngs-0 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/launcher-helper/build/generated/res/pngs/debug
-com.solar.launcher.homehelper.launcher-helper-resValues-1 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/launcher-helper/build/generated/res/resValues/debug
-com.solar.launcher.homehelper.launcher-helper-packageDebugResources-2 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/launcher-helper/build/intermediates/incremental/debug/packageDebugResources/merged.dir
-com.solar.launcher.homehelper.launcher-helper-packageDebugResources-3 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/launcher-helper/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
-com.solar.launcher.homehelper.launcher-helper-debug-4 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/launcher-helper/build/intermediates/merged_res/debug/mergeDebugResources
-com.solar.launcher.homehelper.launcher-helper-debug-5 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/launcher-helper/src/debug/res
-com.solar.launcher.homehelper.launcher-helper-main-6 /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/launcher-helper/src/main/res

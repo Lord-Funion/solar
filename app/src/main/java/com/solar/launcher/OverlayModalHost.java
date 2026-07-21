@@ -11,6 +11,7 @@ import android.view.ViewGroup;
 
 import com.solar.launcher.theme.ThemeManager;
 import com.solar.home.policy.HomeTargetPolicy;
+import com.solar.launcher.stem.StemControls;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -132,6 +133,8 @@ public final class OverlayModalHost {
     private boolean bluetoothPairingPromptVisible;
     private Runnable bluetoothPairingTierRestore;
     private OverlayWifiPasswordKeyboard wifiPasswordKeyboard;
+    /** 2026-07-19 — Digit PIN keyboard when silent Bluetooth pairing needs user digits. */
+    private OverlayBtPinKeyboard btPinKeyboard;
     private String btPairingAddress;
     private int savedBtPairingMode;
     private int savedBtPairingPasskey;
@@ -346,18 +349,8 @@ public final class OverlayModalHost {
                 LauncherDefault.TARGET_SOLAR,
                 R.string.settings_home_launcher_restart_solar,
                 R.string.settings_home_launcher_switch_solar);
-        if (LauncherSwitch.isRockboxAvailable(context)) {
-            appendLauncherPickerRow(labels, targets, isRestart, current, marker,
-                    LauncherDefault.TARGET_ROCKBOX,
-                    R.string.settings_home_launcher_restart_rockbox,
-                    R.string.settings_home_launcher_switch_rockbox);
-        }
-        if (JjLauncherAvailability.isOfferVisible(context)) {
-            appendLauncherPickerRow(labels, targets, isRestart, current, marker,
-                    LauncherDefault.TARGET_JJ,
-                    R.string.settings_home_launcher_restart_jj,
-                    R.string.settings_home_launcher_switch_jj);
-        }
+        // 2026-07-19 — Solar-only HOME picker: no Rockbox/JJ chips (PowerActions kept).
+        // Was: list Rockbox when available + JJ when offer visible. Reversal: restore appendLauncherPickerRow.
         // 2026-07-08 — Stock (Innioasis) in crash/hold HOME picker.
         if (LauncherSwitch.isStockOfferVisible(context)) {
             appendLauncherPickerRow(labels, targets, isRestart, current, marker,
@@ -832,10 +825,33 @@ public final class OverlayModalHost {
         bluetoothPairingPromptVisible = true;
         bluetoothPairingTierRestore = buildBluetoothPairingRestoreRunnable();
         if (wifiPasswordKeyboard != null) wifiPasswordKeyboard.dismiss();
+        if (btPinKeyboard != null) btPinKeyboard.dismiss();
+        // 2026-07-19 — MODE_PIN uses digit wheel keyboard; other modes use passkey/consent menu.
+        if (mode == BluetoothPairingCoordinator.MODE_PIN) {
+            showBluetoothPinKeyboard(address, name, pinPrefill);
+            return;
+        }
         showBluetoothPasskeyMenu(mode, name, passkey);
     }
 
-
+    /**
+     * 2026-07-19 — Overlay digit PIN for legacy headsets after 15s silent negotiation.
+     * Was: MainActivity EXTRA_PAIR_PIN_PROMPT keyboard (settings path).
+     * Reversal: showPinOverlay Intent to MainActivity again.
+     */
+    private void showBluetoothPinKeyboard(String address, String name, String pinPrefill) {
+        if (btPinKeyboard == null) {
+            btPinKeyboard = new OverlayBtPinKeyboard(context, overlayRoot, new Runnable() {
+                @Override
+                public void run() {
+                    bluetoothPairingPromptVisible = false;
+                    dismissListener.onDismissOverlay();
+                }
+            });
+        }
+        if (menu != null && menu.isShowing()) menu.dismiss();
+        btPinKeyboard.show(address, name, pinPrefill);
+    }
 
     /** Passkey display, passkey match, or Just Works consent — scrollable detail + action rows. */
     private void showBluetoothPasskeyMenu(int mode, String name, int passkey) {
@@ -901,10 +917,16 @@ public final class OverlayModalHost {
         final int mode = savedBtPairingMode;
         final String name = savedBtPairingName;
         final int passkey = savedBtPairingPasskey;
+        final String pinPrefill = savedBtPairingPinPrefill;
+        final String address = btPairingAddress;
         return new Runnable() {
             @Override
             public void run() {
-                showBluetoothPasskeyMenu(mode, name, passkey);
+                if (mode == BluetoothPairingCoordinator.MODE_PIN) {
+                    showBluetoothPinKeyboard(address, name, pinPrefill);
+                } else {
+                    showBluetoothPasskeyMenu(mode, name, passkey);
+                }
             }
         };
     }
@@ -1037,6 +1059,9 @@ public final class OverlayModalHost {
         if (wifiPasswordKeyboard != null && wifiPasswordKeyboard.isShowing()) {
             return wifiPasswordKeyboard.handleKeyDown(keyCode);
         }
+        if (btPinKeyboard != null && btPinKeyboard.isShowing()) {
+            return btPinKeyboard.handleKeyDown(keyCode);
+        }
         if (menu == null || !menu.isShowing()) return false;
         if (handleOverlayBackgroundTransportKeyDown(keyCode)) return true;
         if (handleGlobalOverlayVolumeKey(keyCode)) return true;
@@ -1143,6 +1168,9 @@ public final class OverlayModalHost {
     public boolean handleOverlayKeyUp(int keyCode) {
         if (wifiPasswordKeyboard != null && wifiPasswordKeyboard.isShowing()) {
             return wifiPasswordKeyboard.handleKeyUp(keyCode);
+        }
+        if (btPinKeyboard != null && btPinKeyboard.isShowing()) {
+            return btPinKeyboard.handleKeyUp(keyCode);
         }
         if (menu == null || !menu.isShowing()) return false;
         if ((appMenuTierVisible || dialogTierVisible)
@@ -1262,6 +1290,16 @@ public final class OverlayModalHost {
             return true;
         }
         if (held < BACK_HOLD_DISMISS_MS) {
+            // #region agent log
+            try {
+                org.json.JSONObject d = new org.json.JSONObject();
+                d.put("heldMs", held);
+                d.put("needMs", BACK_HOLD_DISMISS_MS);
+                d.put("powerTier", powerTierVisible);
+                DebugE0de2eLog.log(context, "OverlayModalHost.finishOverlayBackHoldAndMaybeDismiss",
+                        "short Back ignored (need hold)", "H5", d);
+            } catch (Exception ignored) {}
+            // #endregion
             return true;
         }
         // 2026-07-08 — USB lock ignores BACK dismiss (must Turn Off or unplug).
@@ -1807,16 +1845,8 @@ public final class OverlayModalHost {
                     LauncherDefault.TARGET_SOLAR,
                     R.string.settings_home_launcher_restart_solar,
                     R.string.settings_home_launcher_switch_solar);
-            appendPowerLauncherRow(labels, headers, powerRowActions, homeTarget, marker,
-                    LauncherDefault.TARGET_ROCKBOX,
-                    R.string.settings_home_launcher_restart_rockbox,
-                    R.string.settings_home_launcher_switch_rockbox);
-            if (JjLauncherAvailability.isOfferVisible(context)) {
-                appendPowerLauncherRow(labels, headers, powerRowActions, homeTarget, marker,
-                        LauncherDefault.TARGET_JJ,
-                        R.string.settings_home_launcher_restart_jj,
-                        R.string.settings_home_launcher_switch_jj);
-            }
+            // 2026-07-19 — Power tier: Solar (+ Stock below) only — no Rockbox/JJ switch chips.
+            // Was: appendPowerLauncherRow Rockbox + JJ. Reversal: restore those two appends.
         }
 
         menu.setScrollableDetailHeader(false);
@@ -2042,14 +2072,18 @@ public final class OverlayModalHost {
             rockboxFg = LauncherSwitch.isRockboxForeground(context);
         }
         boolean showNowPlaying = isNowPlayingChipVisible(rockboxFg, SolarUiState.isPlaybackActive());
+        // Stem/Mix jam: hide Wi‑Fi/BT mid-jam (same gate as MainActivity). 2026-07-21
+        // Was: always true. Reversal: showConn = true.
+        boolean showConn = StemControls.jamQuickBarShowsConnectivity(
+                StemOrMixSession.isActive());
         // 2026-07-15 — Order ends Volume then Sleep/Zzz (was Lock near left).
         return new ThemedContextMenu.QuickItem[] {
             new ThemedContextMenu.QuickItem(null, R.drawable.ic_home,
                     context.getString(R.string.context_go_to_home), true),
             new ThemedContextMenu.QuickItem(null, R.drawable.ic_wifi,
-                    context.getString(R.string.context_tier_wifi), true),
+                    context.getString(R.string.context_tier_wifi), showConn),
             new ThemedContextMenu.QuickItem(null, R.drawable.ic_bluetooth,
-                    context.getString(R.string.home_menu_bluetooth), true),
+                    context.getString(R.string.home_menu_bluetooth), showConn),
             new ThemedContextMenu.QuickItem(null, R.drawable.ic_power,
                     context.getString(R.string.context_quick_power), rooted),
             new ThemedContextMenu.QuickItem(null, R.drawable.ic_play,
@@ -2184,6 +2218,7 @@ public final class OverlayModalHost {
         bluetoothPairingPromptVisible = false;
         btPairingAddress = null;
         if (wifiPasswordKeyboard != null) wifiPasswordKeyboard.dismiss();
+        if (btPinKeyboard != null) btPinKeyboard.dismiss();
     }
 
     /** Back/dismiss without a row pick — route to app menu, native dialog, USB, or BT pairing tier. */

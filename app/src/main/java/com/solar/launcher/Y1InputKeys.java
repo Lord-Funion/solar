@@ -92,6 +92,30 @@ public final class Y1InputKeys {
         return isWheelUp(keyCode) || isWheelDown(keyCode);
     }
 
+    /**
+     * 2026-07-19 — Wheel notch candidate for list/menu focus (DOWN only).
+     * 2026-07-20 — Repeats allowed again: continuous turns often arrive as EV_KEY value=2
+     * after the first DOWN; dropping them made ~1 row per full wheel revolution.
+     * Layman: finger-up does not move; clicks and keep-turning clicks do.
+     * Technical: ACTION_DOWN + wheel keycode; callers use {@link WheelNavPolicy} + KEY_UP
+     * hard-stop so post-release ghost repeats do not walk the list.
+     * Reversal: reject repeatCount!=0 here (pre-2026-07-20).
+     */
+    public static boolean isWheelNavAction(KeyEvent event) {
+        if (event == null) return false;
+        return isWheelNavAction(event.getAction(), event.getKeyCode(), event.getRepeatCount());
+    }
+
+    /**
+     * 2026-07-19/20 — Primitive form for unit tests + callers that already unpacked the KeyEvent.
+     * Reversal: also require repeatCount==0 (old anti-coast filter).
+     */
+    public static boolean isWheelNavAction(int action, int keyCode, int repeatCount) {
+        if (action != KeyEvent.ACTION_DOWN) return false;
+        // 2026-07-20 — repeatCount ignored here; WheelNavPolicy.acceptNotch gates held repeats.
+        return isWheelKey(keyCode);
+    }
+
     public static int wheelMenuDelta(int keyCode) {
         if (isWheelUp(keyCode)) return -1;
         if (isWheelDown(keyCode)) return 1;

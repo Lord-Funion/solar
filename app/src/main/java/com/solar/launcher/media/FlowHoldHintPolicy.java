@@ -4,6 +4,7 @@ package com.solar.launcher.media;
  * 2026-07-18 — Pure remaining/done math for NP Flow Play/Pause hold tip.
  * Layman: after Options tip goes away, show Flow tip up to three volume pulses.
  * Tech: no Android deps — unit-tested ladder for Options → Flow → none.
+ * 2026-07-20 — Prefer {@link NowPlayingTipPolicy} for volume → Options → Flow (seen/used prefs).
  * Reversal: inline remaining-- in MainActivity only.
  */
 public final class FlowHoldHintPolicy {

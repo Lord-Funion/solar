@@ -53,7 +53,7 @@ public final class PlayerAlbumArt3dView extends View {
         if (w <= 0f || h <= 0f) return;
         FlowAlbumArt3d.AlbumArtPose pose = FlowAlbumArt3d.playerPose(w, h);
         float reflectH = FlowAlbumArt3d.playerReflectHeight(h, pose.drawRect);
-        // Cover full opacity; floor uses Flow Y1/Y2 base alpha (Y1 half of Y2).
+        // 2026-07-20 — Cover full opacity; floor uses shared Flow gloss (Y1=Y2).
         float reflectAlpha = reflectH > 1f ? FlowView.flowReflectionBaseAlpha() : 0f;
         int[] table = reflectH > 1f ? reflectTableFor(reflectH) : null;
         FlowAlbumArt3d.drawPlayerCoverWithReflection(canvas, cover, pose.drawRect,

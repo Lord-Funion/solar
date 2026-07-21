@@ -6,11 +6,13 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** Artist/album browse rules driven by {@link LibraryBrowsePrefs}. */
+/**
+ * Artist/album browse rules driven by {@link LibraryBrowsePrefs}.
+ * 2026-07-19 — {@link AlbumOwnerIndex} precomputes owners so guest checks stay O(1).
+ */
 public final class ArtistBrowsePolicy {
 
     public static final class Track {
@@ -27,10 +29,140 @@ public final class ArtistBrowsePolicy {
         }
     }
 
+    /**
+     * 2026-07-19 — One-pass album-owner / guest index for large libraries.
+     * Layman: after a scan we remember who “owns” each album so lists do not re-walk every song.
+     * Technical: O(n) build; albumOwner/hasOwnAlbum/subtitle become map lookups.
+     * Reversal: nested walks in hasOwnAlbum/albumOwnerForBrowse over the full track list.
+     */
+    public static final class AlbumOwnerIndex {
+        private final LibraryBrowsePrefs prefs;
+        /** albumRackKey → (ownerMatchKey → track count) */
+        private final Map<String, Map<String, Integer>> ownerCountsByAlbum =
+                new HashMap<String, Map<String, Integer>>();
+        /** albumRackKey → (ownerMatchKey → display name) */
+        private final Map<String, Map<String, String>> ownerDisplayByAlbum =
+                new HashMap<String, Map<String, String>>();
+        /** artistMatchKey → true when artist owns ≥1 album they are credited on */
+        private final Set<String> artistsWithOwnAlbum = new HashSet<String>();
+        /** artistMatchKey → albumRackKeys where that artist is credited */
+        private final Map<String, Set<String>> albumsByCreditedArtist =
+                new HashMap<String, Set<String>>();
+
+        private AlbumOwnerIndex(LibraryBrowsePrefs prefs) {
+            this.prefs = prefs;
+        }
+
+        /** Build owner maps from the full policy track list (one linear pass). */
+        public static AlbumOwnerIndex build(List<Track> library, LibraryBrowsePrefs prefs) {
+            AlbumOwnerIndex idx = new AlbumOwnerIndex(prefs);
+            if (library == null || library.isEmpty()) return idx;
+            for (Track song : library) {
+                if (song == null || song.album == null || song.album.trim().isEmpty()) continue;
+                String albumKey = albumRackKey(song, prefs);
+                if (albumKey.isEmpty()) continue;
+                String owner = trackOwner(song, prefs);
+                if (!owner.isEmpty() && !isUnknownArtist(owner)) {
+                    String ownerKey = ArtistNames.matchKey(owner);
+                    Map<String, Integer> counts = idx.ownerCountsByAlbum.get(albumKey);
+                    if (counts == null) {
+                        counts = new HashMap<String, Integer>();
+                        idx.ownerCountsByAlbum.put(albumKey, counts);
+                    }
+                    counts.put(ownerKey, counts.containsKey(ownerKey) ? counts.get(ownerKey) + 1 : 1);
+                    Map<String, String> displays = idx.ownerDisplayByAlbum.get(albumKey);
+                    if (displays == null) {
+                        displays = new HashMap<String, String>();
+                        idx.ownerDisplayByAlbum.put(albumKey, displays);
+                    }
+                    if (!displays.containsKey(ownerKey)) displays.put(ownerKey, owner);
+                }
+                List<String> credited = creditedArtists(song.artist, prefs);
+                for (String raw : credited) {
+                    String display = displayArtist(raw, prefs);
+                    if (display.isEmpty() || isUnknownArtist(display)) continue;
+                    String aKey = ArtistNames.matchKey(display);
+                    Set<String> albums = idx.albumsByCreditedArtist.get(aKey);
+                    if (albums == null) {
+                        albums = new HashSet<String>();
+                        idx.albumsByCreditedArtist.put(aKey, albums);
+                    }
+                    albums.add(albumKey);
+                }
+            }
+            // 2026-07-19 — Precompute owns-album flags so collectArtists filter is O(1) per name.
+            for (Map.Entry<String, Set<String>> e : idx.albumsByCreditedArtist.entrySet()) {
+                String artistKey = e.getKey();
+                for (String albumKey : e.getValue()) {
+                    if (idx.ownerForAlbumKey(albumKey, artistKey) == null) {
+                        idx.artistsWithOwnAlbum.add(artistKey);
+                        break;
+                    }
+                }
+            }
+            return idx;
+        }
+
+        /**
+         * Null when browsed artist owns (or ties) the album; else majority owner display.
+         * prefs arg kept for call-site parity (index already baked with prefs). 2026-07-19
+         */
+        public String albumOwnerForBrowse(String album, String browsedArtist, LibraryBrowsePrefs prefs) {
+            if (album == null || browsedArtist == null) return null;
+            String browsedKey = ArtistNames.matchKey(displayArtist(browsedArtist, this.prefs));
+            String albumKey = resolveAlbumKey(album, browsedArtist);
+            return ownerForAlbumKey(albumKey, browsedKey);
+        }
+
+        public boolean hasOwnAlbum(String artist) {
+            if (artist == null || artist.trim().isEmpty()) return false;
+            return artistsWithOwnAlbum.contains(
+                    ArtistNames.matchKey(displayArtist(artist, prefs)));
+        }
+
+        public String albumBrowseSubtitle(String album, String browsedArtist, LibraryBrowsePrefs prefs) {
+            LibraryBrowsePrefs p = prefs != null ? prefs : this.prefs;
+            if (p == null || !p.albumOwnerSubtitles()) return "";
+            String owner = albumOwnerForBrowse(album, browsedArtist, p);
+            if (owner == null || owner.trim().isEmpty()) return "";
+            if (ArtistNames.equals(owner, browsedArtist)) return "";
+            return owner;
+        }
+
+        private String resolveAlbumKey(String album, String browsedArtist) {
+            if (AlbumNames.isUnknownAlbum(album)) {
+                return AlbumNames.unknownAlbumRackKey(displayArtist(browsedArtist, prefs));
+            }
+            return AlbumNames.matchKey(album.trim());
+        }
+
+        /** Same majority / tie rules as legacy albumOwnerForBrowse. */
+        private String ownerForAlbumKey(String albumKey, String browsedKey) {
+            if (albumKey == null || albumKey.isEmpty()) return null;
+            Map<String, Integer> counts = ownerCountsByAlbum.get(albumKey);
+            if (counts == null || counts.isEmpty()) return null;
+            String bestKey = null;
+            int bestCount = 0;
+            for (Map.Entry<String, Integer> e : counts.entrySet()) {
+                if (e.getValue() > bestCount) {
+                    bestCount = e.getValue();
+                    bestKey = e.getKey();
+                }
+            }
+            if (bestKey == null || bestKey.equals(browsedKey)) return null;
+            Integer browsedCount = counts.get(browsedKey);
+            if (browsedCount != null && browsedCount >= bestCount) return null;
+            Map<String, String> displays = ownerDisplayByAlbum.get(albumKey);
+            return displays != null ? displays.get(bestKey) : null;
+        }
+    }
+
     private ArtistBrowsePolicy() {}
 
     public static List<String> collectArtists(List<Track> library, LibraryBrowsePrefs prefs) {
         if (library == null || library.isEmpty()) return Collections.emptyList();
+        // 2026-07-19 — Build index once; filter used to call hasOwnAlbum (O(n²)) per artist.
+        AlbumOwnerIndex idx = AlbumOwnerIndex.build(library, prefs);
         Map<String, String> displayByKey = new HashMap<String, String>();
         Map<String, Integer> trackCounts = new HashMap<String, Integer>();
         Map<String, Long> recentByKey = new HashMap<String, Long>();
@@ -55,7 +187,7 @@ public final class ArtistBrowsePolicy {
         for (Map.Entry<String, String> e : displayByKey.entrySet()) {
             String key = e.getKey();
             String name = e.getValue();
-            if (!passesArtistFilter(name, library, prefs, trackCounts.get(key))) continue;
+            if (!passesArtistFilter(name, idx, prefs, trackCounts.get(key))) continue;
             out.add(name);
         }
         sortArtistNames(out, prefs, trackCounts, recentByKey);
@@ -72,61 +204,29 @@ public final class ArtistBrowsePolicy {
 
     public static boolean hasOwnAlbum(String artist, List<Track> library, LibraryBrowsePrefs prefs) {
         if (artist == null || artist.trim().isEmpty() || library == null) return false;
-        String normalized = displayArtist(artist, prefs);
-        Set<String> seenAlbums = new HashSet<String>();
-        for (Track song : library) {
-            if (!ArtistParser.containsArtist(song.artist, normalized)) continue;
-            String albumKey = albumRackKey(song, prefs);
-            if (albumKey.isEmpty() || !seenAlbums.add(albumKey)) continue;
-            if (albumOwnerForBrowse(song.album, normalized, library, prefs) == null) {
-                return true;
-            }
-        }
-        return false;
+        return AlbumOwnerIndex.build(library, prefs).hasOwnAlbum(artist);
     }
 
     /** Album owner when browsing as a guest credit; null when browsed artist owns the album. */
     public static String albumOwnerForBrowse(String album, String browsedArtist,
             List<Track> library, LibraryBrowsePrefs prefs) {
         if (album == null || browsedArtist == null || library == null) return null;
-        Map<String, Integer> counts = new HashMap<String, Integer>();
-        Map<String, String> displayByKey = new HashMap<String, String>();
-        String browsedKey = ArtistNames.matchKey(displayArtist(browsedArtist, prefs));
-        for (Track song : library) {
-            if (!AlbumNames.equals(album, song.album)) continue;
-            // 2026-07-05: iPod/Classipod — each artist gets their own Unknown Album bucket.
-            if (AlbumNames.isUnknownAlbum(album)) {
-                String songOwner = trackOwner(song, prefs);
-                if (!ArtistNames.equals(songOwner, browsedArtist)) continue;
-            }
-            String owner = trackOwner(song, prefs);
-            if (owner.isEmpty() || isUnknownArtist(owner)) continue;
-            String key = ArtistNames.matchKey(owner);
-            counts.put(key, counts.containsKey(key) ? counts.get(key) + 1 : 1);
-            if (!displayByKey.containsKey(key)) displayByKey.put(key, owner);
-        }
-        if (counts.isEmpty()) return null;
-        String bestKey = null;
-        int bestCount = 0;
-        for (Map.Entry<String, Integer> e : counts.entrySet()) {
-            if (e.getValue() > bestCount) {
-                bestCount = e.getValue();
-                bestKey = e.getKey();
-            }
-        }
-        if (bestKey == null || bestKey.equals(browsedKey)) return null;
-        Integer browsedCount = counts.get(browsedKey);
-        if (browsedCount != null && browsedCount >= bestCount) return null;
-        return displayByKey.get(bestKey);
+        return AlbumOwnerIndex.build(library, prefs).albumOwnerForBrowse(album, browsedArtist, prefs);
     }
 
     public static String albumBrowseSubtitle(String album, String browsedArtist,
             List<Track> library, LibraryBrowsePrefs prefs) {
         if (prefs == null || !prefs.albumOwnerSubtitles()) return "";
-        String owner = albumOwnerForBrowse(album, browsedArtist, library, prefs);
-        if (owner == null || owner.trim().isEmpty()) return "";
-        if (ArtistNames.equals(owner, browsedArtist)) return "";
-        return owner;
+        return AlbumOwnerIndex.build(library, prefs).albumBrowseSubtitle(album, browsedArtist, prefs);
+    }
+
+    /**
+     * 2026-07-19 — Subtitle using a shared index (Flow/rack loops must not rebuild per album).
+     */
+    public static String albumBrowseSubtitle(String album, String browsedArtist,
+            AlbumOwnerIndex index, LibraryBrowsePrefs prefs) {
+        if (index == null) return "";
+        return index.albumBrowseSubtitle(album, browsedArtist, prefs);
     }
 
     public static boolean isGuestOnlyArtistBrowse(String artist, String queryType,
@@ -182,7 +282,7 @@ public final class ArtistBrowsePolicy {
         return AlbumNames.matchKey(song.album.trim());
     }
 
-    private static boolean passesArtistFilter(String artist, List<Track> library,
+    private static boolean passesArtistFilter(String artist, AlbumOwnerIndex idx,
             LibraryBrowsePrefs prefs, Integer trackCount) {
         if (prefs == null) return true;
         int filter = prefs.artistFilter();
@@ -190,7 +290,7 @@ public final class ArtistBrowsePolicy {
         if (filter == LibraryBrowsePrefs.FILTER_MIN_TWO_TRACKS) {
             return trackCount != null && trackCount >= 2;
         }
-        boolean owns = hasOwnAlbum(artist, library, prefs);
+        boolean owns = idx != null && idx.hasOwnAlbum(artist);
         if (filter == LibraryBrowsePrefs.FILTER_OWNERS_ONLY) return owns;
         if (filter == LibraryBrowsePrefs.FILTER_HIDE_GUEST_ONLY) return owns;
         return true;

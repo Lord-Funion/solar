@@ -1,16 +1,16 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest8254417326635862604.xml:2:13-83
-INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest8254417326635862604.xml:2:13-83
+ADDED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest11060475347256591846.xml:2:13-83
+INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest11060475347256591846.xml:2:13-83
 	package
-		INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest8254417326635862604.xml
+		INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest11060475347256591846.xml
 	xmlns:android
-		ADDED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest8254417326635862604.xml:2:23-81
+		ADDED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest11060475347256591846.xml:2:23-81
 uses-sdk
-INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest8254417326635862604.xml reason: use-sdk injection requested
-INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest8254417326635862604.xml
-INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest8254417326635862604.xml
+INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest11060475347256591846.xml reason: use-sdk injection requested
+INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest11060475347256591846.xml
+INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest11060475347256591846.xml
 	android:targetSdkVersion
-		INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest8254417326635862604.xml
+		INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest11060475347256591846.xml
 	android:minSdkVersion
-		INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest8254417326635862604.xml
+		INJECTED from /home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/solar-overlay-ui/build/intermediates/tmp/ProcessLibraryManifest/debug/tempAndroidManifest11060475347256591846.xml

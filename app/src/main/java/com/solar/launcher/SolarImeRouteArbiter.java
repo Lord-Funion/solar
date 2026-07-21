@@ -3,7 +3,7 @@ package com.solar.launcher;
 import android.os.SystemClock;
 
 /**
- * 2026-07-05 — Sole writer for sys.solar.ime.*; mutex order: overlay > IME > handoff > stock.
+ * 2026-07-05 — Sole writer for sys.solar.ime.*; mutex: stemmix > overlay > IME > handoff > stock.
  * Tier-1 text commit lives in SolarInputMethodService; Xposed/root/a11y read-only, escalate on miss.
  * Refuses IME arm when sys.solar.overlay.active=1; ExternalInputHandoff pauses while IME owns keys.
  * When changing: keep Xposed ImeKeyForwarder and root daemon as read-only consumers only.
@@ -44,8 +44,9 @@ public final class SolarImeRouteArbiter {
         return overlayCredentialActive || "1".equals(readProperty(CREDENTIAL_PROPERTY, "0"));
     }
 
-    /** True when IME tray may arm — overlay opening/active blocks IME (mutex order). */
+    /** True when IME tray may arm — overlay / Stem-Mix jam blocks IME (mutex order). */
     public static boolean canArm() {
+        if (StemOrMixSession.isActive()) return false;
         if (OverlayKeyGate.isOverlayKeysActive()) return false;
         if (OverlayKeyGate.isOverlayOpening()) return false;
         return true;

@@ -18,11 +18,22 @@ public final class ScrollIdleGate {
      */
     public static final long IDLE_MS = 180L;
 
+    /**
+     * 2026-07-19 — Y1/A5 idle window: slightly longer so MT6572 finishes selection paints
+     * before preview/art catch-up. Reversal: use {@link #IDLE_MS} on all families.
+     */
+    public static final long IDLE_MS_Y1 = 220L;
+
     /** Pending coalescer depth that means “busy paint — frame-drop” (Rockbox FRAMEDROP 6). */
     public static final int FRAME_DROP_PENDING = 3;
 
+    /**
+     * 2026-07-19 — Y1/A5: drop dual-pane / haptic sooner (pending ≥2). Reversal: FRAME_DROP_PENDING.
+     */
+    public static final int FRAME_DROP_PENDING_Y1 = 2;
+
     public interface IdleListener {
-        /** Called once after IDLE_MS with no {@link #markActivity()}. */
+        /** Called once after idleMs with no {@link #markActivity()}. */
         void onScrollIdle();
     }
 
@@ -30,12 +41,16 @@ public final class ScrollIdleGate {
     private IdleListener listener;
     private long lastActivityUptimeMs = -1L;
     private boolean idlePosted;
+    /** 2026-07-19 — Instance idle window (Y1 may raise via {@link #applyDeviceDefaults()}). */
+    private long idleMs = IDLE_MS;
+    /** 2026-07-19 — Instance frame-drop pending depth. */
+    private int frameDropPending = FRAME_DROP_PENDING;
     private final Runnable idleRunnable = new Runnable() {
         @Override
         public void run() {
             idlePosted = false;
             long now = System.currentTimeMillis();
-            if (lastActivityUptimeMs >= 0L && (now - lastActivityUptimeMs) < IDLE_MS) {
+            if (lastActivityUptimeMs >= 0L && (now - lastActivityUptimeMs) < idleMs) {
                 // Another notch arrived; reschedule.
                 scheduleIdle();
                 return;
@@ -60,6 +75,21 @@ public final class ScrollIdleGate {
         handler = h;
     }
 
+    /**
+     * 2026-07-19 — Tighten paint budget on MT6572-class (Y1/A5); leave Y2 at stock.
+     * Layman: weaker chips skip heavy art sooner while you spin the dial.
+     * Technical: idleMs + frameDropPending. Reversal: leave defaults; never call this.
+     */
+    public void applyDeviceDefaults() {
+        if (DeviceFeatures.isY1() || DeviceFeatures.isA5()) {
+            idleMs = IDLE_MS_Y1;
+            frameDropPending = FRAME_DROP_PENDING_Y1;
+        } else {
+            idleMs = IDLE_MS;
+            frameDropPending = FRAME_DROP_PENDING;
+        }
+    }
+
     /** Wire catch-up (preview / visible rebind). Null clears. */
     public void setListener(IdleListener listener) {
         this.listener = listener;
@@ -75,10 +105,10 @@ public final class ScrollIdleGate {
         scheduleIdle();
     }
 
-    /** True while within IDLE_MS of last activity (spinning or just stopped). */
+    /** True while within idleMs of last activity (spinning or just stopped). */
     public boolean isSpinning() {
         if (lastActivityUptimeMs < 0L) return false;
-        return (System.currentTimeMillis() - lastActivityUptimeMs) < IDLE_MS;
+        return (System.currentTimeMillis() - lastActivityUptimeMs) < idleMs;
     }
 
     /**
@@ -87,7 +117,7 @@ public final class ScrollIdleGate {
      */
     public boolean shouldFrameDropPaint(int absStepsThisFlush, int pendingAfterOffer) {
         if (absStepsThisFlush > 1) return true;
-        if (pendingAfterOffer >= FRAME_DROP_PENDING) return true;
+        if (pendingAfterOffer >= frameDropPending) return true;
         return isSpinning() && absStepsThisFlush >= 1 && pendingAfterOffer > 0;
     }
 
@@ -106,11 +136,30 @@ public final class ScrollIdleGate {
             handler.removeCallbacks(idleRunnable);
         }
         idlePosted = true;
-        handler.postDelayed(idleRunnable, IDLE_MS);
+        handler.postDelayed(idleRunnable, idleMs);
     }
 
     /** Test hook. */
     void markActivityAtForTest(long uptimeMs) {
         lastActivityUptimeMs = uptimeMs;
+    }
+
+    /** 2026-07-19 — Test / debug: current frame-drop pending threshold. */
+    int frameDropPendingForTest() {
+        return frameDropPending;
+    }
+
+    /** 2026-07-19 — Test / debug: current idle quiet window. */
+    long idleMsForTest() {
+        return idleMs;
+    }
+
+    /**
+     * 2026-07-19 — Injectable paint budget for unit tests (no DeviceFeatures).
+     * Reversal: only use applyDeviceDefaults / field defaults.
+     */
+    void setPaintBudgetForTest(long idleMsValue, int frameDropPendingValue) {
+        idleMs = idleMsValue;
+        frameDropPending = frameDropPendingValue;
     }
 }

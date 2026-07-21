@@ -54,23 +54,16 @@ fail() { echo "verify-y1-rom-contents: FAIL: $*" >&2; errors=$((errors + 1)); }
 
 require_path /app/com.solar.launcher.apk || fail "com.solar.launcher.apk"
 require_path /app/SolarHomeHelper.apk || fail "SolarHomeHelper.apk (HOME middle-man)"
-require_path /app/org.rockbox.apk || fail "org.rockbox.apk (rockbox-y1 base)"
-require_path /lib/librockbox.so || fail "librockbox.so"
-
-rb_apk="$tmpdir/org.rockbox.apk"
-debugfs_dump /app/org.rockbox.apk org.rockbox.apk || fail "could not extract org.rockbox.apk"
-[ -s "$rb_apk" ] || fail "org.rockbox.apk empty"
-
-# grep -q + pipefail makes unzip SIGPIPE — count libmisc lines instead.
-rb_misc_count=$(unzip -l "$rb_apk" 2>/dev/null | grep -c 'lib/armeabi/libmisc.so' || true)
-[ "${rb_misc_count:-0}" -ge 1 ] || fail "org.rockbox.apk missing lib/armeabi/libmisc.so"
-
-rb_so_count=$(unzip -l "$rb_apk" 2>/dev/null | grep -c 'lib/armeabi/.*\.so' || true)
-[ "${rb_so_count:-0}" -ge 35 ] || fail "org.rockbox.apk has ${rb_so_count:-0} native libs (expected >=35)"
+# 2026-07-19 — Y1 no longer bakes org.rockbox (Solar-only). Was: require org.rockbox.apk + librockbox.so.
+if debugfs -R "stat /app/org.rockbox.apk" "$sys" 2>/dev/null | grep -q 'Type: regular'; then
+    fail "org.rockbox.apk must not ship on Y1 Solar ROM"
+fi
+if debugfs -R "stat /lib/librockbox.so" "$sys" 2>/dev/null | grep -q 'Type: regular'; then
+    fail "librockbox.so must not ship on Y1 Solar ROM"
+fi
 
 for p in \
     /etc/solar/switch-to-stock.sh \
-    /etc/solar/switch-to-rockbox.sh \
     /etc/solar/sync-y1-keymap.sh \
     /etc/solar/sync-rockbox-libs.sh \
     /etc/solar/sync-rockbox-assets.sh \
@@ -100,6 +93,9 @@ for p in \
     /app/io.github.gohoski.notpipe.apk; do
     require_path "$p" || fail "missing $p"
 done
+if debugfs -R "stat /etc/solar/switch-to-rockbox.sh" "$sys" 2>/dev/null | grep -q 'Type: regular'; then
+    fail "switch-to-rockbox.sh must not ship on Y1 Solar ROM"
+fi
 
 if ! debugfs_cat /etc/init.d/99XposedInit.sh | grep -q 'com.solar.launcher.xposed.themefont'; then
     fail "99XposedInit.sh must enable com.solar.launcher.xposed.themefont"
@@ -188,6 +184,11 @@ fi
 
 chmod +x "$SCRIPT_DIR/verify-rom-app-allowlist.sh"
 "$SCRIPT_DIR/verify-rom-app-allowlist.sh" "$sys" || fail "system APK allowlist audit"
+
+# 2026-07-19 — Koensayr bluetooth pairing conf bake.
+# shellcheck source=lib-verify-bluetooth-pairing.sh
+source "$SCRIPT_DIR/lib-verify-bluetooth-pairing.sh"
+verify_bluetooth_pairing_conf_debugfs "$sys"
 
 if [ "$errors" -ne 0 ]; then
     die "$errors check(s) failed — rebuild with ./solar-rom/scripts/build-rom.sh a|b"

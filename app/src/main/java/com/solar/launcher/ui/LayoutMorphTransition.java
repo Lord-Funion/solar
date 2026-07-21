@@ -137,4 +137,14 @@ public final class LayoutMorphTransition {
         if (host == null || animating || ScreenTransition.isAnimating()) return false;
         return !ScreenTransition.systemAnimationsDisabled(host.getContext());
     }
+
+    /**
+     * 2026-07-19 — Drop stuck dual-pane morph so Back/nav isAnimating is not held forever.
+     * Layman: stop a half-finished width morph that was blocking the next Back.
+     * Technical: clear animating only; layout params stay at last frame (applyScreenChange fixes).
+     * Reversal: delete; leave morph flag sticky until ValueAnimator end.
+     */
+    public static void abort() {
+        animating = false;
+    }
 }

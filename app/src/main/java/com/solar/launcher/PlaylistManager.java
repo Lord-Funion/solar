@@ -287,4 +287,138 @@ public final class PlaylistManager {
     if (m3u == null || !m3u.isFile()) return false;
     return m3u.delete();
   }
+
+  /**
+   * 2026-07-20 — Soft safety net for streamed add-to-playlist (not the primary windowing strategy).
+   * Layman: stop after this many new songs so a huge artist cannot fill all RAM with File objects.
+   * Reversal: Integer.MAX_VALUE or rely only on caller-side collect.
+   */
+  public static final int PATH_CHUNK_SOFT_CAP = 50_000;
+
+  /**
+   * 2026-07-20 — One page of absolute paths for streamed playlist write.
+   * Layman: hand the writer the next small batch of song paths, then forget them.
+   * Technical: null/empty ends the stream; PlaylistManager never holds the full add set.
+   */
+  public interface PathChunkSource {
+    /** Next absolute path page; null or empty means done. */
+    List<String> nextChunk();
+  }
+
+  /**
+   * 2026-07-20 — Create M3U by streaming path chunks (no full File list in RAM).
+   * Layman: build a new playlist one small batch of songs at a time.
+   * Technical: writes #EXTM3U lines as chunks arrive; softCap stops runaway adds.
+   * Reversal: {@link #createPlaylist(File, String, List)}.
+   * @return entry with empty tracks list + caller uses {@link ChunkWriteResult#added} for toast count
+   */
+  public static ChunkWriteResult createPlaylistFromPathChunks(File musicRoot, String displayName,
+          PathChunkSource source, int softCap) throws Exception {
+    if (musicRoot == null || !musicRoot.isDirectory()) {
+      throw new IllegalArgumentException("musicRoot");
+    }
+    File dir = playlistsDir(musicRoot);
+    if (!dir.exists() && !dir.mkdirs()) {
+      throw new IllegalStateException("mkdir Playlists");
+    }
+    String label = displayName != null ? displayName.trim() : "";
+    if (label.isEmpty()) label = "Playlist";
+    File dest = uniqueM3uFile(dir, label);
+    int cap = softCap > 0 ? softCap : PATH_CHUNK_SOFT_CAP;
+    int written = writeM3uFromChunks(dest, null, source, cap);
+    return new ChunkWriteResult(new Entry(label, dest, new ArrayList<File>()), written);
+  }
+
+  /**
+   * 2026-07-20 — Append path chunks to an existing M3U with path dedupe (streamed).
+   * Layman: add songs to a playlist in small batches instead of one giant list in memory.
+   * Technical: existing paths stay in a String set for dedupe; new paths written in pages.
+   * Reversal: {@link #appendTracks(File, File, List)}.
+   */
+  public static ChunkWriteResult appendPathChunks(File m3u, File musicRoot, PathChunkSource source,
+          int softCap) throws Exception {
+    if (m3u == null || !m3u.isFile()) throw new IllegalArgumentException("m3u");
+    Entry existing = parse(m3u, musicRoot);
+    java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<String>();
+    for (File t : existing.tracks) {
+      if (t == null || !t.isFile()) continue;
+      seen.add(canonicalKey(t));
+    }
+    int cap = softCap > 0 ? softCap : PATH_CHUNK_SOFT_CAP;
+    int added = writeM3uFromChunks(m3u, seen, source, cap);
+    return new ChunkWriteResult(new Entry(existing.name, m3u, new ArrayList<File>()), added);
+  }
+
+  /** 2026-07-20 — Result of a streamed playlist write (entry + how many paths added). */
+  public static final class ChunkWriteResult {
+    public final Entry entry;
+    public final int added;
+
+    public ChunkWriteResult(Entry entry, int added) {
+      this.entry = entry;
+      this.added = added;
+    }
+  }
+
+  /**
+   * 2026-07-20 — Write #EXTM3U: optional existing seen-keys first, then stream new path chunks.
+   * Layman: open the playlist file and copy song paths in, a page at a time.
+   * Technical: when seen!=null, rewrite existing keys then append unseen chunk paths.
+   */
+  private static int writeM3uFromChunks(File dest, java.util.LinkedHashSet<String> seen,
+          PathChunkSource source, int softCap) throws Exception {
+    File parent = dest.getParentFile();
+    if (parent != null && !parent.exists()) parent.mkdirs();
+    File tmp = new File(dest.getAbsolutePath() + ".tmp");
+    BufferedWriter w = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(tmp), "UTF-8"));
+    int added = 0;
+    try {
+      w.write("#EXTM3U\n");
+      if (seen != null) {
+        for (String key : seen) {
+          if (key == null || key.isEmpty()) continue;
+          File t = new File(key);
+          if (!t.isFile()) continue;
+          writeExtInfLine(w, t);
+        }
+      }
+      if (source != null) {
+        if (seen == null) seen = new java.util.LinkedHashSet<String>();
+        while (added < softCap) {
+          List<String> chunk = source.nextChunk();
+          if (chunk == null || chunk.isEmpty()) break;
+          for (int i = 0; i < chunk.size() && added < softCap; i++) {
+            String path = chunk.get(i);
+            if (path == null || path.isEmpty()) continue;
+            File t = new File(path);
+            if (!t.isFile()) continue;
+            String key = canonicalKey(t);
+            if (!seen.add(key)) continue;
+            writeExtInfLine(w, t);
+            added++;
+          }
+        }
+      }
+    } finally {
+      w.close();
+    }
+    if (dest.exists() && !dest.delete()) {
+      tmp.delete();
+      throw new IllegalStateException("replace m3u");
+    }
+    if (!tmp.renameTo(dest)) {
+      tmp.delete();
+      throw new IllegalStateException("rename m3u");
+    }
+    return added;
+  }
+
+  /** Write one #EXTINF + path line for an audio file. 2026-07-20 */
+  private static void writeExtInfLine(BufferedWriter w, File t) throws Exception {
+    String title = t.getName();
+    int dot = title.lastIndexOf('.');
+    if (dot > 0) title = title.substring(0, dot);
+    w.write("#EXTINF:-1," + title + "\n");
+    w.write(t.getAbsolutePath() + "\n");
+  }
 }

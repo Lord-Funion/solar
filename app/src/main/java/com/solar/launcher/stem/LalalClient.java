@@ -225,11 +225,15 @@ public final class LalalClient {
     }
 
     /**
-     * Upload → multistem → download on workDir → optional experimental premix → publish.
-     * Default: keep all Melody/Other MP3s for synced multi-player (zone 3).
-     * 2026-07-19
+     * Upload → multistem → download on workDir → optional premix; play from work only.
+     * Layman: peel the song into scratch stems and start playing — save later.
+     * Technical: no {@link #publishStems} here; callers use {@link StemDeferredPublish}.
+     * Was: copied to durableDir + cleared work before mixers opened (SD write hitch).
+     * Reversal: restore publish block when workDir≠durableDir.
+     * durableDir kept for API compat (ignored when deferred). 2026-07-19 / 2026-07-21
      */
-    public List<StemFile> separateToMp3(File source, File workDir, File durableDir,
+    public List<StemFile> separateToMp3(File source, File workDir,
+            @SuppressWarnings("unused") File durableDir,
             boolean premixExperimental, Progress progress) throws Exception {
         if (licenseKey.length() < 8) throw new IOException("Lalal license key missing");
         if (source == null || !source.isFile()) throw new IOException("Source track missing");
@@ -262,15 +266,8 @@ public final class LalalClient {
         }
         throwIfCancelled();
 
-        File finalDir = durableDir != null ? durableDir : workDir;
-        if (!sameDir(workDir, finalDir)) {
-            emit(progress, "publish", 97, "Copying to storage…");
-            pads = publishStems(pads, finalDir, source);
-            clearDirQuiet(workDir);
-        } else {
-            // Same folder — still stamp basename so remounts find this leaf. 2026-07-19
-            writeTrackMarker(finalDir, source);
-        }
+        // durableDir ignored — durable copy via StemDeferredPublish after playback. 2026-07-21
+        writeTrackMarker(workDir, source);
         emit(progress, "ready", 100, "Ready");
         return pads;
     }
@@ -292,12 +289,16 @@ public final class LalalClient {
      * Layman: one cloud job peels the voice and the band for Now Playing.
      * Technical: POST /split/stem_separator/ stem=vocals → download type stem + back.
      * Reversal: use separateToMp3 only.
+     * 2026-07-21 — Downloads to solo work only; sibling publish via {@link StemDeferredPublish}.
+     * Was: immediate {@link #publishSoloSiblings} before NP could play. Reversal: restore that call.
      */
     public void separateSoloToFiles(File source, File soloDir, Progress progress) throws Exception {
         if (licenseKey.length() < 8) throw new IOException("Lalal license key missing");
         if (source == null || !source.isFile()) throw new IOException("Source track missing");
-        if (soloDir == null) throw new IOException("Solo dir missing");
-        soloDir.mkdirs();
+        // Work scratch under soloDir (cache); durable siblings deferred. 2026-07-19 / 2026-07-21
+        File work = soloDir != null ? soloDir : SoloStemPaths.ensureSiblingDir(source, SoloMode.INSTRUMENTAL);
+        if (work == null) throw new IOException("Solo dir missing");
+        work.mkdirs();
 
         throwIfCancelled();
         emit(progress, "upload", 0, "Connecting…");
@@ -312,23 +313,71 @@ public final class LalalClient {
         throwIfCancelled();
         emit(progress, "download", 70, "Fetching vocals + instrumental…");
 
-        File vocalsOut = new File(soloDir, "vocals.mp3");
-        File instrOut = new File(soloDir, "instrumental.mp3");
+        File vocalsWork = new File(work, "vocals.mp3");
+        File instrWork = new File(work, "instrumental.mp3");
         String stemUrl = typed.get("stem");
         String backUrl = typed.get("back");
         if (stemUrl != null && stemUrl.length() > 0) {
-            download(stemUrl, vocalsOut);
+            emit(progress, "download", 75, "Downloading acapella…");
+            download(stemUrl, vocalsWork);
         }
         if (backUrl != null && backUrl.length() > 0) {
-            download(backUrl, instrOut);
+            emit(progress, "download", 88, "Downloading instrumental…");
+            download(backUrl, instrWork);
         }
-        boolean gotVocals = vocalsOut.isFile() && vocalsOut.length() >= 100;
-        boolean gotInstr = instrOut.isFile() && instrOut.length() >= 100;
+        boolean gotVocals = vocalsWork.isFile() && vocalsWork.length() >= 100;
+        boolean gotInstr = instrWork.isFile() && instrWork.length() >= 100;
         if (!gotVocals && !gotInstr) {
             throw new IOException("Solo split returned no downloadable tracks");
         }
-        writeTrackMarker(soloDir, source);
+        // Marker only — sibling copy deferred so NP can start. 2026-07-21
+        writeTrackMarker(work, source);
         emit(progress, "ready", 100, "Ready");
+    }
+
+    /**
+     * Copy work vocals/instrumental into sibling .acapellas / .instrumentals folders.
+     * Layman: put the peeled files next to the song under hidden folders.
+     * 2026-07-19
+     */
+    public static void publishSoloSiblings(File source, File vocalsWork, File instrWork) {
+        if (source == null || !source.isFile()) return;
+        File acapDest = null;
+        File instrDest = null;
+        if (vocalsWork != null && vocalsWork.isFile() && vocalsWork.length() >= 100) {
+            SoloStemPaths.ensureSiblingDir(source, SoloMode.ACAPELLA);
+            File dest = SoloStemPaths.siblingSoloFile(source, SoloMode.ACAPELLA, "mp3");
+            if (dest != null) {
+                copyFileQuiet(vocalsWork, dest);
+                acapDest = dest;
+            }
+        }
+        if (instrWork != null && instrWork.isFile() && instrWork.length() >= 100) {
+            SoloStemPaths.ensureSiblingDir(source, SoloMode.INSTRUMENTAL);
+            String ext = instrWork.getName().toLowerCase(java.util.Locale.US).endsWith(".wav")
+                    ? "wav" : "mp3";
+            File dest = SoloStemPaths.siblingSoloFile(source, SoloMode.INSTRUMENTAL, ext);
+            if (dest != null) {
+                copyFileQuiet(instrWork, dest);
+                instrDest = dest;
+            }
+        }
+        // #region agent log
+        try {
+            org.json.JSONObject d = new org.json.JSONObject();
+            d.put("source", source.getName());
+            d.put("sourcePath", source.getAbsolutePath());
+            d.put("vocalsWork", vocalsWork != null ? vocalsWork.getAbsolutePath() : "null");
+            d.put("vocalsSize", vocalsWork != null ? vocalsWork.length() : -1L);
+            d.put("instrWork", instrWork != null ? instrWork.getAbsolutePath() : "null");
+            d.put("instrSize", instrWork != null ? instrWork.length() : -1L);
+            d.put("acapDest", acapDest != null ? acapDest.getAbsolutePath() : "null");
+            d.put("instrDest", instrDest != null ? instrDest.getAbsolutePath() : "null");
+            d.put("dualOk", acapDest != null && instrDest != null);
+            com.solar.launcher.Debug072d46Log.log(
+                    "LalalClient.publishSoloSiblings", "published", "H-F", d);
+        } catch (Exception ignored) {}
+        // #endregion
     }
 
     /**
@@ -468,20 +517,106 @@ public final class LalalClient {
     }
 
     /**
-     * Local solo file if present and owned by track. 2026-07-19
+     * Local solo file if present — sibling folders first, then legacy stem_solo cache.
+     * 2026-07-19 — Prefer …/.instrumentals|/.acapellas/&lt;basename&gt;.
+     * Was: stem_solo leaf only. Reversal: skip sibling check.
      */
     public static File findReadySoloFile(android.content.Context ctx, File track, SoloMode mode,
             File appCache) {
         if (track == null || !track.isFile() || mode == null) return null;
+        File sibling = SoloStemPaths.findReadySibling(track, mode);
+        if (sibling != null) {
+            // #region agent log
+            try {
+                org.json.JSONObject d = new org.json.JSONObject();
+                d.put("track", track.getName());
+                d.put("trackPath", track.getAbsolutePath());
+                d.put("mode", mode.name());
+                d.put("branch", "sibling");
+                d.put("hit", sibling.getAbsolutePath());
+                d.put("hitSize", sibling.length());
+                d.put("stableKey", cacheKeyStable(track));
+                com.solar.launcher.Debug072d46Log.log(
+                        "LalalClient.findReadySoloFile", "hit", "H-B", d);
+            } catch (Exception ignored) {}
+            // #endregion
+            return sibling;
+        }
         File cache = appCache != null ? appCache : (ctx != null ? ctx.getCacheDir() : null);
         File dir = soloDir(cache, track);
         if (dir != null && dir.isDirectory() && stemDirOwnedByTrack(dir, track)) {
             File f = mode == SoloMode.ACAPELLA
                     ? new File(dir, "vocals.mp3")
                     : resolveInstrumentalFile(dir);
-            if (f != null && f.isFile() && f.length() >= 100) return f;
+            if (f != null && f.isFile() && f.length() >= 100) {
+                // #region agent log
+                try {
+                    org.json.JSONObject d = new org.json.JSONObject();
+                    d.put("track", track.getName());
+                    d.put("mode", mode.name());
+                    d.put("branch", "soloCache");
+                    d.put("dir", dir.getAbsolutePath());
+                    d.put("hit", f.getAbsolutePath());
+                    d.put("markerOk", markerMatchesTrack(dir, track));
+                    d.put("stableKey", cacheKeyStable(track));
+                    com.solar.launcher.Debug072d46Log.log(
+                            "LalalClient.findReadySoloFile", "hit", "H-B,H-E", d);
+                } catch (Exception ignored) {}
+                // #endregion
+                return f;
+            }
         }
-        return findSoloFromFullStems(ctx, track, mode, cache);
+        File fromFull = findSoloFromFullStems(ctx, track, mode, cache);
+        // #region agent log
+        try {
+            org.json.JSONObject d = new org.json.JSONObject();
+            d.put("track", track.getName());
+            d.put("mode", mode.name());
+            d.put("branch", fromFull != null ? "fullStems" : "miss");
+            d.put("hit", fromFull != null ? fromFull.getAbsolutePath() : "null");
+            d.put("stableKey", cacheKeyStable(track));
+            com.solar.launcher.Debug072d46Log.log(
+                    "LalalClient.findReadySoloFile",
+                    fromFull != null ? "hit" : "miss", "H-E", d);
+        } catch (Exception ignored) {}
+        // #endregion
+        return fromFull;
+    }
+
+    /**
+     * 2026-07-20 — UI-safe solo presence: sibling folders + solo leaf only (no stem-root scan).
+     * Layman: quick check that Instrumental/Acapella files sit next to the song or in cache.
+     * Technical: skip {@link #findSoloFromFullStems} / {@link #findReadyStemDir}.
+     * Was: menu used findReadySoloFile (could walk lalal_stems). Reversal: call that instead.
+     */
+    public static File findReadySoloFileFast(File track, SoloMode mode, File appCache) {
+        if (track == null || !track.isFile() || mode == null) return null;
+        File sibling = SoloStemPaths.findReadySibling(track, mode);
+        if (sibling != null) return sibling;
+        File dir = soloDir(appCache, track);
+        if (dir == null || !dir.isDirectory()) return null;
+        File f = mode == SoloMode.ACAPELLA
+                ? new File(dir, "vocals.mp3")
+                : resolveInstrumentalFile(dir);
+        if (f != null && f.isFile() && f.length() >= 100) return f;
+        return null;
+    }
+
+    /**
+     * 2026-07-20 — Offline menu gate without stem-root walks.
+     * Layman: only look beside the song or in its tiny solo cache / user .stems folder.
+     * Technical: sibling/leaf + {@link #userStemsReady} / vocals pad — never {@link #findReadyStemDir}.
+     * Reversal: call {@link #hasOfflineSoloSource}.
+     */
+    public static boolean hasOfflineSoloSourceFast(File track, SoloMode mode, File appCache) {
+        if (track == null || !track.isFile() || mode == null) return false;
+        if (findReadySoloFileFast(track, mode, appCache) != null) return true;
+        if (mode == SoloMode.ACAPELLA) {
+            File vocals = resolveStemFile(userStemsDir(track), "vocals");
+            return vocals != null && vocals.isFile() && vocals.length() >= 100;
+        }
+        // Instrumental can bake from full pads when user sidecar is complete. 2026-07-20
+        return userStemsReady(track);
     }
 
     /** Prefer instrumental.mp3 then instrumental.wav. 2026-07-19 */
@@ -521,6 +656,32 @@ public final class LalalClient {
     }
 
     /**
+     * True when offline can still produce this solo without cloud (bake pads / full-stem vocals).
+     * Layman: Stem Player files already on the player mean Instrumental can be mixed offline.
+     * Technical: INSTRUMENTAL → findReadyStemDir; ACAPELLA → findSoloFromFullStems vocals.
+     * Was: menus used opt-in alone offline. Reversal: ignore this helper in canOfferSoloMode.
+     * 2026-07-19
+     */
+    public static boolean hasOfflineSoloSource(android.content.Context ctx, File track, SoloMode mode,
+            File appCache) {
+        if (track == null || !track.isFile() || mode == null) return false;
+        File cache = appCache != null ? appCache : (ctx != null ? ctx.getCacheDir() : null);
+        if (mode == SoloMode.INSTRUMENTAL) {
+            if (findReadyStemDir(ctx, track, false, cache) != null) return true;
+            if (ctx == null) return false;
+            try {
+                android.content.SharedPreferences prefs =
+                        ctx.getSharedPreferences(LalalAccount.PREFS_NAME, 0);
+                return findReadyStemDir(ctx, track,
+                        LalalAccount.isPremixExperimental(prefs), cache) != null;
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+        return findSoloFromFullStems(ctx, track, mode, cache) != null;
+    }
+
+    /**
      * Bake instrumental.wav from drum+bass+melody pads into solo leaf (CPU only).
      * 2026-07-19
      */
@@ -552,21 +713,26 @@ public final class LalalClient {
             }
         }
         if (parts.isEmpty()) throw new IOException("No non-vocal stems to bake");
+        // Bake into sibling .instrumentals; keep legacy solo leaf as work scratch. 2026-07-19
         File solo = soloDir(cache, track);
         solo.mkdirs();
-        File out = new File(solo, "instrumental.wav");
+        File workOut = new File(solo, "instrumental.wav");
         emit(progress, "mix", 50, "Baking instrumental…");
-        StemOtherPremix.mixToMonoWav(parts, out, null, null);
+        StemOtherPremix.mixToMonoWav(parts, workOut, null, null);
         writeTrackMarker(solo, track);
         File vocals = resolveStemFile(stemDir, "vocals");
+        File vocalsWork = null;
         if (vocals != null) {
-            File vOut = new File(solo, "vocals.mp3");
-            if (!vOut.isFile() || vOut.length() < 100) {
-                copyFileQuiet(vocals, vOut);
+            vocalsWork = new File(solo, "vocals.mp3");
+            if (!vocalsWork.isFile() || vocalsWork.length() < 100) {
+                copyFileQuiet(vocals, vocalsWork);
             }
         }
+        emit(progress, "publish", 90, "Saving beside track…");
+        publishSoloSiblings(track, vocalsWork, workOut);
+        File sibling = SoloStemPaths.findReadySibling(track, SoloMode.INSTRUMENTAL);
         emit(progress, "ready", 100, "Ready");
-        return out;
+        return sibling != null ? sibling : workOut;
     }
 
     private static void copyFileQuiet(File src, File dest) {
@@ -617,24 +783,27 @@ public final class LalalClient {
     }
 
     /**
-     * Durable stem home — internal cache when room; else preferred media volume cache.
-     * 2026-07-19
+     * Durable stem vault leaf — internal MMC first, MicroSD next, app cache last.
+     * Layman: long-term stem shelf prefers the phone chip over the SD card.
+     * Technical: {@link StemDurableRoots#pick}; was getNewMediaRoot (Primary=MicroSD bias).
+     * Reversal: restore app-cache-first + getNewMediaRoot overflow.
+     * 2026-07-19 / 2026-07-21
      */
     public static File durableStemDir(android.content.Context ctx, File track, boolean premix) {
         if (ctx == null) return null;
-        long need = premix ? 48L * 1024L * 1024L : 80L * 1024L * 1024L;
-        File internalRoot = ctx.getCacheDir();
-        File internal = stemCacheDir(internalRoot, track, premix);
-        if (com.solar.launcher.StreamCacheRoot.hasSpace(internalRoot, need)) {
-            return internal;
-        }
-        File media = com.solar.launcher.DeviceFeatures.getNewMediaRoot(ctx);
-        if (media == null) return internal;
-        File overflow = new File(new File(media,
-                "Android/data/" + ctx.getPackageName() + "/cache/lalal_stems"),
-                cacheLeaf(track, premix));
-        overflow.mkdirs();
-        return overflow;
+        long need = StemDurableRoots.needBytes(premix);
+        File appVault = new File(ctx.getCacheDir(), "lalal_stems");
+        File internalVault = StemDurableRoots.volumeVault(
+                com.solar.launcher.DeviceFeatures.getInternalStorageRoot(),
+                ctx.getPackageName());
+        File microVault = StemDurableRoots.volumeVault(
+                com.solar.launcher.DeviceFeatures.getMicroSdRoot(),
+                ctx.getPackageName());
+        File vault = StemDurableRoots.pick(internalVault, microVault, appVault, need);
+        if (vault == null) vault = appVault;
+        File leaf = new File(vault, cacheLeaf(track, premix));
+        leaf.mkdirs();
+        return leaf;
     }
 
     /** @deprecated Prefer overload with premix flag. */
@@ -695,9 +864,12 @@ public final class LalalClient {
     }
 
     /**
-     * True when marker names this track AND the leaf folder is that track’s cache key
-     * (or a user {@code *.stems} sidecar). Blocks poisoned markers on another song’s leaf.
-     * 2026-07-19
+     * True when marker names this track AND the leaf belongs to it (stable key, path key, or
+     * remounted path-drift with matching basename+size marker).
+     * Blocks poisoned markers on unrelated leaves without a matching marker.
+     * Was: stable key in leaf only — missed legacy path-keyed caches after remount.
+     * Reversal: require leaf.indexOf(cacheKeyStable) only.
+     * 2026-07-20
      */
     public static boolean stemDirOwnedByTrack(File dir, File track) {
         if (dir == null || track == null) return false;
@@ -705,7 +877,12 @@ public final class LalalClient {
         String leaf = dir.getName();
         if (leaf != null && leaf.endsWith(".stems")) return true; // user sidecar
         String key = cacheKeyStable(track);
-        return leaf != null && key != null && leaf.indexOf(key) >= 0;
+        if (leaf != null && key != null && leaf.indexOf(key) >= 0) return true;
+        String pathKey = cacheKeyFor(track);
+        if (leaf != null && pathKey != null && leaf.indexOf(pathKey) >= 0) return true;
+        // Path-drifted legacy leaf: marker already matched basename+size. 2026-07-20
+        return leaf != null
+                && (leaf.indexOf("_live_") >= 0 || leaf.indexOf("_premix_") >= 0);
     }
 
     /**
@@ -753,7 +930,12 @@ public final class LalalClient {
         }
     }
 
-    static void clearDirQuiet(File dir) {
+    /**
+     * Delete files inside a stem leaf and the folder itself (best-effort).
+     * Layman: throw away a scratch stem folder quietly.
+     * 2026-07-21
+     */
+    public static void clearDirQuiet(File dir) {
         if (dir == null || !dir.isDirectory()) return;
         File[] kids = dir.listFiles();
         if (kids == null) return;
@@ -965,21 +1147,80 @@ public final class LalalClient {
             org.json.JSONObject d = new org.json.JSONObject();
             d.put("totalMs", System.currentTimeMillis() - t0);
             d.put("count", out.size());
-            com.solar.launcher.Debug543e15Log.log(
+            StringBuilder ids = new StringBuilder();
+            StringBuilder sizes = new StringBuilder();
+            for (int i = 0; i < out.size(); i++) {
+                StemFile s = out.get(i);
+                if (ids.length() > 0) {
+                    ids.append(',');
+                    sizes.append(',');
+                }
+                ids.append(s != null ? s.id : "?");
+                sizes.append(s != null && s.file != null ? s.file.length() : -1);
+            }
+            d.put("ids", ids.toString());
+            d.put("sizes", sizes.toString());
+            d.put("hasAcoustic", ids.toString().contains("acoustic_guitar"));
+            d.put("hasResidual", ids.toString().contains(RESIDUAL_ID));
+            com.solar.launcher.Debug75a361Log.log(
                     "LalalClient.downloadStemsParallel:end",
-                    "parallel stem download done",
-                    "STEM_DL",
+                    "downloaded stem set",
+                    "B",
                     d);
         } catch (Exception ignored) {}
         // #endregion
         return out;
     }
 
+    /**
+     * ASCII-safe name for Content-Disposition only — bytes stay the real file.
+     * Layman: titles with ’ or " used to break Lalal upload headers (“unexpected char”).
+     * Technical: strip quotes/controls/non-ASCII; keep letters, digits, ._- ; empty → track.mp3.
+     * Reversal: pass {@code file.getName()} raw into the header.
+     * 2026-07-20
+     */
+    public static String uploadFileNameForHeader(String rawName) {
+        if (rawName == null || rawName.isEmpty()) return "track.mp3";
+        String name = rawName;
+        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        if (slash >= 0 && slash + 1 < name.length()) name = name.substring(slash + 1);
+        StringBuilder sb = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+                    || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
+                sb.append(c);
+            } else if (c == ' ' || c == '\'' || c == '\u2019' || c == '\u2018') {
+                // 2026-07-20 — Spaces and apostrophes (ASCII + curly) → underscore (header-safe).
+                sb.append('_');
+            } else if (c > 127) {
+                sb.append('_');
+            }
+            // Drop quotes, backslash, controls, and other punctuation.
+        }
+        String out = sb.toString();
+        while (out.contains("..")) out = out.replace("..", ".");
+        // 2026-07-20 — All-punctuation input (e.g. ''') must not ship as "___".
+        boolean hasAlnum = false;
+        for (int i = 0; i < out.length(); i++) {
+            char c = out.charAt(i);
+            if (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+                hasAlnum = true;
+                break;
+            }
+        }
+        if (!hasAlnum || out.isEmpty() || out.equals(".") || out.equals("..")) {
+            return "track.mp3";
+        }
+        if (out.charAt(0) == '.') out = "t" + out;
+        return out;
+    }
+
     /** Binary upload — Content-Disposition filename; returns source id. */
     String upload(File file) throws Exception {
         RequestBody body = RequestBody.create(MediaType.parse("application/octet-stream"), file);
-        String name = file.getName();
-        if (name == null || name.isEmpty()) name = "track.mp3";
+        // 2026-07-20 — Sanitize header name; apostrophes/' broke Lalal (“unexpected char”).
+        String name = uploadFileNameForHeader(file != null ? file.getName() : null);
         Request req = new Request.Builder()
                 .url(BASE + "/api/v1/upload/")
                 .header("X-License-Key", licenseKey)
@@ -1277,6 +1518,32 @@ public final class LalalClient {
      */
     public static List<StemFile> loadCached(File dir, boolean premixExperimental) {
         List<StemFile> flex = loadStemDirFlexible(dir);
+        // #region agent log
+        try {
+            org.json.JSONObject d = new org.json.JSONObject();
+            d.put("dir", dir != null ? dir.getName() : "");
+            d.put("premix", premixExperimental);
+            d.put("flexCount", flex != null ? flex.size() : -1);
+            int others = 0;
+            StringBuilder ids = new StringBuilder();
+            if (flex != null) {
+                for (int i = 0; i < flex.size(); i++) {
+                    StemFile s = flex.get(i);
+                    if (s == null) continue;
+                    if (ids.length() > 0) ids.append(',');
+                    ids.append(s.id).append(':').append(s.zone);
+                    if (s.zone == 3) others++;
+                }
+            }
+            d.put("flexIds", ids.toString());
+            d.put("otherCount", others);
+            com.solar.launcher.Debug75a361Log.log(
+                    "LalalClient.loadCached",
+                    premixExperimental ? "premix path" : "live collapse path",
+                    premixExperimental ? "C" : "A",
+                    d);
+        } catch (Exception ignored) {}
+        // #endregion
         if (premixExperimental) {
             int others = 0;
             for (int i = 0; i < flex.size(); i++) {
@@ -1306,6 +1573,10 @@ public final class LalalClient {
         StemFile melodyAlias = null;
         StemFile melodyResidual = null;
         StemFile melodyOther = null;
+        // #region agent log
+        StringBuilder z3Ids = new StringBuilder();
+        StringBuilder z3Sizes = new StringBuilder();
+        // #endregion
         for (int i = 0; i < stems.size(); i++) {
             StemFile s = stems.get(i);
             if (s == null || s.file == null || !s.file.isFile()) continue;
@@ -1316,6 +1587,14 @@ public final class LalalClient {
                 continue;
             }
             String id = s.id != null ? s.id : "";
+            // #region agent log
+            if (z3Ids.length() > 0) {
+                z3Ids.append(',');
+                z3Sizes.append(',');
+            }
+            z3Ids.append(id);
+            z3Sizes.append(s.file.length());
+            // #endregion
             if ("melody".equals(id) || "other".equals(id)
                     || "instruments".equals(id) || "samples".equals(id)
                     || (s.file.getName() != null
@@ -1327,12 +1606,45 @@ public final class LalalClient {
                 melodyOther = s;
             }
         }
-        if (melodyAlias != null) byZone[3] = melodyAlias;
-        else if (melodyResidual != null) byZone[3] = melodyResidual;
-        else byZone[3] = melodyOther;
+        // Prefer alias → residual → first named other (piano/guitars). 2026-07-19
+        String pickReason;
+        if (melodyAlias != null) {
+            byZone[3] = melodyAlias;
+            pickReason = "alias";
+        } else if (melodyResidual != null) {
+            byZone[3] = melodyResidual;
+            pickReason = "residual_over_named";
+        } else {
+            byZone[3] = melodyOther;
+            pickReason = "named_other";
+        }
         for (int z = 0; z < 4; z++) {
             if (byZone[z] != null) out.add(byZone[z]);
         }
+        // #region agent log
+        try {
+            org.json.JSONObject d = new org.json.JSONObject();
+            d.put("z3Candidates", z3Ids.toString());
+            d.put("z3Sizes", z3Sizes.toString());
+            d.put("pickReason", pickReason);
+            StemFile mel = byZone[3];
+            d.put("pickedId", mel != null ? mel.id : "");
+            d.put("pickedBytes", mel != null && mel.file != null ? mel.file.length() : -1);
+            d.put("hadAcoustic", z3Ids.toString().contains("acoustic_guitar"));
+            d.put("hadElectric", z3Ids.toString().contains("electric_guitar"));
+            d.put("hadPiano", z3Ids.toString().contains("piano"));
+            d.put("hadResidual", z3Ids.toString().contains(RESIDUAL_ID));
+            d.put("discardedNamed", "residual_over_named".equals(pickReason)
+                    && (z3Ids.toString().contains("acoustic_guitar")
+                    || z3Ids.toString().contains("electric_guitar")
+                    || z3Ids.toString().contains("piano")));
+            com.solar.launcher.Debug75a361Log.log(
+                    "LalalClient.collapseToOnePadPerZone",
+                    "melody pad pick",
+                    "A",
+                    d);
+        } catch (Exception ignored) {}
+        // #endregion
         return out;
     }
 
@@ -1381,6 +1693,8 @@ public final class LalalClient {
      */
     public static boolean isStemLibraryArtifact(File f) {
         if (f == null) return false;
+        // 2026-07-19 — Sibling .instrumentals / .acapellas never enter the music library.
+        if (SoloStemPaths.isSiblingSoloPath(f)) return true;
         File cur = f;
         // Walk parents so Song.stems/vocals.mp3 and Song.stems itself both match.
         while (cur != null) {
@@ -1389,7 +1703,9 @@ public final class LalalClient {
                 if (name.endsWith(".stems")) return true;
                 // 2026-07-19 — Solo NP cache + work/stems leaves are pads, not library songs.
                 if ("lalal_stems".equals(name) || "lalal_work".equals(name)
-                        || "lalal_solo".equals(name) || "stem_solo".equals(name)) {
+                        || "lalal_solo".equals(name) || "stem_solo".equals(name)
+                        || SoloStemPaths.DIR_INSTRUMENTALS.equals(name)
+                        || SoloStemPaths.DIR_ACAPELLAS.equals(name)) {
                     return true;
                 }
             }
@@ -1421,18 +1737,45 @@ public final class LalalClient {
      */
     public static java.util.HashSet<String> indexReadyOriginatingPaths(
             android.content.Context ctx, java.util.List<File> libraryTracks, File appCache) {
+        // 2026-07-20 — Build path→size then share SEGMENTED map path.
+        java.util.HashMap<String, Long> pathToSize = new java.util.HashMap<String, Long>();
+        if (libraryTracks != null) {
+            for (int i = 0; i < libraryTracks.size(); i++) {
+                File t = libraryTracks.get(i);
+                if (t == null || !t.isFile() || isStemLibraryArtifact(t)) continue;
+                long sz = t.length();
+                if (sz <= 0L) continue;
+                pathToSize.put(t.getAbsolutePath(), Long.valueOf(sz));
+            }
+        }
+        return indexReadyOriginatingPaths(ctx, pathToSize, appCache);
+    }
+
+    /**
+     * 2026-07-20 — Has Stems index from SQLite path→size (SEGMENTED empty customLibrary).
+     * Layman: match stem folders to library songs using DB sizes, not a full in-RAM song list.
+     * Technical: basename|size map + sidecar probe + cache/work leaf scan.
+     * Was: require List&lt;File&gt; from customLibrary (empty under SEGMENTED). Reversal: File-list API only.
+     */
+    public static java.util.HashSet<String> indexReadyOriginatingPaths(
+            android.content.Context ctx, java.util.Map<String, Long> pathToSize, File appCache) {
         java.util.HashSet<String> out = new java.util.HashSet<String>();
-        if (libraryTracks == null || libraryTracks.isEmpty()) return out;
-        // basename|size → absolute path for marker match (size required). 2026-07-19
+        if (pathToSize == null || pathToSize.isEmpty()) return out;
+        // basename|size → absolute path for marker match (size required). 2026-07-19/20
         java.util.HashMap<String, String> byBaseSize = new java.util.HashMap<String, String>();
-        for (int i = 0; i < libraryTracks.size(); i++) {
-            File t = libraryTracks.get(i);
-            if (t == null || !t.isFile() || isStemLibraryArtifact(t)) continue;
+        for (java.util.Map.Entry<String, Long> e : pathToSize.entrySet()) {
+            if (e == null) continue;
+            String path = e.getKey();
+            Long sizeObj = e.getValue();
+            if (path == null || path.length() == 0 || sizeObj == null) continue;
+            long size = sizeObj.longValue();
+            if (size <= 0L) continue;
+            File t = new File(path);
+            if (isStemLibraryArtifact(t)) continue;
             String base = trackBaseName(t).toLowerCase();
-            String path = t.getAbsolutePath();
-            byBaseSize.put(base + "|" + t.length(), path);
-            // Cheap sidecar: Song.stems next to track. 2026-07-19
-            if (userStemsReady(t)) out.add(path);
+            byBaseSize.put(base + "|" + size, path);
+            // Cheap sidecar: Song.stems next to track (needs file on disk). 2026-07-19
+            if (t.isFile() && userStemsReady(t)) out.add(path);
         }
         java.util.List<File> roots = stemCacheRoots(ctx, appCache);
         for (int ri = 0; ri < roots.size(); ri++) {
@@ -1681,8 +2024,10 @@ public final class LalalClient {
     }
 
     /**
-     * Parent folders that may contain stem leaf dirs (internal + overflow + host appCache).
-     * 2026-07-19
+     * Parent folders that may contain stem leaf dirs (app + internal MMC before MicroSD).
+     * Layman: look for saved stems on the chip first, then the card.
+     * Was: getNewMediaRoot then micro then internal. Reversal: restore that order.
+     * 2026-07-19 / 2026-07-21
      */
     public static java.util.List<File> stemCacheRoots(android.content.Context ctx, File appCache) {
         java.util.ArrayList<File> roots = new java.util.ArrayList<File>();
@@ -1692,22 +2037,15 @@ public final class LalalClient {
             File cache = ctx.getCacheDir();
             addRoot(roots, seen, cache != null ? new File(cache, "lalal_stems") : null);
             try {
+                String pkg = ctx.getPackageName();
+                // Internal volume before MicroSD (matches durable pick). 2026-07-21
+                addRoot(roots, seen, StemDurableRoots.volumeVault(
+                        com.solar.launcher.DeviceFeatures.getInternalStorageRoot(), pkg));
+                addRoot(roots, seen, StemDurableRoots.volumeVault(
+                        com.solar.launcher.DeviceFeatures.getMicroSdRoot(), pkg));
+                // Legacy Primary-pref vault if still different from the two above. 2026-07-21
                 File media = com.solar.launcher.DeviceFeatures.getNewMediaRoot(ctx);
-                if (media != null) {
-                    addRoot(roots, seen, new File(media,
-                            "Android/data/" + ctx.getPackageName() + "/cache/lalal_stems"));
-                }
-                // Peer MicroSD / internal — both volume caches when dual-mounted. 2026-07-19
-                File micro = com.solar.launcher.DeviceFeatures.getMicroSdRoot();
-                File internal = com.solar.launcher.DeviceFeatures.getInternalStorageRoot();
-                if (micro != null) {
-                    addRoot(roots, seen, new File(micro,
-                            "Android/data/" + ctx.getPackageName() + "/cache/lalal_stems"));
-                }
-                if (internal != null) {
-                    addRoot(roots, seen, new File(internal,
-                            "Android/data/" + ctx.getPackageName() + "/cache/lalal_stems"));
-                }
+                addRoot(roots, seen, StemDurableRoots.volumeVault(media, pkg));
             } catch (Exception ignored) {}
         }
         return roots;

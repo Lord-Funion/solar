@@ -68,6 +68,18 @@ Active patchers (wired into the bash):
 
 Root escalation is handled by Y1 permissive `/system/xbin/su` (Y2 baked at ROM build via `vendor/y1-su/`; Y1 from rockbox base).
 
+## Solar ROM wiring (2026-07-19)
+
+| Device | Native AVRCP bake (`apply-avrcp-patches.sh`) | App path |
+|--------|-----------------------------------------------|----------|
+| **Y1** A/B | Yes — mtkbt / libextavrcp / AVRCP.kl / Y1Bridge when present | `AvrcpTrackInfoWriter` + `Y1BluetoothInput` (AVRCP uinput only) |
+| **Y2** | **Intentional skip** — different MT6582 stack; sites do not match | App A2DP + stock AVRCP only |
+| **A5** | Soft-skip on MD5 mismatch | Same as Y1 app path when bridge present |
+
+Headset remote keys (play/pause/skip) on Y1 require the patched `AVRCP.kl` discrete PAUSE row and `Y1BluetoothInput.isBluetoothTransportKey` (InputDevice name contains `AVRCP`).
+
+AirPods **silence** (bonded but no audio) is a separate RTP fix — see [`../bluetooth-rtp/README.md`](../bluetooth-rtp/README.md).
+
 ## See also
 
 - [`../../README.md`](../../README.md) — project overview

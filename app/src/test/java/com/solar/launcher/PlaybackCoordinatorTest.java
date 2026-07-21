@@ -99,6 +99,46 @@ public class PlaybackCoordinatorTest {
         assertEquals("2", cur.navidromeSongId);
     }
 
+    /**
+     * 2026-07-20 — musicIndex must follow the play-head slot, not the first equal file.
+     * Layman: two copies of the same song in a queue; skip to the second — NP says track 2.
+     * Was: musicLikeSame first-match pinned index to the earlier twin (stale NP / wrong prepare).
+     */
+    @Test
+    public void musicIndex_usesQueueSlotNotFirstFileMatch() {
+        PlaybackCoordinator pc = new PlaybackCoordinator();
+        File twin = new File("/music/same.mp3");
+        List<File> playlist = new ArrayList<File>();
+        playlist.add(twin);
+        playlist.add(new File("/music/other.mp3"));
+        playlist.add(twin);
+        pc.activateMusic(playlist, 0, false);
+        assertEquals(0, pc.musicIndex());
+        assertEquals(0, pc.unifiedQueue().index());
+        pc.setQueueIndex(2);
+        assertEquals("second twin must be music slot 2, not 0", 2, pc.musicIndex());
+        assertSame(twin, pc.musicPlaylist().get(pc.musicIndex()));
+    }
+
+    /**
+     * 2026-07-20 — activateMusic(startIndex) must land on that row when files are duplicated.
+     * Was: equals() last-match set qStart to the later twin.
+     */
+    @Test
+    public void activateMusic_startIndexHonorsSlotWithDuplicateFiles() {
+        PlaybackCoordinator pc = new PlaybackCoordinator();
+        File twin = new File("/music/same.mp3");
+        List<File> playlist = new ArrayList<File>();
+        playlist.add(twin);
+        playlist.add(new File("/music/other.mp3"));
+        playlist.add(twin);
+        pc.activateMusic(playlist, 0, false);
+        assertEquals(0, pc.unifiedQueue().index());
+        pc.activateMusic(playlist, 2, false);
+        assertEquals(2, pc.unifiedQueue().index());
+        assertEquals(2, pc.musicIndex());
+    }
+
     /** 2026-07-06 — FM replaces queue with saved-station mirror when presets exist. */
     @Test
     public void syncFmQueue_multiStationRadioQueue() {

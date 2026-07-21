@@ -129,7 +129,7 @@ public final class SolarPlatformPrep {
         XposedModuleStore.bindResolveContext(ctx);
         PlatformProbe.Report probe = PlatformProbe.probe(manifest);
         if (!probe.rootAvailable) {
-            notify(listener, 100, "Limited mode — no root");
+            notify(listener, 100, "Limited mode: no root");
             result.outcome = PrepOutcome.LIMITED;
             PlatformPrepState.markApplied(ctx, manifest.prepVersion, PlatformPrepState.Outcome.LIMITED);
             com.solar.launcher.SolarRecoveryCoordinator.setPlatformDegraded(ctx, true);
@@ -143,32 +143,41 @@ public final class SolarPlatformPrep {
         // 2026-07-16 — Co-install alongside Rockbox/switch scripts removed from onboarding setup.
         // Solar-first onboarding: modders can manually incorporate Rockbox or switch scripts if desired.
 
-        notify(listener, 25, "Staging init hooks…");
-        // 2026-07-05 — Ladder step 3: init.d files (99XposedInit.sh) from manifest files[].
-        stageManifestFiles(ctx, manifest, probe.remountWritable, result);
+        // 2026-07-20 — Lab Solar-only (persist.solar.lab.noxposed=1): skip Xposed ladder entirely.
+        // Layman: after uninstall-xposed-adb.sh, prep must not put hooks back.
+        // Reversal: setprop persist.solar.lab.noxposed 0; re-run install-xposed-adb.sh.
+        final boolean labNoXposed = XposedModuleEnsurer.isLabNoXposed();
+        if (labNoXposed) {
+            notify(listener, 80, "Lab: Xposed skipped (Solar-only)…");
+            notifyLog(listener, "persist.solar.lab.noxposed=1: framework/modules not staged");
+        } else {
+            notify(listener, 25, "Staging init hooks…");
+            // 2026-07-05 — Ladder step 3: init.d files (99XposedInit.sh) from manifest files[].
+            stageManifestFiles(ctx, manifest, probe.remountWritable, result);
 
-        notify(listener, 45, "Installing Xposed framework…");
-        // 2026-07-05 — Ladder step 4: api17/api19 vendor tree; ETXTBUSY may stage app_process.
-        XposedFrameworkInstaller.Result fw = XposedFrameworkInstaller.ensureFramework(ctx, manifest);
-        if (fw.error != null) {
-            result.degradedReasons.add("framework: " + fw.error);
-        }
-        if (fw.rebootRequired) {
-            result.rebootRequired = true;
-        }
+            notify(listener, 45, "Installing Xposed framework…");
+            // 2026-07-05 — Ladder step 4: api17/api19 vendor tree; ETXTBUSY may stage app_process.
+            XposedFrameworkInstaller.Result fw = XposedFrameworkInstaller.ensureFramework(ctx, manifest);
+            if (fw.error != null) {
+                result.degradedReasons.add("framework: " + fw.error);
+            }
+            if (fw.rebootRequired) {
+                result.rebootRequired = true;
+            }
 
-        notify(listener, 65, "Installing hook modules…");
-        // 2026-07-05 — Ladder step 5: pm install -r + /system/app copy for required modules.
-        int installed = XposedModuleInstaller.installRequiredModules(ctx, manifest, probe.remountWritable);
-        notifyLog(listener, "Modules installed/verified: " + installed);
-        if (installed == 0 && hasMissingModules(manifest)) {
-            result.degradedReasons.add("modules");
-        }
+            notify(listener, 65, "Installing hook modules…");
+            // 2026-07-05 — Ladder step 5: pm install -r + /system/app copy for required modules.
+            int installed = XposedModuleInstaller.installRequiredModules(ctx, manifest, probe.remountWritable);
+            notifyLog(listener, "Modules installed/verified: " + installed);
+            if (installed == 0 && hasMissingModules(manifest)) {
+                result.degradedReasons.add("modules");
+            }
 
-        notify(listener, 80, "Enabling modules…");
-        // 2026-07-05 — Ladder step 6: modules.list + enabled_modules.xml repair (parity with 99XposedInit.sh).
-        if (XposedModuleEnsurer.repairModulesBlocking(ctx)) {
-            result.rebootRequired = true;
+            notify(listener, 80, "Enabling modules…");
+            // 2026-07-05 — Ladder step 6: modules.list + enabled_modules.xml repair (parity with 99XposedInit.sh).
+            if (XposedModuleEnsurer.repairModulesBlocking(ctx)) {
+                result.rebootRequired = true;
+            }
         }
 
         notify(listener, 92, "Applying display settings…");
@@ -176,7 +185,27 @@ public final class SolarPlatformPrep {
         LargeFontAccessibilitySuppressor.applySync(ctx);
         GraphicsPerformancePolicy.applySync(ctx);
 
-        notify(listener, 95, "Finishing…");
+        notify(listener, 94, "Applying Bluetooth pairing conf…");
+        // 2026-07-19 — Ladder step 8: Koensayr audio/auto_pairing/blacklist + CoD props.
+        BluetoothPairingConfInstaller.Result btConf = BluetoothPairingConfInstaller.apply(ctx);
+        if (btConf.applied && btConf.rebootSuggested) {
+            result.rebootRequired = true;
+            notifyLog(listener, "Bluetooth pairing conf updated (reboot suggested)");
+        } else if (btConf.skipped) {
+            notifyLog(listener, "Bluetooth pairing conf skipped: " + btConf.detail);
+        }
+
+        notify(listener, 96, "Applying AirPods audio fix…");
+        // 2026-07-19 — Ladder step 9: Y1 RTP proxy when stock MD5 matches.
+        AirpodsRtpProxyInstaller.Result rtp = AirpodsRtpProxyInstaller.apply(ctx);
+        if (rtp.applied && rtp.rebootRequired) {
+            result.rebootRequired = true;
+            notifyLog(listener, "AirPods RTP proxy installed (reboot required)");
+        } else if (rtp.skipped) {
+            notifyLog(listener, "AirPods RTP proxy skipped: " + rtp.detail);
+        }
+
+        notify(listener, 98, "Finishing…");
         if (result.rebootRequired) {
             result.outcome = PrepOutcome.REBOOT_PENDING;
             PlatformPrepState.markApplied(ctx, manifest.prepVersion, PlatformPrepState.Outcome.COMPLETE);

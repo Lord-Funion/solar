@@ -80,8 +80,10 @@ public final class InvidiousBackend implements YoutubeBackend {
             for (int i = 0; i < json.length(); i++) {
                 JSONObject j = json.getJSONObject(i);
                 if (!"video".equals(j.optString("type", ""))) continue;
+                String id = j.optString("videoId", "");
+                if (id.length() == 0) continue;
                 out.add(new YouTubeVideo(
-                        j.optString("videoId", ""),
+                        id,
                         j.optString("title", ""),
                         j.optString("author", ""),
                         YoutubeApiUtil.formatDuration(j.optInt("lengthSeconds", 0))));
@@ -288,7 +290,8 @@ public final class InvidiousBackend implements YoutubeBackend {
         return out;
     }
 
+    /** 2026-07-19 — Quick timeouts so InstancePool can try the next host inside search budget. */
     private static String httpGet(String url) throws IOException {
-        return new String(SolarHttp.getBytes(url, "application/json", UA), "UTF-8");
+        return new String(SolarHttp.getBytesQuick(url, "application/json", UA, 3, 6), "UTF-8");
     }
 }

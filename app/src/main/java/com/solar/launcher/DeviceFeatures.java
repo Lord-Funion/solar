@@ -110,9 +110,20 @@ public final class DeviceFeatures {
         return "a5".equals(detectFamily());
     }
 
-    /** Touch UI path — A5 only; Y1/Y2 stay wheel/key. */
+    /**
+     * Touch UI path — A5, or phone chrome (click wheel needs touch).
+     * 2026-07-20 — Was: A5 only. Now: also when PhoneChromePolicy would activate.
+     * Reversal: return isA5() only.
+     */
     public static boolean hasTouchscreen() {
-        return isA5();
+        if (isA5()) return true;
+        try {
+            int[] px = readDisplayPixels();
+            return com.solar.launcher.phone.PhoneChromePolicy.active(
+                    px[0], px[1], readDeviceFamilyPinForPhoneChrome());
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /**
@@ -241,11 +252,20 @@ public final class DeviceFeatures {
     /**
      * MicroSD root when healthy; else null (do not fall back to Internal here).
      * 2026-07-15 — Callers that need “any volume” use {@link #getStorageRoots()}.
+     * 2026-07-20 — Phone chrome may override with MicroSD/ under the user folder.
+     * Reversal: drop phone override block.
      */
     public static File getMicroSdRoot() {
         if (testMicroSdPresentOverride != null && !testMicroSdPresentOverride.booleanValue()) {
             return null;
         }
+        try {
+            android.content.Context app = com.solar.launcher.SolarApplication.getAppContext();
+            if (app != null) {
+                File phone = com.solar.launcher.phone.PhoneStorageRoots.microSdRootOverride(app);
+                if (phone != null) return phone;
+            }
+        } catch (Throwable ignored) {}
         File primary = new File(primaryStoragePath());
         if (isStorageVolumeHealthy(primary)) return primary;
         return null;
@@ -254,8 +274,17 @@ public final class DeviceFeatures {
     /**
      * Public Internal Storage root when healthy; else null.
      * 2026-07-15 — Available even when MicroSD is absent (Y2 sold without a card).
+     * 2026-07-20 — Phone chrome may override with Internal/ under the user folder.
+     * Reversal: drop phone override block.
      */
     public static File getInternalStorageRoot() {
+        try {
+            android.content.Context app = com.solar.launcher.SolarApplication.getAppContext();
+            if (app != null) {
+                File phone = com.solar.launcher.phone.PhoneStorageRoots.internalRootOverride(app);
+                if (phone != null) return phone;
+            }
+        } catch (Throwable ignored) {}
         String secondary = secondaryStoragePath();
         if (secondary == null) return null;
         File internal = new File(secondary);
@@ -438,6 +467,8 @@ public final class DeviceFeatures {
     /**
      * Preferred root for new user media (Reach, podcasts, covers, recordings).
      * 2026-07-15 — Honors pref; falls open to any healthy volume when the pick is missing.
+     * 2026-07-20 — Phone chrome without a chosen Storage folder must not write to /sdcard0.
+     * Y1/Y2/A5 unchanged (chrome inactive). Reversal: drop blocksStockStorageFallOpen check.
      */
     public static File getNewMediaRoot(Context ctx) {
         if (useInternalForNewMedia(ctx)) {
@@ -449,6 +480,12 @@ public final class DeviceFeatures {
             File internal = getInternalStorageRoot();
             if (internal != null) return internal;
         }
+        // Phone Solar: wait for onboarding instead of silently using stock sdcard0.
+        try {
+            if (com.solar.launcher.phone.PhoneStorageRoots.blocksStockStorageFallOpen(ctx)) {
+                return null;
+            }
+        } catch (Throwable ignored) {}
         return getPrimaryStorageRoot();
     }
 
@@ -650,8 +687,9 @@ public final class DeviceFeatures {
     /**
      * 2026-07-15 — A5 QVGA portrait 240×320 (order-independent; ±20px for overscan).
      * Pure logic for unit tests and adb staging scripts.
+     * 2026-07-20 — public for PhoneChromePolicy (other package).
      */
-    static boolean looksLikeA5Display(int widthPx, int heightPx) {
+    public static boolean looksLikeA5Display(int widthPx, int heightPx) {
         if (widthPx <= 0 || heightPx <= 0) return false;
         int a = Math.min(widthPx, heightPx);
         int b = Math.max(widthPx, heightPx);
@@ -660,12 +698,22 @@ public final class DeviceFeatures {
 
     /**
      * 2026-07-15 — Y1 360×480 (landscape 480×360 or portrait). ±20px.
+     * 2026-07-20 — public for PhoneChromePolicy (other package).
      */
-    static boolean looksLikeY1Display(int widthPx, int heightPx) {
+    public static boolean looksLikeY1Display(int widthPx, int heightPx) {
         if (widthPx <= 0 || heightPx <= 0) return false;
         int a = Math.min(widthPx, heightPx);
         int b = Math.max(widthPx, heightPx);
         return a >= 340 && a <= 380 && b >= 460 && b <= 500;
+    }
+
+    /**
+     * 2026-07-20 — Family pin for phone-chrome gate (empty when unset).
+     * PhoneChromePolicy treats y1|y2|a5 as “no chrome” even on tall skins.
+     * Reversal: delete; policy can only use display size.
+     */
+    public static String readDeviceFamilyPinForPhoneChrome() {
+        return readSystemProperty(PROP_DEVICE_FAMILY);
     }
 
     /**

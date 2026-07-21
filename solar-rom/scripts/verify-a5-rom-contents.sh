@@ -164,6 +164,11 @@ chmod +x "$SCRIPT_DIR/verify-rom-app-allowlist.sh"
 # A5 intentionally omits org.rockbox — do not require it in allowlist required-path check.
 SOLAR_ROM_NO_ROCKBOX=1 "$SCRIPT_DIR/verify-rom-app-allowlist.sh" "$sys" || fail "system APK allowlist audit"
 
+# 2026-07-19 — Koensayr bluetooth pairing conf bake.
+# shellcheck source=lib-verify-bluetooth-pairing.sh
+source "$SCRIPT_DIR/lib-verify-bluetooth-pairing.sh"
+verify_bluetooth_pairing_conf_debugfs "$sys"
+
 # Unused but required for env parity with other verify scripts (aapt present).
 : "$AAPT"
 

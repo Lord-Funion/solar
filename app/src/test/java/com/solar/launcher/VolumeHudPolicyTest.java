@@ -62,4 +62,32 @@ public class VolumeHudPolicyTest {
             throw new AssertionError("browser");
         }
     }
+
+    /** 2026-07-20 — Y2/A5/emulator always own Solar volume HUD path (not family-prop-only). */
+    @Test
+    public void y2AndA5_useSolarVolumeHudWithoutFamilyProp() {
+        if (!VolumeHudPolicy.shouldUseSolarVolumeHud(true, false, false, "")) {
+            throw new AssertionError("Y2");
+        }
+        if (!VolumeHudPolicy.shouldUseSolarVolumeHud(false, true, false, "")) {
+            throw new AssertionError("A5");
+        }
+        if (!VolumeHudPolicy.shouldUseSolarVolumeHud(false, false, true, "")) {
+            throw new AssertionError("emulator");
+        }
+        if (VolumeHudPolicy.shouldUseSolarVolumeHud(false, false, false, "")) {
+            throw new AssertionError("unknown device without family prop");
+        }
+        if (!VolumeHudPolicy.shouldUseSolarVolumeHud(false, false, false, "y2")) {
+            throw new AssertionError("family y2");
+        }
+    }
+
+    /** 2026-07-20 — In-app compact volume bar must not paint on NP when HW volume device. */
+    @Test
+    public void y2A5_mustNotShowCompactHudOnNowPlaying() {
+        if (VolumeHudPolicy.shouldShowCompactVolumeHud(true, true, false)) {
+            throw new AssertionError("NP compact HUD must stay off");
+        }
+    }
 }

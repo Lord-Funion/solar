@@ -22,6 +22,8 @@ public final class LibraryBrowsePrefs {
     public static final int SONG_SORT_ARTIST = 1;
     public static final int SONG_SORT_ALBUM = 2;
     public static final int SONG_SORT_DATE = 3;
+    /** 2026-07-20 — Shortest→longest by duration_ms; unknown lengths sink to the end. */
+    public static final int SONG_SORT_LENGTH = 4;
 
     /** Shared album rack sort — Library Albums tab and Flow Albums carousel. */
     public static final int ALBUM_RACK_SORT_TITLE = 0;
@@ -116,8 +118,21 @@ public final class LibraryBrowsePrefs {
         return prefs.getInt(KEY_SONG_SORT, SONG_SORT_TITLE);
     }
 
+    /**
+     * 2026-07-20 — Write song-list sort without cycling (stem-pick defaults to Length).
+     * Was: only cycleSongSort(). Reversal: drop setter; stem pick leaves prior sort alone.
+     */
+    public void setSongSort(int sort) {
+        int clamped = sort;
+        if (clamped < SONG_SORT_TITLE || clamped > SONG_SORT_LENGTH) {
+            clamped = SONG_SORT_TITLE;
+        }
+        prefs.edit().putInt(KEY_SONG_SORT, clamped).commit();
+    }
+
     public int cycleSongSort() {
-        int next = (songSort() + 1) % 4;
+        // 2026-07-20 — Five modes (Title…Length). Was % 4 before Length existed.
+        int next = (songSort() + 1) % 5;
         prefs.edit().putInt(KEY_SONG_SORT, next).commit();
         return next;
     }
@@ -142,7 +157,8 @@ public final class LibraryBrowsePrefs {
     }
 
     public int cycleAlbumSongSort() {
-        int next = (albumSongSort() + 1) % 4;
+        // 2026-07-20 — Same Length option as song lists. Was % 4.
+        int next = (albumSongSort() + 1) % 5;
         prefs.edit().putInt(KEY_ALBUM_SONG_SORT, next).commit();
         return next;
     }
@@ -201,6 +217,7 @@ public final class LibraryBrowsePrefs {
             case SONG_SORT_ALBUM:
                 return albumTrackList ? R.string.library_sort_track : R.string.library_sort_album;
             case SONG_SORT_DATE: return R.string.library_sort_date;
+            case SONG_SORT_LENGTH: return R.string.library_sort_length;
             default: return R.string.library_sort_title;
         }
     }

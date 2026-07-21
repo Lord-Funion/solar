@@ -46,6 +46,20 @@ public final class UiBusy {
      * Technical: MediaPlayer/IJK BUFFERING_START/END + podcastEpisodeLoading + video fill.
      */
     public static final String REASON_MEDIA_BUFFER = "media_buffer";
+    /**
+     * 2026-07-20 — Cold start until home is navigable.
+     * Layman: status spinner while Solar is still waking up so menus do not look half-dead.
+     * Technical: MainActivity arms until first-ready dismiss / onCreate home ready; blocks wheel/OK.
+     * Reversal: remove reason; drop StartupNavGate swallow.
+     */
+    public static final String REASON_STARTUP = "startup";
+    /**
+     * 2026-07-20 — Stem / Lalal prepare or mashup resolve in flight.
+     * Layman: spinner while Stem Player is splitting or loading pads.
+     * Technical: StemPlayerHost.startJob → clear when mixers ready / fail / detach.
+     * Reversal: drop reason; statusView text-only again.
+     */
+    public static final String REASON_STEM_PREPARE = "stem_prepare";
 
     public interface Listener {
         void onBusyChanged(boolean busy);
@@ -98,6 +112,13 @@ public final class UiBusy {
         }
     }
 
+    /** 2026-07-19 — Debug: active reason→count map for throbber hunting (cb4747). */
+    public static String snapshotReasons() {
+        synchronized (COUNTS) {
+            return COUNTS.toString();
+        }
+    }
+
     /**
      * Mark work in flight.
      * Layman: turn the spinner on for this job.
@@ -118,16 +139,7 @@ public final class UiBusy {
             }
         }
         // #region agent log
-        try {
-            if (com.solar.launcher.Debug0f5debLog.ENABLED) {
-                org.json.JSONObject d = new org.json.JSONObject();
-                d.put("op", "begin");
-                d.put("reason", reason);
-                d.put("becameBusy", becameBusy);
-                d.put("busy", isBusy());
-                com.solar.launcher.Debug0f5debLog.log(null, "UiBusy.begin", "busy begin", "H-busy", d);
-            }
-        } catch (Exception ignored) {}
+        // 2026-07-19 — Lean: skip per-begin spam (was ~1 Hz idle + every hop).
         // #endregion
         if (becameBusy) notifyListener();
         else if (isBusy()) notifyListener();
@@ -160,20 +172,27 @@ public final class UiBusy {
             COUNTS.remove(reason);
             becameIdle = totalLocked() == 0;
         }
-        // #region agent log
-        try {
-            if (com.solar.launcher.Debug0f5debLog.ENABLED) {
-                org.json.JSONObject d = new org.json.JSONObject();
-                d.put("op", "clear");
-                d.put("reason", reason);
-                d.put("becameIdle", becameIdle);
-                d.put("busy", isBusy());
-                com.solar.launcher.Debug0f5debLog.log(null, "UiBusy.clear", "busy clear", "H-busy", d);
-            }
-        } catch (Exception ignored) {}
-        // #endregion
         if (becameIdle) notifyListener();
         else notifyListener();
+    }
+
+    /**
+     * 2026-07-19 — Clear after one UI frame so sync OK/Back/drill still paints the throbber once.
+     * Layman: spinner stays on for a blink even when the next menu is ready instantly.
+     * Was: clear() same-stack → ProgressBar never drawn. Reversal: call clear(reason) directly.
+     */
+    public static void clearNextFrame(final String reason) {
+        Handler h = main();
+        if (h == null) {
+            clear(reason);
+            return;
+        }
+        h.post(new Runnable() {
+            @Override
+            public void run() {
+                clear(reason);
+            }
+        });
     }
 
     /** Clear every reason (activity destroy / emergency). */
@@ -188,6 +207,8 @@ public final class UiBusy {
     /**
      * begin + auto end after timeoutMs (safety net if a path forgets end).
      * Layman: spinner cannot stick forever if a prepare never finishes.
+     * 2026-07-20 — Callers that need an immediate status-bar paint should sync after begin
+     * (see MainActivity.armNavFeedbackThrobber).
      */
     public static void beginAutoEnd(final String reason, long timeoutMs) {
         begin(reason);

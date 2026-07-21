@@ -23,7 +23,12 @@ public final class GlobalInputPolicy {    public static final String POLICY_REV_
      * 2026-07-18 — POLICY_REV 26: modal/context hold 350ms; POWER tap max 280ms (no overlap).
      * Was: POLICY_REV 25 with 420/380. Reversal: POLICY_REV 25 + 420L holds + 380L tap max.
      */
-    public static final int POLICY_REV = 26;
+    /**
+     * 2026-07-20 — POLICY_REV 27: modal/context hold ~280ms; POWER tap max 220ms (no overlap).
+     * Layman: Options opens a bit sooner; short taps still stay taps.
+     * Was: POLICY_REV 26 with 350/280. Reversal: POLICY_REV 26 + 350L holds + 280L tap max.
+     */
+    public static final int POLICY_REV = 27;
  
     /**
      * Cross-process — infinite list wrap opt-in for main Solar lists (not context/overlay modal).
@@ -32,20 +37,20 @@ public final class GlobalInputPolicy {    public static final String POLICY_REV_
     public static final String PROP_INFINITE_SCROLL = "persist.solar.nav.infinite_scroll";
  
     /**
-     * 2026-07-18 — Short POWER tap window must stay under modal hold (see GLOBAL_MODAL_HOLD_MS).
-     * Was 380L with 420ms modal; lowered with 350ms modal so tap and hold never overlap.
-     * Reversal: 380L only if modal returns to ≥420L.
+     * 2026-07-20 — Short POWER tap window must stay under modal hold (see GLOBAL_MODAL_HOLD_MS).
+     * Was 280L with 350ms modal; lowered with 280ms modal so tap and hold never overlap.
+     * Reversal: 280L only if modal returns to ≥350L.
      */
-    public static final long POWER_TAP_MAX_MS = 280L;
+    public static final long POWER_TAP_MAX_MS = 220L;
     /**
-     * 2026-07-18 — Global modal tier (~350ms): SystemUI shells, stock apps, third-party apps.
-     * Layman: hold Back/Power about a third of a second for the quick menu — taps stay taps.
+     * 2026-07-20 — Global modal tier (~280ms): SystemUI shells, stock apps, third-party apps.
+     * Layman: hold Back/Power just under a third of a second for the quick menu — taps stay taps.
      * Technical: warmOverlayProcess + postDelayed in SystemServerHooks BACK/POWER paths.
-     * Was 420L (felt slow on wheel remotes); Android long-press default is ~500ms — we sit under it.
-     * Best practice: 500ms platform default; 300–400ms for secondary remote holds; &lt;250ms false-fires.
-     * Must stay above {@link #POWER_TAP_MAX_MS}. Reversal: 420L + POWER_TAP_MAX 380L.
+     * Was 350L (felt laggy on 256MB devices); Android long-press default is ~500ms — we sit under it.
+     * Best practice: 500ms platform default; 250–300ms for snappy remote holds; &lt;250ms false-fires.
+     * Must stay above {@link #POWER_TAP_MAX_MS}. Reversal: 350L + POWER_TAP_MAX 280L.
      */
-    public static final long GLOBAL_MODAL_HOLD_MS = 350L;
+    public static final long GLOBAL_MODAL_HOLD_MS = 280L;
     /** @deprecated use {@link #GLOBAL_MODAL_HOLD_MS}. */
     public static final long THIRD_PARTY_MODAL_HOLD_MS = GLOBAL_MODAL_HOLD_MS;
     /**
@@ -61,15 +66,15 @@ public final class GlobalInputPolicy {    public static final String POLICY_REV_
     public static final long NAV_OWNED_BACK_MODAL_MS = THIRD_PARTY_LAUNCHER_MODAL_HOLD_MS;
     /** @deprecated use {@link #backModalHoldMsForPackage}. */
     public static final long MODAL_HOLD_MS = GLOBAL_MODAL_HOLD_MS;
-    /** 2026-07-18 — OK/center long-press in stock apps — opens row context menu (~350ms). */
-    public static final long CENTER_MENU_HOLD_MS = 350L;
+    /** 2026-07-20 — OK/center long-press in stock apps — opens row context menu (~280ms). */
+    public static final long CENTER_MENU_HOLD_MS = 280L;
     /**
-     * 2026-07-18 — Solar HOME BACK hold — in-app quick/options menu (~350ms).
-     * Layman: hold Back ~⅓s on Solar for Options; tap still goes back.
-     * Was 420L; matched GLOBAL_MODAL_HOLD_MS snappier remote feel.
-     * Reversal: 420L if Options opens on clumsy taps.
+     * 2026-07-20 — Solar HOME BACK hold — in-app quick/options menu (~280ms).
+     * Layman: hold Back ~¼s on Solar for Options; tap still goes back.
+     * Was 350L; matched GLOBAL_MODAL_HOLD_MS dial-back for snappier feel.
+     * Reversal: 350L if Options opens on clumsy taps.
      */
-    public static final long SOLAR_BACK_CONTEXT_HOLD_MS = 350L;
+    public static final long SOLAR_BACK_CONTEXT_HOLD_MS = 280L;
     /**
      * 2026-07-08 — Rescue HUD 3..2..1 arms here; finger must still be down.
      * Layman: after ~7s of holding Back, on-screen countdown begins.

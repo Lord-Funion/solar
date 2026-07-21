@@ -10,7 +10,8 @@ import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedHelpers;
 
 /**
- * 2026-07-05 — Tier-1 overlay key forward: highest mutex tier while sys.solar.overlay.active=1.
+ * 2026-07-05 — Tier-1 overlay key forward while sys.solar.overlay.active=1.
+ * Mutex: stemmix > overlay — skip when Stem/Mix jam owns pads (sys.solar.stemmix.active=1).
  * Read-only consumer of OverlayKeyGate props; WM overlay is NOT_FOCUSABLE — keys flow through here.
  * When changing: OPENING_STALE_MS must match OverlayKeyGate; disarm pulse clears stale BACK holds.
  * Reversal: remove PWM hook; global quick menu keys leak to foreground app.
@@ -19,6 +20,8 @@ final class OverlayKeyForwarder {
 
     /** Must match {@link com.solar.launcher.OverlayKeyGate#ACTIVE_PROPERTY}. */
     static final String ACTIVE_PROPERTY = "sys.solar.overlay.active";
+    /** Must match {@link com.solar.launcher.StemOrMixSession#ACTIVE_PROPERTY}. 2026-07-19 */
+    static final String STEMMIX_ACTIVE_PROPERTY = "sys.solar.stemmix.active";
     /** Must match {@link com.solar.launcher.OverlayKeyGate#OPENING_PROPERTY}. */
     static final String OPENING_PROPERTY = "sys.solar.overlay.opening";
     /** Elapsed-realtime ms when opening=1 was set — stale via shared StaleOverlayGate JAR. */
@@ -99,6 +102,8 @@ final class OverlayKeyForwarder {
         boolean forwarded = false;
         int keyCode = 0;
         try {
+        // Stem/Mix jam owns pads — do not steal keys for overlay. 2026-07-19
+        if (isStemMixActive()) return;
         KeyEvent event = findKeyEvent(param.args);
         // Hardware volume always goes to AudioService first — passive HUD only refreshes via hooks.
         if (event != null && isHardwareVolumeKey(event.getKeyCode())) {
@@ -383,6 +388,18 @@ final class OverlayKeyForwarder {
 
     static boolean isOverlayActiveOrOpening() {
         return com.solar.input.policy.StaleOverlayGate.isActiveOrOpening();
+    }
+
+    /** True while Stem/Mix jam published sys.solar.stemmix.active=1. 2026-07-19 */
+    static boolean isStemMixActive() {
+        try {
+            Class<?> sp = getSystemPropertiesClass();
+            if (sp == null) return false;
+            Object v = XposedHelpers.callStaticMethod(sp, "get", STEMMIX_ACTIVE_PROPERTY, "0");
+            return "1".equals(String.valueOf(v));
+        } catch (Throwable th) {
+            return false;
+        }
     }
 
     private static boolean shouldForwardOverlayKeyFastPath(int keyCode) {

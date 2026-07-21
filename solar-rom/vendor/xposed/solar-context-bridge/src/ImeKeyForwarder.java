@@ -50,6 +50,8 @@ final class ImeKeyForwarder {
   }
 
   private static void handleImeKeyIntercept(XC_MethodHook.MethodHookParam param, boolean queueing) {
+    // Stem/Mix jam owns pads — IME must not steal wheel/OK. 2026-07-19
+    if (OverlayKeyForwarder.isStemMixActive()) return;
     if (OverlayKeyForwarder.isOverlayActiveOrOpening()) return;
     if (!isImeActive()) return;
     KeyEvent event = findKeyEvent(param.args);
@@ -69,7 +71,8 @@ final class ImeKeyForwarder {
   }
 
   static boolean tryForwardFromAppContext(Context ctx, KeyEvent event) {
-    if (event == null || OverlayKeyForwarder.isOverlayActiveOrOpening()) return false;
+    if (event == null || OverlayKeyForwarder.isStemMixActive()) return false;
+    if (OverlayKeyForwarder.isOverlayActiveOrOpening()) return false;
     if (!isImeActive()) return false;
     return tryForwardFromAppContext(ctx, event.getKeyCode(), event.getAction(), event.getRepeatCount());
   }

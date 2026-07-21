@@ -63,7 +63,7 @@
     <string name="settings_report_issue">Report Issue</string>
     <string name="settings_report_problem">Report a Problem</string>
     <string name="settings_contact_developer">Contact Developer</string>
-    <string name="settings_report_unreachable">Reach is offline — try again later</string>
+    <string name="settings_report_unreachable">Reach is offline. Try again later</string>
     <string name="settings_debug_dev_support_experiment">Developer support thread (lab)</string>
     <string name="settings_support_developer">Donations</string>
     <string name="settings_sub_report_issue">Settings: Report Issue</string>
@@ -74,8 +74,19 @@
     <string name="report_issue_from_device">Report from Device</string>
     <string name="report_issue_from_device_hint">Message Solar Development on this player. Your note is sent privately and can include diagnostics from this device.</string>
     <string name="report_issue_needs_reach">Connect to Wi‑Fi and sign in to Reach to message Solar Development. Your message is sent to the developers and opens a private diagnostic report with logs from this device.</string>
-    <string name="report_issue_sent_hint">Message queued — diagnostics are being uploaded for the developers.</string>
+    <string name="report_issue_sent_hint">Message queued. Diagnostics are being uploaded for the developers.</string>
+    <!-- 2026-07-19 — Lean Report Issue: GitHub link + optional message + one-shot logs. -->
+    <string name="report_issue_send_logs">Send device logs</string>
+    <string name="report_issue_send_logs_hint">Opens a keyboard for an optional note, then uploads logs once. Wi‑Fi required. No automatic background reports.</string>
+    <string name="report_issue_message_optional">Optional message: Play/Pause to send</string>
+    <string name="report_issue_sending">Sending logs…</string>
+    <string name="report_issue_sent_ok">Report sent. Thank you.</string>
+    <string name="report_issue_sent_fail">Could not send report (%1$s). Try again when online.</string>
+    <string name="report_issue_offline">Connect to Wi‑Fi to send logs.</string>
+    <!-- 2026-07-20 — Was "Getting ready…"; power menu now names the real action. -->
     <string name="diag_getting_ready">Getting ready…</string>
+    <string name="diag_shutting_down">Shutting down…</string>
+    <string name="diag_restarting">Restarting…</string>
     <!-- 2026-07-16 — Full-screen first boot / self-heal wait (was blank black screen). -->
     <string name="getting_things_ready">Getting things ready, please wait…</string>
     <string name="getting_things_ready_detail">Solar is finishing setup on this player.</string>
@@ -101,40 +112,77 @@
     <string name="status_home">Home</string>
     <string name="status_now_playing">Now Playing</string>
     <string name="browser_has_stems">Has Stems</string>
-    <string name="browser_stem_player">Stem Player</string>
+    <!-- 2026-07-21 Stems/Mix sanity — hub label Stems (not Stem Player). Reversal: Stem Player. -->
+    <string name="browser_stems">Stems</string>
+    <string name="browser_stem_player">Stems</string>
+    <string name="browser_get_stems">Get stems</string>
     <string name="status_has_stems">Has Stems</string>
     <string name="path_library_has_stems">Has Stems</string>
-    <string name="has_stems_empty">No stemmed tracks yet — open a song’s Stem Player to separate</string>
+    <string name="has_stems_empty">No stemmed tracks yet. Open Get stems to separate</string>
     <string name="has_stems_loading">Loading stemmed tracks…</string>
-    <string name="status_stem_player">Stem Player</string>
+    <string name="status_stem_player">Stems</string>
+    <string name="status_stems_hub">Stems</string>
     <string name="status_mix">Mix</string>
-    <string name="context_action_stem_player">Stem Player</string>
+    <!-- 2026-07-21 — Get stems = prep/extract this track. Reversal: Use in Stem Player. -->
+    <string name="context_action_get_stems">Get stems</string>
+    <!-- 2026-07-21 — Start Stem session = pick numbering browse. Reversal: Select tracks…. -->
+    <string name="context_action_start_stem_session">Start Stem session</string>
+    <!-- 2026-07-20 — Was: "Stem Player". Kept for older call sites; prefer get_stems. -->
+    <string name="context_action_stem_player">Get stems</string>
+    <!-- 2026-07-20 — Multi-select entry opens stem pick browse. Prefer start_stem_session. -->
+    <string name="context_action_stem_select_tracks">Start Stem session</string>
     <string name="context_action_start_mix">Start Mix</string>
+    <string name="stem_mix_pick_select_all">Select all</string>
+    <string name="stem_mix_pick_clear_all">Clear all</string>
+    <string name="stem_queue_need_prepared">Only tracks with stems can join mid-jam</string>
+    <string name="mix_deck_stamped">Deck %1$d</string>
     <string name="context_action_play_instrumental">Play Instrumental</string>
     <string name="context_action_play_acapella">Play Acapella</string>
+    <!-- 2026-07-21 — NP Stems master; layers only when ✓. Was: always Instrumentals/Vocals. -->
+    <string name="context_action_stems">Stems</string>
+    <string name="context_action_stems_global">Stems On/Off</string>
+    <string name="np_stems_persist_title">Save stems?</string>
+    <string name="np_stems_persist_message">This track is not in your library. Separate stems with Lalal.ai and keep a copy for next time?</string>
+    <string name="np_stems_persist_confirm">Separate</string>
+    <string name="solo_stem_getting_stems">Getting stems…</string>
+    <!-- 2026-07-20 — NP / playing-track layer toggles (✓/✗); not used for non-playing Play rows. -->
+    <string name="context_action_instrumentals">Instrumentals</string>
+    <string name="context_action_vocals">Vocals</string>
+    <string name="context_action_turn_vocals_on">Turn vocals on</string>
+    <string name="context_action_turn_vocals_off">Turn vocals off</string>
     <string name="solo_stem_getting_instrumental">Getting instrumental…</string>
     <string name="solo_stem_getting_acapella">Getting acapella…</string>
-    <string name="solo_stem_need_opt_in">Add your Lalal.ai API key in Settings to separate stems</string>
+    <string name="solo_stem_progress_pct">%1$s %2$d%%</string>
+    <string name="solo_stem_need_opt_in">Enable Stem features or add your Lalal.ai API key in Settings</string>
     <string name="solo_stem_need_wifi">Connect Wi‑Fi to create Instrumental / Acapella</string>
-    <string name="solo_stem_failed">Could not create that stem — try again later</string>
-    <string name="settings_lalal_hint">Opt in: paste your Lalal.ai key to unlock Stem Player, Mix, Instrumental, and Acapella. Cached stems play offline.</string>
+    <string name="solo_stem_failed">Could not create that stem. Try again later</string>
+    <string name="settings_lalal_hint">Paste your Lalal.ai key, or paste/clear to the demo key to use the bundled quota. Cached stems play offline.</string>
+    <string name="settings_stem_features">Enable Stem features</string>
+    <string name="settings_stem_features_hint">On by default while a demo key is bundled. Instrumental and Vocals use that key on all devices; Stem Player and Mix also appear on Y1/Y2. Turn off to hide those menus. Paste your own key anytime for your account.</string>
     <string name="mix_open">Mix</string>
     <string name="mix_assign_status">Mix assign · PREV/NEXT/PLAY bind · hold PLAY start</string>
     <string name="mix_assign_slot">Track %1$d</string>
     <string name="mix_assign_need_slot">Mark at least one track (PREV / NEXT / PLAY)</string>
-    <string name="mix_assign_use_pads">Assign with PREV / NEXT / PLAY — OK only opens folders</string>
+    <string name="mix_assign_use_pads">Assign with PREV / NEXT / PLAY. OK only opens folders</string>
     <string name="mix_reassign_pick">Pick a track for Mix deck %1$d · PREV/NEXT/PLAY assign</string>
-    <string name="stem_pick_status">Stem · %1$d/3 · Play to jam</string>
-    <string name="stem_pick_slot">Stem %1$d</string>
-    <string name="stem_pick_marked">Marked stem %1$d</string>
-    <string name="stem_pick_cleared">Cleared stem mark</string>
-    <string name="stem_pick_need_mark">Mark a track first (Center), then Play</string>
+    <!-- 2026-07-20 — Plain fallbacks; live UI uses HardwareButtonGlyph ImageSpans. -->
+    <string name="mix_fader_onboarding">Mix · PREV/NEXT/PLAY highlight a deck · wheel moves the lit fader</string>
+    <string name="mix_assign_onboarding">Mix assign · PREV/NEXT/PLAY bind tracks · hold PLAY start Mix</string>
+    <string name="stem_pick_status">Stem · %1$d marked · Play to jam</string>
+    <string name="stem_pick_slot">(%1$d)</string>
+    <string name="stem_pick_marked">Queued (%1$d)</string>
+    <string name="stem_pick_cleared">Removed from stem queue</string>
+    <string name="stem_pick_need_mark">Mark at least one song (Center), then Play</string>
+    <string name="stem_pick_use_pads">Center marks or unmarks. Play starts the jam</string>
+    <string name="stem_pick_onboarding">Center marks songs · Play starts the jam (queue unlimited)</string>
+    <string name="stem_reassign_ok_hint">Replace track %1$d · Center confirms · Prev/Next = other track</string>
     <string name="stem_player_need_file">Stem Player needs a local track file</string>
     <string name="stem_player_need_wifi">Connect Wi‑Fi to separate stems</string>
-    <string name="stem_player_need_wifi_partial">Connect Wi‑Fi to separate %1$d marked song(s) — mashup kept open in pick mode</string>
-    <string name="settings_lalal">Stem Player (Lalal.ai)</string>
+    <string name="stem_player_need_wifi_partial">Connect Wi‑Fi to separate %1$d marked song(s). Mashup kept open in pick mode</string>
+    <string name="settings_lalal">Stem Player API key (Lalal.ai)</string>
     <string name="settings_stem_premix">Stem Melody premix (experimental)</string>
-    <string name="lalal_not_configured">Not configured (demo key)</string>
+    <string name="lalal_not_configured">Stem features off</string>
+    <string name="lalal_using_demo">Using demo key</string>
     <string name="lalal_configured">API key set</string>
     <string name="lalal_key_prompt">Lalal.ai API key</string>
     <string name="status_settings">Settings</string>
@@ -203,7 +251,7 @@
     <string name="lib_preview_split_credits">List each credited artist separately when tags use feat., &amp;, or similar.</string>
     <string name="lib_preview_norm_album">Merge albums that differ only by capitalization.</string>
     <string name="lib_preview_guest_browse">For artists who only appear as guests, choose albums or songs first.</string>
-    <string name="lib_preview_artist_filter">Limit the Artists list — hide one-track guests or show album owners only.</string>
+    <string name="lib_preview_artist_filter">Limit the Artists list. Hide one-track guests or show album owners only.</string>
     <string name="lib_preview_artist_sort">Order the Artists list A–Z, by track count, or by recently added.</string>
     <string name="lib_preview_song_sort">Default sort for song lists in Artists, Albums, Genres, and playlists.</string>
     <string name="lib_preview_album_song_sort">Default sort for album tracks.</string>
@@ -257,17 +305,17 @@
 
     <!-- Solar Reach (Soulseek client) -->
     <string name="reach_product_name">Solar Reach</string>
-    <string name="reach_hint_home">Solar Reach is a Soulseek client — search peers and download tracks to Music.</string>
+    <string name="reach_hint_home">Solar Reach is a Soulseek client. Search peers and download tracks to Music.</string>
     <string name="reach_hint_search">Solar Reach · Soulseek network · Wi-Fi required</string>
     <string name="reach_hint_results">Ranked by free slot &amp; upload speed. [***] = most likely to download.</string>
     <string name="reach_hint_download">Downloading via Soulseek peer transfer…</string>
     <string name="reach_stop_download_title">Stop download?</string>
     <string name="reach_stop_download_message">Leave Reach and cancel this download?</string>
     <string name="reach_stop_download_confirm">Stop download</string>
-    <string name="reach_error_too_many_peers">Too many peer connections — try again in a moment.</string>
+    <string name="reach_error_too_many_peers">Too many peer connections. Try again in a moment.</string>
     <string name="common_cancel">Cancel</string>
     <string name="common_ok">OK</string>
-    <string name="podcasts_download_paused">Download paused — offline playback limited to buffered audio.</string>
+    <string name="podcasts_download_paused">Download paused. Offline playback limited to buffered audio.</string>
 
     <!-- Soulseek extras -->
     <string name="soulseek_back_search">@string/common_back</string>
@@ -340,7 +388,7 @@
     <string name="skip_fwd_30">Skip forward 30s</string>
     <string name="sleep_timer_label">Sleep timer: %1$s</string>
     <string name="sleep_timer_set">Sleep timer: %1$s</string>
-    <string name="sleep_timer_fired">Sleep timer — paused</string>
+    <string name="sleep_timer_fired">Sleep timer: paused</string>
     <string name="audiobook_chapters">Chapters</string>
     <string name="audiobook_no_chapters">No chapters found</string>
     <string name="browser_recently_added">Recently Added</string>
@@ -363,8 +411,8 @@
     <string name="settings_screen_timeout">Screen Timeout</string>
     <string name="settings_full_width_menus">Full Width Menus</string>
     <string name="settings_menu_item_padding">Menu Item Padding</string>
-    <string name="settings_menu_item_padding_hint">Left gutter on home and settings rows (on by default). Off = flush to the screen edge (iPod classic). Your choice is saved for this theme only — switching themes returns to that look’s default unless you change it there too.</string>
-    <string name="settings_menu_item_padding_mask_hint">This theme uses a menu mask and has not opted into flush — padding stays on so the mask lines up. Switch theme or add settingsMenu_Item_Padding:false / disableMenu_Item_Padding to flush.</string>
+    <string name="settings_menu_item_padding_hint">Left gutter on home and settings rows (on by default). Off = flush to the screen edge (iPod classic). Your choice is saved for this theme only. Switching themes returns to that look’s default unless you change it there too.</string>
+    <string name="settings_menu_item_padding_mask_hint">This theme uses a menu mask and has not opted into flush. Padding stays on so the mask lines up. Switch theme or add settingsMenu_Item_Padding:false / disableMenu_Item_Padding to flush.</string>
     <string name="settings_infinite_scroll">Infinite Scroll</string>
     <string name="settings_infinite_scroll_hint">At list ends, wheel wraps to the other end. Off by default.</string>
     <string name="settings_menu_transitions">Menu Transitions</string>
@@ -394,7 +442,7 @@
     <string name="settings_preview_reset_rockbox">Deletes the .rockbox folder from Internal Storage (/storage/sdcard0). Rockbox settings, themes, and playlists stored there will be removed.</string>
     <string name="settings_preview_reset_solar">Clears all Solar app preferences (settings, library rules, Reach/Deezer options, and similar). Does not delete music files unless you also choose MicroSD contents.</string>
     <string name="settings_preview_reset_themes">Deletes downloaded and custom theme folders on Internal Storage (Themes/ and JJ_Themes/) and Solar\u2019s internal theme cache.</string>
-    <string name="settings_preview_reset_microsd">Removes every file and folder on MicroSD. Files are overwritten once before deletion so standard recovery tools may still find them \u2014 this is not a secure wipe.</string>
+    <string name="settings_preview_reset_microsd">Removes every file and folder on MicroSD. Files are overwritten once before deletion so standard recovery tools may still find them, this is not a secure wipe.</string>
     <string name="settings_preview_reset_caches">Clears album-art caches, Flow thumbnails, stream/download temp files, and other Solar cache data.</string>
     <string name="settings_preview_reset_everything">Selects all reset options below. Review each item before continuing.</string>
     <string name="settings_preview_reset_continue">Runs the selected reset steps. You will be asked to confirm before anything is deleted.</string>
@@ -416,7 +464,7 @@
     <string name="emergency_recovery_retry">Retry Solar</string>
     <string name="emergency_package_launcher_title">Choose an app</string>
     <string name="home_platform_degraded">Some features may be limited on this player</string>
-    <string name="reach_error_transient">Connection hiccup — retrying…</string>
+    <string name="reach_error_transient">Connection hiccup, retrying…</string>
     <string name="settings_usb">USB</string>
     <string name="settings_sub_usb">Settings: USB</string>
     <string name="settings_connections">Connections</string>
@@ -436,13 +484,13 @@
     <string name="about_report_issues">Report Issues: github.com/thesolarproject/issues</string>
     <string name="about_donation">Donations: https://ko-fi.com/thesolarproject</string>
     <string name="about_update_button">Update / Change App Version</string>
-    <string name="about_update_unavailable">Updates unavailable — check Wi‑Fi connection</string>
+    <string name="about_update_unavailable">Updates unavailable. Check Wi‑Fi connection</string>
     <string name="settings_bluetooth_setup">Bluetooth</string>
     <string name="settings_bluetooth_pairing_pin">Bluetooth pairing PIN</string>
     <string name="settings_display_brightness">Brightness</string>
     <string name="settings_storage_info">Storage info</string>
     <string name="settings_y2_hold_ok_to_sleep">Hold OK to sleep</string>
-    <string name="settings_preview_y2_hold_ok_to_sleep">Off (default): hold the center button opens the quick menu, like Back — use the sleep button for screen off. On: holding OK puts the screen to sleep (previous behaviour).</string>
+    <string name="settings_preview_y2_hold_ok_to_sleep">Off (default): hold the center button opens the quick menu, like Back, use the sleep button for screen off. On: holding OK puts the screen to sleep (previous behaviour).</string>
     <string name="settings_a5_menu_nav">Menu buttons</string>
     <string name="settings_a5_menu_nav_face">Face buttons</string>
     <string name="settings_a5_menu_nav_side">Side buttons</string>
@@ -465,9 +513,9 @@
     <string name="storage_volume_header">%1$s</string>
     <string name="settings_background">Background source</string>
     <string name="settings_usb_auto_connect">Auto-Connect</string>
-    <string name="settings_preview_usb_auto_connect">Enable USB storage automatically when a PC connects.</string>
+    <string name="settings_preview_usb_auto_connect">Enable USB storage automatically when a PC connects (e.g. car stereos). When off, Android shows its own USB dialog.</string>
     <string name="settings_usb_suppress_prompt">Use Android USB dialog</string>
-    <string name="settings_preview_usb_suppress_prompt">Let the system USB screen handle the cable (lighter). Turn off to use Solar\u2019s USB prompt.</string>
+    <string name="settings_preview_usb_suppress_prompt">Deprecated. Android always owns the cable dialog unless Auto-Connect is on.</string>
     <string name="settings_usb_turn_on">Enable Now</string>
     <string name="settings_preview_usb_turn_on">Turn on USB storage manually.</string>
     <string name="settings_background_source">Background Image Source</string>
@@ -475,7 +523,7 @@
     <string name="bg_section_theme_wallpapers">Theme wallpapers (480×360)</string>
     <string name="bg_wallpaper_desktop">Desktop</string>
     <string name="bg_wallpaper_global">Global</string>
-    <string name="bg_wallpaper_theme_row">%1$s — %2$s</string>
+    <string name="bg_wallpaper_theme_row">%1$s: %2$s</string>
     <string name="bg_pick_custom_image">Choose custom image (480×360)</string>
     <string name="toast_bg_wallpaper_size_hint">480×360 JPG/PNG recommended</string>
 
@@ -511,9 +559,9 @@
     <string name="home_menu_photos">Photos</string>
     <string name="home_menu_audiobooks">Audiobooks</string>
     <string name="home_menu_apps">Apps</string>
-    <string name="home_videos_coming_soon">Videos — coming soon.</string>
-    <string name="home_photos_coming_soon">Photos — coming soon.</string>
-    <string name="home_audiobooks_coming_soon">Audiobooks — coming soon.</string>
+    <string name="home_videos_coming_soon">Videos: coming soon.</string>
+    <string name="home_photos_coming_soon">Photos: coming soon.</string>
+    <string name="home_audiobooks_coming_soon">Audiobooks: coming soon.</string>
     <string name="home_screen_editor">Home Screen</string>
     <string name="home_screen_shortcuts">Shortcuts</string>
     <string name="home_screen_arrange">Arrange Menu</string>
@@ -586,13 +634,15 @@
     <string name="bt_pairing_consent_title">Pair with %1$s?</string>
     <string name="bt_pairing_consent_body">Allow %1$s to connect to this player?</string>
     <string name="bt_pairing_pair">Pair</string>
+    <string name="bt_status_connecting">Connecting…</string>
     <string name="keyboard_soulseek_username">Soulseek Username</string>
     <string name="keyboard_soulseek_password">Reach Password</string>
-    <string name="keyboard_hint">[prev] delete · [play] OK · [next] space\n[play] hold Aa/# · [wheel] pick · [ok] type\n[back] cancel</string>
-    <string name="keyboard_hint_a5">Vol: space / delete · Back: Enter · Hold Back: Aa / #\nFace mid: type · Wheel/face: pick · Edge flick: cancel</string>
+    <!-- 2026-07-20 — Hold tip names Capitals/Symbols (was Aa/#). Reversal: restore Aa/#. -->
+    <string name="keyboard_hint">[prev] delete · [play] OK · [next] space\nhold [play] for Capitals and Symbols\n[back] cancel</string>
+    <string name="keyboard_hint_a5">Vol: space / delete · Back: Enter · Hold Back: Capitals and Symbols\nEdge flick: cancel</string>
     <string name="solar_ime_label">Solar Keyboard</string>
     <string name="solar_ime_type_hint">Type here…</string>
-    <string name="solar_ime_a11y_description">Solar typing helper — pastes text when the wheel keyboard cannot reach a field directly.</string>
+    <string name="solar_ime_a11y_description">Solar typing helper. Pastes text when the wheel keyboard cannot reach a field directly.</string>
 
     <!-- Browser -->
     <string name="browser_folders">📁 Folders</string>
@@ -603,6 +653,8 @@
     <string name="browser_years">📅 Years</string>
     <string name="browser_favorites">♥ Favorites</string>
     <string name="browser_search">🔍 Search Library</string>
+    <!-- 2026-07-19 — Short Search… row at top of Artists/Albums/Songs/… lists (opens wheel keyboard). -->
+    <string name="browser_search_ellipsis">🔍 Search…</string>
     <string name="status_library_years">Library: Years</string>
     <string name="status_library_favorites">Library: Favorites</string>
     <string name="library_favorites_empty">No favorites yet. In Library or Now Playing, hold Back for the menu, then choose Add to favorites.</string>
@@ -630,7 +682,7 @@
     <string name="path_navidrome_search">Navidrome / Search: %1$s</string>
     <string name="navidrome_search_title">Navidrome: %1$s</string>
     <string name="navidrome_search_empty">No Navidrome matches</string>
-    <string name="library_search_section_navidrome">Online — Navidrome</string>
+    <string name="library_search_section_navidrome">Online: Navidrome</string>
     <string name="library_search_searching_navidrome">Searching Navidrome…</string>
     <string name="get_music_source_navidrome">Navidrome</string>
     <string name="context_navidrome_download">Save to library</string>
@@ -647,7 +699,7 @@
     <string name="navidrome_download_album">Download album for offline</string>
     <string name="navidrome_downloading">Downloading… %1$d / %2$d</string>
     <string name="navidrome_download_done">Downloaded %1$d tracks</string>
-    <string name="library_search_section_plex">Online — Plex</string>
+    <string name="library_search_section_plex">Online: Plex</string>
     <string name="library_search_searching_plex">Searching Plex…</string>
     <string name="get_music_source_plex">Plex</string>
     <string name="context_plex_download">Save to library</string>
@@ -685,7 +737,7 @@
     <string name="plex_search_empty">No Plex matches</string>
     <string name="path_plex_all_songs">Plex / Songs</string>
     <string name="plex_songs">Plex: Songs</string>
-    <string name="library_search_section_jellyfin">Online — Jellyfin</string>
+    <string name="library_search_section_jellyfin">Online: Jellyfin</string>
     <string name="library_search_searching_jellyfin">Searching Jellyfin…</string>
     <string name="get_music_source_jellyfin">Jellyfin</string>
     <string name="context_jellyfin_download">Save to library</string>
@@ -756,6 +808,7 @@
     <string name="library_sort_album">Album</string>
     <string name="library_sort_track">Track #</string>
     <string name="library_sort_date">Date added</string>
+    <string name="library_sort_length">Length</string>
     <string name="library_sort_now">Sort: %1$s</string>
     <string name="library_playlists_local_section">Local playlists</string>
     <string name="library_playlists_empty">No local playlists yet</string>
@@ -820,7 +873,7 @@
     <string name="datetime_sync_now">Sync Time Now</string>
     <string name="datetime_sync_started">Syncing time…</string>
     <string name="datetime_auto_on">Sets the clock from the internet when Wi‑Fi is already online. Does not wake Wi‑Fi in the background. Time zone is your choice below.</string>
-    <string name="datetime_auto_off">Manual date and time only — fully offline.</string>
+    <string name="datetime_auto_off">Manual date and time only. Fully offline.</string>
     <string name="datetime_dst_on">Uses your zone’s spring-forward / fall-back rules (works offline).</string>
     <string name="datetime_dst_off">Keeps standard time year-round for the selected zone (works offline).</string>
 
@@ -846,10 +899,10 @@
     <string name="update_get_latest_jj">Get latest JJ Launcher</string>
     <string name="update_get_latest_rockbox">Install latest Rockbox-Y1</string>
     <string name="update_get_latest_rockbox_hint">Downloads the Rockbox-Y1 APK and native libraries (root). On Y2, SolarRockboxCompat keeps Rockbox working with Solar OS.</string>
-    <string name="update_companion_jj_done">JJ Launcher updated (system app — settings kept).</string>
-    <string name="update_companion_jj_failed">JJ Launcher update failed — check Wi‑Fi and root.</string>
-    <string name="update_companion_rockbox_done">Rockbox-Y1 installed (APK + libraries — settings kept).</string>
-    <string name="update_companion_rockbox_failed">Rockbox-Y1 install failed — check Wi‑Fi and root.</string>
+    <string name="update_companion_jj_done">JJ Launcher updated (system app, settings kept).</string>
+    <string name="update_companion_jj_failed">JJ Launcher update failed. Check Wi‑Fi and root.</string>
+    <string name="update_companion_rockbox_done">Rockbox-Y1 installed (APK + libraries, settings kept).</string>
+    <string name="update_companion_rockbox_failed">Rockbox-Y1 install failed. Check Wi‑Fi and root.</string>
     <string name="settings_debug_rockbox_experiment">Rockbox (experiment)</string>
     <string name="settings_debug_rockbox_experiment_hint">Off by default. Unlocks Install Rockbox-Y1 in Change version and Use Rockbox under Home launcher. Y2 runs Rockbox-Y1 with the Rockbox compatibility Xposed module.</string>
 
@@ -904,10 +957,10 @@
     <string name="soulseek_sharing_disabled">Sharing: off (disabled in Settings)</string>
     <string name="soulseek_invalid_username">Username: letters, digits, _ - only (max 20)</string>
     <string name="soulseek_login_failed">Login failed: %1$s</string>
-    <string name="soulseek_login_failed_check_account">Login failed: %1$s — check Settings → Account or Regenerate.</string>
-    <string name="soulseek_invalid_reset_auto">Invalid account — reset to new auto account.</string>
+    <string name="soulseek_login_failed_check_account">Login failed: %1$s. Check Settings → Account or Regenerate.</string>
+    <string name="soulseek_invalid_reset_auto">Invalid account. Reset to new auto account.</string>
     <string name="soulseek_port_warning">Reach uses Soulseek TCP port %1$d. If downloads fail, forward this port on your router.</string>
-    <string name="soulseek_download_only_note">Download-only — some users only allow downloaders who share files.</string>
+    <string name="soulseek_download_only_note">Download-only. Some users only allow downloaders who share files.</string>
     <string name="soulseek_type_search">Type search…</string>
     <string name="soulseek_new_search_with">New search with \"%1$s\"</string>
     <string name="soulseek_search_hint">Enter search query</string>
@@ -927,7 +980,7 @@
     <string name="soulseek_sharing_off">Sharing: off (Wi‑Fi required)</string>
     <string name="soulseek_sharing_nat_probing">Sharing: checking port forward…</string>
     <string name="soulseek_sharing_no_nat">Sharing: off (NAT-PMP unavailable on this network)</string>
-    <string name="soulseek_sharing_hint">Sharing and profile exchange run whenever you are on Wi‑Fi with a successful NAT-PMP port forward — no charger needed. Turn Wi‑Fi off to stop Reach from using the network; without Wi‑Fi or NAT-PMP the Soulseek client stays disconnected to save power.</string>
+    <string name="soulseek_sharing_hint">Sharing and profile exchange run whenever you are on Wi‑Fi with a successful NAT-PMP port forward, no charger needed. Turn Wi‑Fi off to stop Reach from using the network; without Wi‑Fi or NAT-PMP the Soulseek client stays disconnected to save power.</string>
     <string name="soulseek_reach_enabled">Enable Reach</string>
     <string name="soulseek_enabled">Enable Soulseek</string>
     <string name="soulseek_enabled_hint">Soulseek search, messaging, chat rooms, and peer sharing.</string>
@@ -938,14 +991,14 @@
     <string name="reach_unavailable_body">Reach cannot accept peer connections on this network. Downloads, search, and sharing need a mapped listen port (NAT-PMP or manual router forward).</string>
     <string name="reach_unavailable_mobile">You appear to be on a mobile data connection. Reach rarely works on 4G/5G or Personal Hotspot because carriers use CG-NAT and block inbound ports.</string>
     <string name="reach_unavailable_nat">Your router did not grant a NAT-PMP port map. Try home Wi‑Fi with UPnP/NAT-PMP enabled, or forward the TCP listen port shown in Connection.</string>
-    <string name="reach_unavailable_gateway">No local gateway was found — common on captive portal Wi‑Fi, guest networks, or isolated work/school VLANs.</string>
+    <string name="reach_unavailable_gateway">No local gateway was found. Common on captive portal Wi‑Fi, guest networks, or isolated work/school VLANs.</string>
     <string name="reach_unavailable_port_lost">The port map dropped and did not come back. Peer transfers are paused until mapping succeeds again.</string>
-    <string name="reach_unavailable_server_ok">The Soulseek server connection may still work — messages and account settings can remain available.</string>
+    <string name="reach_unavailable_server_ok">The Soulseek server connection may still work. Messages and account settings can remain available.</string>
     <string name="reach_unavailable_settings_hint">Peer features are off on this network. Connect to home Wi‑Fi with port forwarding, or use Messages if enabled.</string>
-    <string name="reach_peer_lost_toast">Reach peer connection lost — transfers may fail on this network.</string>
+    <string name="reach_peer_lost_toast">Reach peer connection lost. Transfers may fail on this network.</string>
     <string name="reach_checking_connectivity">Checking peer connectivity…</string>
     <string name="soulseek_save_and_thanks">Add to Library + Say Thanks</string>
-    <string name="soulseek_thanks_message">Thank you for %1$s from %2$s — Check out Reach for Innioasis %3$s</string>
+    <string name="soulseek_thanks_message">Thank you for %1$s from %2$s. Check out Reach for Innioasis %3$s</string>
     <string name="soulseek_thanks_sent">Thanks sent to %1$s</string>
     <string name="soulseek_allow_messaging">Allow messaging</string>
     <string name="soulseek_messaging_hint">Lets you send and receive private messages with other Soulseek users. Your Reach friend code is shown when messaging is enabled.</string>
@@ -1013,7 +1066,7 @@
     <string name="soulseek_browse_empty_folder">This folder is empty.</string>
     <string name="soulseek_browse_failed">Browse failed: %1$s</string>
     <string name="soulseek_browse_back">@string/common_back</string>
-    <string name="soulseek_user_status">%1$s — %2$s · %3$d files</string>
+    <string name="soulseek_user_status">%1$s: %2$s · %3$d files</string>
     <string name="soulseek_user_offline">offline</string>
     <string name="soulseek_user_online">online</string>
     <string name="soulseek_compose_message">Send message</string>
@@ -1030,7 +1083,7 @@
     <string name="soulseek_pm_dismiss">Dismiss</string>
     <string name="soulseek_pm_retry_download">Retry download</string>
     <string name="soulseek_sharing_reciprocity_hint">This user may require you to share files. Enable sharing in Reach settings and wait for your library to index.</string>
-    <string name="soulseek_peer_not_sharing_warning">%1$s is online but lists no shared files — they may require reciprocity.</string>
+    <string name="soulseek_peer_not_sharing_warning">%1$s is online but lists no shared files. They may require reciprocity.</string>
     <string name="soulseek_enable_sharing_hint">Enable sharing in Reach settings to download from users who require reciprocity.</string>
     <string name="soulseek_user_no_files">No shared files listed</string>
     <string name="soulseek_peer_files">%1$d files shared</string>
@@ -1042,7 +1095,8 @@
     <string name="soulseek_message_incoming">From %1$s</string>
     <string name="soulseek_message_outgoing">You</string>
     <string name="reach_for_device">Reach for Innioasis %1$s</string>
-    <string name="reach_user_bio_intro">Reach is a Soulseek client built for Innioasis %1$s music players — browse, search, download, message, and share from your player over Wi‑Fi.\nhttps://github.com/thesolarproject/solar</string>
+    <string name="reach_user_bio_intro">Reach is a Soulseek client built for Innioasis %1$s music players. Browse, search, download, message, and share from your player over Wi‑Fi.
+https://github.com/thesolarproject/solar</string>
     <string name="reach_user_bio_status">Sharing: %1$s\nMessaging: %2$s</string>
     <string name="reach_user_bio_note_share_on">I\'m happy to share my library. Folder browse from my player can be unreliable while I\'m away; downloads work best when my player is online at home.</string>
     <string name="reach_user_bio_note_share_off">My library is not shared from this player.</string>
@@ -1055,7 +1109,7 @@
     <string name="settings_sub_soulseek_messages_thread">%1$s</string>
     <string name="settings_sub_soulseek_chat_rooms">Settings: Reach / Soulseek / Chat rooms</string>
     <string name="settings_sub_soulseek_chat_room">%1$s</string>
-    <string name="settings_sub_soulseek_chat_room_wall">%1$s — Wall</string>
+    <string name="settings_sub_soulseek_chat_room_wall">%1$s: Wall</string>
     <string name="settings_sub_soulseek_interests">Settings: Reach / Soulseek / Interests</string>
     <string name="settings_sub_soulseek_user_profile">%1$s</string>
     <string name="settings_sub_deezer">Settings: Reach / Deezer</string>
@@ -1072,7 +1126,7 @@
     <string name="deezer_change_account_pc">Change account on PC</string>
     <string name="deezer_quality">Preferred quality</string>
     <string name="deezer_wifi_required">Internet connection required for Deezer.</string>
-    <string name="deezer_not_configured">Set up Deezer on PC — start Wi‑Fi Transfer, open /deezer</string>
+    <string name="deezer_not_configured">Set up Deezer on PC. Start Wi‑Fi Transfer, open /deezer</string>
     <string name="deezer_hint_search">Deezer · Wi‑Fi required</string>
     <string name="deezer_type_search">Type search…</string>
     <string name="deezer_recent_searches">Recent searches</string>
@@ -1216,20 +1270,20 @@
     <string name="soulseek_phase_receiving_user">Receiving %1$s</string>
     <string name="soulseek_phase_receiving">Receiving from %1$s</string>
     <string name="soulseek_phase_retrying">Retrying %1$s</string>
-    <string name="soulseek_phase_complete">Complete — %1$s</string>
-    <string name="soulseek_stall_hint">No data yet (%1$s). Peer may be offline, queued, or blocked — try another result.</string>
+    <string name="soulseek_phase_complete">Complete: %1$s</string>
+    <string name="soulseek_stall_hint">No data yet (%1$s). Peer may be offline, queued, or blocked. Try another result.</string>
     <string name="soulseek_try_another_result">Try another result</string>
     <string name="soulseek_research_section">Try searching again</string>
     <string name="soulseek_download_failed_title">Download failed: %1$s · %2$s</string>
     <string name="soulseek_download_failure_banner">Could not download: %1$s</string>
     <string name="soulseek_retry_download">Retry this file</string>
-    <string name="soulseek_error_unknown">Download failed — try another peer.</string>
-    <string name="soulseek_error_server_unreachable">Reach server unreachable — will retry in the background.</string>
-    <string name="soulseek_error_peer_unreachable">Peer offline or unreachable — try another result.</string>
-    <string name="soulseek_error_nat">Could not connect to peer — check Wi‑Fi and port forwarding.</string>
-    <string name="soulseek_error_transfer_timeout">Peer did not respond — they may be offline or queueing uploads.</string>
-    <string name="soulseek_error_file_timeout">File transfer timed out — forward your Reach listen port on the router.</string>
-    <string name="path_soulseek_search_done_download">Searching finished: %1$s (%2$d results) — download in progress</string>
+    <string name="soulseek_error_unknown">Download failed. Try another peer.</string>
+    <string name="soulseek_error_server_unreachable">Reach server unreachable. Will retry in the background.</string>
+    <string name="soulseek_error_peer_unreachable">Peer offline or unreachable. Try another result.</string>
+    <string name="soulseek_error_nat">Could not connect to peer. Check Wi‑Fi and port forwarding.</string>
+    <string name="soulseek_error_transfer_timeout">Peer did not respond. They may be offline or queueing uploads.</string>
+    <string name="soulseek_error_file_timeout">File transfer timed out. Forward your Reach listen port on the router.</string>
+    <string name="path_soulseek_search_done_download">Searching finished: %1$s (%2$d results), download in progress</string>
     <string name="soulseek_recovery_same_file_count">Same file: %1$s · %2$d other peers</string>
     <string name="soulseek_recovery_same_file_none">No other peers with this exact filename</string>
     <string name="soulseek_recovery_similar">Search similar tracks</string>
@@ -1245,7 +1299,7 @@
     <string name="soulseek_info_device_ip">Device IP: %1$s</string>
     <string name="soulseek_info_nat_note">Reach maps your listen port via NAT-PMP (retries alternate gateways, renews every 30 min). If mapping fails, forward the TCP port above on your router.</string>
     <string name="soulseek_preview_search">Search the Soulseek network and download tracks to Music.</string>
-    <string name="soulseek_preview_about">Solar Reach — Soulseek client. Account and sharing notes.</string>
+    <string name="soulseek_preview_about">Solar Reach: Soulseek client. Account and sharing notes.</string>
     <string name="soulseek_preview_regenerate">Creates a new dictionary-word friend code and fixed auto password.</string>
 
     <!-- Podcasts -->
@@ -1334,25 +1388,33 @@
     <!-- 2026-07-11 — Y2 only: power hold also opens Options; Y1 keeps context_hold_back_hint (no power key). -->
     <string name="context_hold_back_or_power_hint">Hold Back or Power for Options</string>
     <!-- 2026-07-18 — NP transport tip after Options dismissed; glyph = Play/Pause. -->
-    <string name="flow_hold_play_pause_hint">hold — open Flow</string>
+    <string name="flow_hold_play_pause_hint">open Flow</string>
     <!-- 2026-07-18 — Live NP tip while holding Back / Play-Pause (glyphs supply the button). -->
     <!-- Short copy so 480px + glyph fits without cutting off mid-word. -->
-    <string name="np_keep_holding_for_options">hold — Options</string>
-    <string name="np_keep_holding_for_flow">hold — Flow</string>
+    <string name="np_keep_holding_for_options">Options</string>
+    <string name="np_keep_holding_for_flow">Flow</string>
     <string name="context_quick_power">Power</string>
     <string name="context_quick_queue">Queue</string>
     <string name="playlist_move_tutorial_title">Move tracks in playlist</string>
-    <string name="playlist_move_tutorial_body">Hold OK on a track to pick it up.\n\nScroll the wheel to move it — the tracks above and below show where it will land.\n\nPress OK again to place it.\n\nPress Back to cancel and restore the original order.</string>
+    <string name="playlist_move_tutorial_body">Hold OK on a track to pick it up.
+
+Scroll the wheel to move it. The tracks above and below show where it will land.
+
+Press OK again to place it.
+
+Press Back to cancel and restore the original order.</string>
     <string name="playlist_move_tutorial_got_it">Got it</string>
     <string name="queue_tutorial_line_ok">Press OK again to place the track.</string>
-    <string name="queue_tutorial_line_hold">Hold OK — pick up the track, then scroll to move it in the queue.</string>
+    <string name="queue_tutorial_line_hold">Hold OK, pick up the track, then scroll to move it in the queue.</string>
     <string name="queue_tutorial_got_it">Got it</string>
+    <!-- 2026-07-21 — ContextFeatureTip optional second row (journey tips). -->
+    <string name="feature_tip_dont_show_again">Don\'t show again</string>
     <string name="context_tier_wifi">Wi-Fi</string>
     <string name="context_wifi_on">Wi-Fi On</string>
     <string name="context_wifi_off">Wi-Fi Off</string>
     <string name="overlay_wifi_toggle_on">Turn Wi-Fi on</string>
     <string name="overlay_wifi_toggle_off">Turn Wi-Fi off</string>
-    <string name="overlay_wifi_need_password">Saved password required — connect this network in Solar Settings.</string>
+    <string name="overlay_wifi_need_password">Saved password required. Connect this network in Solar Settings.</string>
     <string name="overlay_bt_toggle_on">Turn Bluetooth on</string>
     <string name="overlay_bt_toggle_off">Turn Bluetooth off</string>
     <string name="overlay_queue_in_solar_hint">Open Solar for the play queue.</string>
@@ -1371,8 +1433,9 @@
     <string name="context_find_like_this">Find like this</string>
     <string name="update_installing_title">Installing update</string>
     <string name="update_install_reboot">Installing update… device will reboot.</string>
-    <string name="update_reboot_eta">Restarting to complete update, ETA 3 Minutes</string>
-    <string name="update_device_restarting">Device Restarting for Update</string>
+    <!-- 2026-07-19 — Not a countdown; reboot may take up to ~3 min to finish booting. -->
+    <string name="update_reboot_eta">The device will restart to finish the update. Coming back may take up to about 3 minutes.</string>
+    <string name="update_device_restarting">Restart to finish update</string>
     <string name="update_available_title">Update available</string>
     <string name="update_available_message">Solar %1$s is available.</string>
     <string name="update_install">Install</string>
@@ -1386,12 +1449,15 @@
     <string name="platform_prep_subtitle">Solar is finishing setup on this player…</string>
     <string name="platform_prep_continue">Continue</string>
     <string name="platform_prep_restart">Restart now</string>
+    <!-- 2026-07-19 — Aliases kept for any stale refs; UI uses getting_things_ready + auto-reboot. -->
+    <string name="platform_prep_reboot_title">Getting things ready, please wait…</string>
+    <string name="platform_prep_reboot_detail">Solar is finishing setup on this player.</string>
     <string name="platform_prep_partial_message">Some system features may be limited on this player. Music and settings will still work.</string>
     <string name="platform_prep_limited_message">This player is running with limited system features. Music and settings will still work.</string>
     <string name="platform_prep_status_title">Platform status</string>
     <string name="platform_prep_run_again">Retry setup</string>
     <string name="platform_prep_continuing_soon">Continuing to Solar shortly…</string>
-    <string name="platform_prep_modules_ready">Hook modules installed and enabled. Restart once to activate them.</string>
+    <string name="platform_prep_modules_ready">Hook modules installed and enabled. Restarting…</string>
     <string name="context_action_lock_failed">Could not lock screen</string>
     <!-- 2026-07-15 — Sleep chip failure (same idea as lock_failed). -->
     <string name="context_action_sleep_failed">Could not sleep screen</string>
@@ -1407,8 +1473,8 @@
     <string name="reach_buffering_track">Buffering…</string>
     <string name="reach_buffering_pct">Buffering · %1$d%%</string>
     <string name="podcasts_no_results">No podcasts found.</string>
-    <string name="podcasts_filtered_unavailable">%1$d podcast(s) hidden — feed or audio not reachable on this device.</string>
-    <string name="podcasts_episodes_filtered">%1$d episode(s) hidden — audio not reachable on this device.</string>
+    <string name="podcasts_filtered_unavailable">%1$d podcast(s) hidden. Feed or audio not reachable on this device.</string>
+    <string name="podcasts_episodes_filtered">%1$d episode(s) hidden. Audio not reachable on this device.</string>
     <string name="podcasts_checking_shows">Checking podcasts…</string>
     <string name="podcasts_checking_episodes">Checking episodes…</string>
     <string name="podcasts_type_search">Type search…</string>
@@ -1523,13 +1589,13 @@
     <string name="settings_debug_youtube_experiment">YouTube</string>
     <string name="settings_debug_youtube_experiment_hint">On by default. Off hides Videos → YouTube and Music → YouTube. Uses Solar’s built-in Invidious/Piped clients (needs Wi‑Fi).</string>
     <string name="settings_debug_usb_mass_storage_experiment">USB mass storage (Y2 experiment)</string>
-    <string name="settings_debug_usb_mass_storage_experiment_hint">Unavailable — Y2 uses MTP only. USB disk mode is not supported on this Android 4.4.2 build.</string>
+    <string name="settings_debug_usb_mass_storage_experiment_hint">Unavailable: Y2 uses MTP only. USB disk mode is not supported on this Android 4.4.2 build.</string>
     <string name="settings_usb_mass_storage_unavailable">USB mass storage is not available on this device. Y2 uses MTP for PC file transfer.</string>
     <string name="settings_debug_xposed_root_required">Root is required to apply Xposed module changes.</string>
     <string name="settings_debug_xposed_apply_failed">Could not write Xposed module config.</string>
     <string name="settings_debug_flow_enabled">Flow Mode</string>
     <string name="settings_flow">Flow</string>
-    <string name="settings_flow_hold_play_pause_hint">hold — open Flow view</string>
+    <string name="settings_flow_hold_play_pause_hint">open Flow view</string>
     <string name="settings_debug_flow_ok_library">OK → Library</string>
     <string name="settings_debug_flow_theme">Theme Decoration</string>
     <string name="settings_debug_flow_no_reflections">No Reflections</string>
@@ -1559,7 +1625,7 @@
     <string name="settings_debug_xposed_new_modules_later">Later</string>
     <string name="settings_debug_xposed_required_off_banner">Warning: required Solar modules are off. Global overlay, dialog replacement, and theme font may not work until you re-enable them below and reboot.</string>
     <string name="settings_debug_xposed_solar_generic_disable_warning">This Solar ROM module is required for normal operation. Turning it off may break overlay, handoff, dialogs, or fonts until you enable it here and reboot.\n\nYou can still disable it for debugging.</string>
-    <string name="settings_debug_xposed_user_module_hint">Third-party module — enable or disable freely. Apply and reboot to activate.</string>
+    <string name="settings_debug_xposed_user_module_hint">Third-party module. Enable or disable freely. Apply and reboot to activate.</string>
     <string name="settings_debug_xposed_empty">No Xposed modules found on this device. Install hook APKs or flash a Solar ROM with Xposed modules baked in.</string>
     <string name="settings_debug_xposed_module_detail_title">Module</string>
     <string name="settings_debug_xposed_module_enable">Enabled</string>
@@ -1663,11 +1729,15 @@
     <string name="radio_fm_presets">Presets</string>
     <string name="radio_fm_recordings">Recordings</string>
     <string name="radio_fm_unavailable">FM radio is not available on this device.</string>
+    <!-- 2026-07-20 — Phone chrome FM gate copy. -->
+    <string name="radio_fm_phone_needs_mtk">FM needs MediaTek radio hardware. It is unavailable on this phone.</string>
+    <string name="radio_fm_phone_mtk_warn_title">FM Radio</string>
+    <string name="radio_fm_phone_mtk_warn_message">FM on phones may not work reliably. Continue anyway?</string>
     <string name="radio_fm_no_presets">No presets yet</string>
     <string name="radio_fm_scanning">Scanning FM…</string>
     <string name="radio_fm_scan_starting">Scanning band…</string>
     <string name="radio_fm_scan_found">Found %1$s MHz</string>
-    <string name="radio_fm_scan_done">Scan complete — select a station</string>
+    <string name="radio_fm_scan_done">Scan complete. Select a station</string>
     <string name="radio_fm_scan_error">Scan failed: %1$s</string>
     <string name="radio_fm_scan_results_title">Stations found</string>
     <string name="radio_fm_recordings_missing">Could not open FM Recordings folder.</string>
@@ -1687,7 +1757,7 @@
     <string name="radio_fm_tune_click">Wheel adjusts MHz</string>
     <string name="radio_fm_tuning_active">Wheel changes MHz</string>
     <string name="radio_fm_save_channel">Save channel</string>
-    <string name="radio_fm_channel_saved">★ Saved — select to remove</string>
+    <string name="radio_fm_channel_saved">★ Saved. Select to remove</string>
     <string name="radio_fm_channel_removed">Channel removed.</string>
     <string name="radio_fm_saved_channels_row">Saved channels</string>
     <string name="radio_fm_scan_all_row">Auto scan</string>
@@ -1699,7 +1769,10 @@
     <string name="radio_fm_output_bluetooth">Bluetooth</string>
     <string name="radio_fm_output_cycle_hint">Tap to cycle Wired / Bluetooth / Speaker</string>
     <string name="radio_ctx_audio_output">Audio: %1$s</string>
-    <string name="radio_fm_onboarding_hint">Earphones work best as the antenna. FM still opens without them — try Speaker in Audio if silent, or power off and on.</string>
+    <string name="radio_fm_onboarding_hint">Earphones work best as the antenna. FM still opens without them, try Speaker in Audio if silent, or power off and on.</string>
+    <!-- 2026-07-20 — Settings band picker: show auto-detect result + Scan vs Online Radio. -->
+    <string name="radio_fm_detected_band">Detected: %1$s (%2$s)</string>
+    <string name="radio_fm_stations_from_scan">FM stations come from Scan on this device — not the internet. Online Radio plays streams.</string>
     <string name="radio_fm_scan_none">No stations found.</string>
     <string name="radio_fm_scan_saved">Saved %1$d channels</string>
     <string name="radio_fm_stereo">Stereo</string>
@@ -1709,7 +1782,7 @@
     <string name="radio_fm_fine_tune">Fine tune</string>
     <string name="radio_fm_fine_tune_active">Fine tune · wheel changes MHz</string>
     <string name="radio_fm_presets_header">Presets · %1$d</string>
-    <string name="radio_fm_audio_silent_hint">No audio path — try Speaker under Audio, or plug in earphones for better reception</string>
+    <string name="radio_fm_audio_silent_hint">No audio path. Try Speaker under Audio, or plug in earphones for better reception</string>
     <string name="radio_fm_earphones_hint">Optional: earphones improve reception. Use Audio → Speaker if you want the built-in speaker.</string>
     <string name="radio_fm_fallback_title">Could not start FM</string>
     <string name="radio_fm_fallback_message">Solar could not start FM (%1$s). Try again after unplugging earphones, or open stock FM Radio.</string>
@@ -1722,7 +1795,9 @@
 
     <string name="radio_net_favorites">Favorites</string>
     <string name="radio_net_search">Search</string>
-    <string name="radio_net_search_hint">Use country and tag browse for now.</string>
+    <!-- 2026-07-20 — Was toast-only hint; Search opens Solar IME. Reversal: restore toast copy. -->
+    <string name="radio_net_search_hint">Type a station name</string>
+    <string name="radio_net_search_title">Search stations</string>
     <string name="radio_net_loading_countries">Loading countries…</string>
     <string name="radio_net_loading_states">Loading states…</string>
     <string name="radio_net_loading_tags">Loading tags…</string>
@@ -1733,10 +1808,17 @@
     <string name="radio_net_no_stations">No stations found.</string>
     <string name="radio_net_no_favorites">No favorite stations yet.</string>
     <string name="radio_net_country_header">%1$s</string>
-    <string name="radio_net_tags_header">Tags — %1$s</string>
-    <string name="radio_net_stations_header">Stations — %1$s</string>
-    <string name="radio_net_skip_states">No states — loading tags…</string>
+    <string name="radio_net_tags_header">Tags: %1$s</string>
+    <string name="radio_net_stations_header">Stations: %1$s</string>
+    <!-- 2026-07-20 — Top of tag list: stations with no genre filter (tag=null). -->
+    <string name="radio_net_all_genres">All genres</string>
+    <string name="radio_net_show_more">Show more</string>
+    <string name="radio_net_skip_states">No states, loading tags…</string>
     <string name="radio_net_play_error">Could not play station.</string>
+    <!-- 2026-07-20 — Station row subtitle when codec/bitrate present. -->
+    <string name="radio_net_station_meta">%1$s · %2$d kbps</string>
+    <string name="radio_net_station_codec">%1$s</string>
+    <string name="radio_net_station_bitrate">%1$d kbps</string>
 
     <string name="radio_ctx_save_preset">Save preset</string>
     <string name="radio_ctx_scan">Scan band</string>
@@ -1745,7 +1827,7 @@
     <string name="radio_ctx_remove_favorite">Remove favorite</string>
     <string name="radio_ctx_open_net_browse">Internet browse</string>
     <string name="radio_ctx_preset_saved">Preset saved.</string>
-    <string name="radio_fm_tuning_hint">Tuning — press OK to save</string>
+    <string name="radio_fm_tuning_hint">Tuning: press OK to save</string>
     <string name="radio_fm_seeking">Scanning…</string>
     <string name="radio_ctx_favorite_added">Added to favorites.</string>
     <string name="radio_ctx_favorite_removed">Removed from favorites.</string>
@@ -1761,8 +1843,10 @@
     <string name="browser_youtube_audio">YouTube Audio</string>
     <string name="youtube_search_row">Search YouTube</string>
     <string name="youtube_search_title">Search YouTube</string>
+    <string name="keyboard_video_file_search">Search videos by name</string>
+    <string name="video_search_none">No videos match</string>
     <string name="youtube_search_hint">Title, channel, or topic</string>
-    <string name="youtube_search_query_subtitle">Query: %1$s — OK to edit</string>
+    <string name="youtube_search_query_subtitle">Query: %1$s, OK to edit</string>
     <string name="youtube_recent_subtitle">Recent search</string>
     <string name="youtube_popular_header">Popular suggestions</string>
     <string name="youtube_results_header">Search results</string>
@@ -1787,7 +1871,7 @@
     <string name="youtube_resolve_connecting">Connecting…</string>
     <string name="youtube_play_error">Could not play this video.</string>
     <string name="youtube_play_error_detail">Could not play: %1$s</string>
-    <string name="youtube_play_timeout">Stream took too long — check Wi‑Fi and try again.</string>
+    <string name="youtube_play_timeout">Stream took too long. Check Wi‑Fi and try again.</string>
     <string name="youtube_ctx_play">Play</string>
     <string name="youtube_ctx_open">Open video</string>
     <!-- 2026-07-15 — Music→YouTube context (audio-only hub). Was: Open video. Reversal: use youtube_ctx_open. -->
@@ -1849,7 +1933,8 @@
     <string name="radio_band_au">Australia / New Zealand</string>
     <string name="radio_band_kr">Korea</string>
     <string name="radio_band_ru">Russia</string>
-    <string name="adb_setup_reboot_warning">Configuring device…\nRestarting, ETA 3 Minutes.</string>
+    <!-- 2026-07-19 — 3 min = time to come back after reboot, not a countdown. -->
+    <string name="adb_setup_reboot_warning">Configuring device…\nRestart when ready. Coming back may take up to about 3 minutes.</string>
     <string name="settings_debug_wireless_adb">Wireless ADB</string>
     <string name="settings_debug_wireless_adb_hint">Automatically enable Wireless ADB on startup if rooted</string>
     <string name="settings_debug_microsd_format">MicroSD format</string>
@@ -1860,7 +1945,7 @@
     <string name="microsd_format_progress">Formatting MicroSD…</string>
     <string name="microsd_format_success">MicroSD formatted.</string>
     <string name="microsd_format_failed">MicroSD format failed.</string>
-    <string name="microsd_format_fat32_fallback">ExFAT unavailable — formatted as FAT32.</string>
+    <string name="microsd_format_fat32_fallback">ExFAT unavailable. Formatted as FAT32.</string>
     <string name="microsd_format_no_card">No MicroSD detected.</string>
     <string name="microsd_format_opening_system">Opening system storage settings…</string>
     <string name="settings_debug_advanced_debugging">Enable Advance Debugging</string>

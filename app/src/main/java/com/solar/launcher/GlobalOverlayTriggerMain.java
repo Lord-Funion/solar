@@ -62,7 +62,7 @@ public final class GlobalOverlayTriggerMain {
         @Override
         public void run() {
             if (!backDown || backLongFired || backRestartFired) return;
-            if (isOverlayActive() || isOverlayOpening()) return;
+            if (isOverlayActive() || isOverlayOpening() || isStemMixActive()) return;
             String fg = resolveBackForegroundForRoot();
             if (!GlobalOverlayPolicy.shouldOfferBackLongGlobalModal(fg, isImeActive())) return;
             backLongFired = true;
@@ -224,9 +224,11 @@ public final class GlobalOverlayTriggerMain {
     /** Linux input_event (32-bit ARM): timeval 8B @0, type u16 @8, code u16 @10, value s32 @12. */
     private static void parseEvent(byte[] buf) {
         if (buf == null || buf.length < 16) return;
-        if (isOverlayActive() || isOverlayOpening() || isImeActive()) {
+        if (isOverlayActive() || isOverlayOpening() || isImeActive() || isStemMixActive()) {
             OverlayInputCoordinator.healStaleGatesFromRoot();
         }
+        // Stem/Mix jam owns pads — root miss-gate must not open overlay / steal keys. 2026-07-19
+        if (isStemMixActive()) return;
         int type = le16(buf, 8);
         int code = le16(buf, 10);
         int value = le32(buf, 12);
@@ -487,6 +489,18 @@ public final class GlobalOverlayTriggerMain {
         }
     }
 
+    /** True when Stem/Mix jam owns pads — trust sys.solar.stemmix.active. 2026-07-19 */
+    private static boolean isStemMixActive() {
+        try {
+            Class<?> sp = Class.forName("android.os.SystemProperties");
+            java.lang.reflect.Method get = sp.getMethod("get", String.class, String.class);
+            Object v = get.invoke(null, StemOrMixSession.ACTIVE_PROPERTY, "0");
+            return "1".equals(String.valueOf(v));
+        } catch (Exception e) {
+            return StemOrMixSession.isActive();
+        }
+    }
+
     /** Root tier only after PWM miss pulse — prevents double key delivery. */
     private static boolean shouldRootForwardImeKeys() {
         return SolarImeRouteArbiter.shouldRootForwardKeys();
@@ -519,19 +533,40 @@ public final class GlobalOverlayTriggerMain {
             handler.removeCallbacks(powerLongRunnable);
             handler.removeCallbacks(powerRestartRunnable);
             handler.removeCallbacks(powerRescueArmRunnable);
+            String fgAtDown = resolvePowerForegroundForRoot();
+            // 2026-07-20 — Root miss-gate: arm Options spinner on Power DOWN (Solar fg only).
+            // Layman: same spinner as hold-Back while waiting for the menu.
+            // Reversal: drop am broadcast; spinner only after OPEN_CONTEXT_MENU.
+            if (com.solar.input.policy.GlobalInputPolicy.shouldOfferPowerLongModal(
+                    fgAtDown, DeviceFeatures.isY2())) {
+                try {
+                    Runtime.getRuntime().exec(new String[]{"sh", "-c",
+                            "am broadcast -a " + OverlayTriggers.ACTION_CONTEXT_HOLD_ARM
+                                    + " -p com.solar.launcher >/dev/null 2>&1"});
+                } catch (Exception ignored) {}
+            }
             handler.postDelayed(powerLongRunnable,
-                    com.solar.input.policy.GlobalInputPolicy.powerModalHoldMsForPackage(
-                            resolvePowerForegroundForRoot()) + POWER_MISS_GATE_MS);
+                    com.solar.input.policy.GlobalInputPolicy.powerModalHoldMsForPackage(fgAtDown)
+                            + POWER_MISS_GATE_MS);
             handler.postDelayed(powerRescueArmRunnable,
                     com.solar.input.policy.GlobalInputPolicy.HUD_COUNTDOWN_START_MS);
             handler.postDelayed(powerRestartRunnable, BACK_RESTART_MS);
         } else if (value == 0) {
             long held = powerDownAt > 0 ? SystemClock.uptimeMillis() - powerDownAt : 0L;
+            boolean menuOpened = powerLongFired;
             powerDown = false;
             powerDownAt = 0L;
             handler.removeCallbacks(powerLongRunnable);
             handler.removeCallbacks(powerRestartRunnable);
             handler.removeCallbacks(powerRescueArmRunnable);
+            // 2026-07-20 — Early release: clear hold spinner (mirror ContextHoldThrobberGate).
+            if (ContextHoldThrobberGate.shouldClearOnHoldCancel(menuOpened)) {
+                try {
+                    Runtime.getRuntime().exec(new String[]{"sh", "-c",
+                            "am broadcast -a " + OverlayTriggers.ACTION_CONTEXT_HOLD_CANCEL
+                                    + " -p com.solar.launcher >/dev/null 2>&1"});
+                } catch (Exception ignored) {}
+            }
             if (com.solar.input.policy.GlobalInputPolicy.shouldPassthroughPowerTap(held)) {
                 if (!powerRestartFired) {
                     SolarRescueHoldState.disarm();

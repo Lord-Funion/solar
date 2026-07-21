@@ -22,7 +22,8 @@ public final class SoulseekAccount {
     public static final String PREF_HIDE_FLAC = "soulseek_hide_flac";
     public static final String PREF_HIDE_HIGH_BITRATE = "soulseek_hide_high_bitrate";
     public static final String PREF_SHARING_ENABLED = "soulseek_sharing_enabled";
-    public static final String PREF_INCLUDE_IN_GET_MUSIC = "soulseek_include_in_get_music";
+    // 2026-07-19 — Removed unused PREF_INCLUDE_IN_GET_MUSIC (Get Music follows soulseekActive).
+    // Was: soulseek_include_in_get_music default true. Reversal: restore const + includeInGetMusic().
 
     private static final Pattern USERNAME_OK =
             Pattern.compile("^[A-Za-z0-9_-]{1,20}$");
@@ -193,10 +194,5 @@ public final class SoulseekAccount {
         if (account == null) return "Auto account";
         if (account.custom) return account.username;
         return account.username;
-    }
-
-    public static boolean includeInGetMusic(SharedPreferences prefs) {
-        if (prefs == null) return true;
-        return prefs.getBoolean(PREF_INCLUDE_IN_GET_MUSIC, true);
     }
 }

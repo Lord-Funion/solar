@@ -16,6 +16,30 @@ public final class FlowNowPlayingFocus {
     }
 
     /**
+     * 2026-07-20 — Prefer scanned library labels over ID3 for Flow cover / match keys.
+     * Layman: use the library name so flying cover matches the carousel tile.
+     * Was: customLibrary walk then tags ad-hoc. Reversal: return tags when library blank.
+     * @return {album, artist}; album empty when both sources blank.
+     */
+    public static String[] preferLibraryAlbumArtist(
+            String libraryAlbum, String libraryArtist,
+            String tagAlbum, String tagArtist) {
+        if (libraryAlbum != null && libraryAlbum.trim().length() > 0) {
+            return new String[] {
+                    libraryAlbum.trim(),
+                    libraryArtist != null ? libraryArtist : ""
+            };
+        }
+        if (tagAlbum != null && tagAlbum.trim().length() > 0) {
+            return new String[] {
+                    tagAlbum.trim(),
+                    tagArtist != null ? tagArtist : ""
+            };
+        }
+        return new String[] { "", "" };
+    }
+
+    /**
      * Catalog item key for the playing album — uses dominant artist from {@link FlowCatalog}.
      * Falls back to probe when the album is not in the rack yet.
      */

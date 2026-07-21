@@ -708,15 +708,9 @@ audit_rom_contents() {
             errors=$((errors + 1))
         fi
     fi
-    if [ "$TYPE" = "y2" ]; then
-        if [ ! -x "$sys_mount/xbin/solar-rb-launch" ]; then
-            echo "audit fail: /system/xbin/solar-rb-launch missing (Rockbox Settings/FM/BT launch)" >&2
-            errors=$((errors + 1))
-        fi
-    fi
-    # 2026-07-15 — A5 omits Rockbox launch shim + wheel gesture script on purpose.
-    if [ "$TYPE" = "a5" ] && [ -x "$sys_mount/xbin/solar-rb-launch" ]; then
-        echo "audit fail: /system/xbin/solar-rb-launch must not ship on A5 (no Rockbox bake)" >&2
+    # 2026-07-19 — solar-rb-launch retired (no Rockbox bake on any TYPE).
+    if [ -x "$sys_mount/xbin/solar-rb-launch" ]; then
+        echo "audit fail: /system/xbin/solar-rb-launch must not ship (Solar-only)" >&2
         errors=$((errors + 1))
     fi
     if [ "$TYPE" = "a5" ]; then
@@ -789,41 +783,20 @@ audit_rom_contents() {
         errors=$((errors + 1))
     fi
 
-    rockbox_on_rom=1
-    if [ "$TYPE" = "a5" ]; then
-        # 2026-07-15 — A5 is touch/face-nav; no Rockbox-y1 bake (intentional divergence).
-        rockbox_on_rom=0
-    elif [ "$TYPE" = "y2" ] && [ "${SOLAR_ROM_LEGACY_ROCKBOX:-0}" != "1" ]; then
-        rockbox_on_rom=0
+    # 2026-07-19 — No ROM bakes org.rockbox (Solar-only). Was: Y1 required; Y2 LEGACY optional.
+    rockbox_on_rom=0
+    echo "audit note: org.rockbox omitted on all Solar ROM packs (launch-if-present only)" >&2
+    if [ -f "$sys_mount/app/org.rockbox.apk" ] || [ -f "$sys_mount/lib/librockbox.so" ]; then
+        echo "audit fail: org.rockbox must not ship on Solar ROM (TYPE=$TYPE)" >&2
+        errors=$((errors + 1))
     fi
-
-    if [ "$rockbox_on_rom" = "1" ]; then
-        if [ ! -f "$sys_mount/app/org.rockbox.apk" ]; then
-            echo "audit fail: org.rockbox.apk missing (launcher switch requires Rockbox)" >&2
-            errors=$((errors + 1))
-        fi
-
-        if [ ! -f "$sys_mount/lib/librockbox.so" ]; then
-            echo "audit fail: librockbox.so missing" >&2
-            errors=$((errors + 1))
-        fi
-    elif [ "$TYPE" = "y2" ]; then
-        echo "audit note: Y2 org.rockbox prep-delivered via Solar APK platform bundle" >&2
-        # 2026-07-19 — Leftover Rockbox/JJ on default Y2 pack = hard fail.
-        if [ -f "$sys_mount/app/org.rockbox.apk" ] || [ -f "$sys_mount/lib/librockbox.so" ]; then
-            echo "audit fail: org.rockbox must not ship on default Y2 ROM (use SOLAR_ROM_LEGACY_ROCKBOX=1)" >&2
-            errors=$((errors + 1))
-        fi
-        if [ -f "$sys_mount/app/com.themoon.y1.apk" ] || [ -f "$sys_mount/priv-app/com.themoon.y1.apk" ]; then
-            echo "audit fail: com.themoon.y1 (JJ) must not ship on Y2 Solar ROM" >&2
-            errors=$((errors + 1))
-        fi
-    elif [ "$TYPE" = "a5" ]; then
-        echo "audit note: A5 omits org.rockbox bake (touch player; Solar-only)" >&2
-        if [ -f "$sys_mount/app/org.rockbox.apk" ]; then
-            echo "audit fail: org.rockbox.apk must not ship on A5 ROM" >&2
-            errors=$((errors + 1))
-        fi
+    if [ -f "$sys_mount/app/com.themoon.y1.apk" ] || [ -f "$sys_mount/priv-app/com.themoon.y1.apk" ]; then
+        echo "audit fail: com.themoon.y1 (JJ) must not ship on Solar ROM" >&2
+        errors=$((errors + 1))
+    fi
+    if [ -f "$sys_mount/xbin/solar-rb-launch" ]; then
+        echo "audit fail: solar-rb-launch must not ship (no Rockbox bake)" >&2
+        errors=$((errors + 1))
     fi
 
     # FM radio — warn when mtk FM stack is absent (Solar FM browse still opens; tune may fail).
@@ -952,6 +925,12 @@ audit_rom_contents() {
 
     if [ ! -f "$sys_mount/etc/solar/disable-rockbox-for-solar.sh" ]; then
         echo "audit fail: /system/etc/solar/disable-rockbox-for-solar.sh missing (legacy forwarder)" >&2
+        errors=$((errors + 1))
+    fi
+
+    # 2026-07-19 — switch-to-rockbox no longer packed; keep switch-to-stock for Solar HOME.
+    if [ -f "$sys_mount/etc/solar/switch-to-rockbox.sh" ]; then
+        echo "audit fail: switch-to-rockbox.sh must not ship (Solar-only HOME)" >&2
         errors=$((errors + 1))
     fi
 
@@ -1350,44 +1329,40 @@ if [ "$TYPE" = "y2" ] \
     install_fm_from_y1_base "$MOUNT_SYS"
 fi
 
-if [ "$TYPE" = "y2" ]; then
-    if [ "${SOLAR_ROM_LEGACY_ROCKBOX:-0}" = "1" ]; then
-        install_rockbox_from_y1_base "$MOUNT_SYS"
-    else
-        echo "==> Y2 Rockbox — platform prep bundle (org.rockbox via Solar APK self-heal)"
-        # 2026-07-19 — Force-strip Rockbox + JJ leftovers from jj_auto / ATA base.
-        # Layman: Solar packs the OS; Rockbox comes later via APK prep, not baked in.
-        # Technical: rm system APKs/libs + userdata package trees. Reversal: LEGACY_ROCKBOX=1.
-        echo "==> Force-remove org.rockbox + com.themoon.y1 (JJ) from Y2 pack"
-        sudo rm -f "$MOUNT_SYS/app/org.rockbox.apk" "$MOUNT_SYS/lib/librockbox.so"
-        sudo rm -f "$MOUNT_SYS/app/com.themoon.y1.apk" "$MOUNT_SYS/priv-app/com.themoon.y1.apk"
-        # Catch oddly named JJ / moon launcher APKs under app/priv-app.
-        while IFS= read -r _jj; do
-            [ -n "$_jj" ] || continue
-            echo "  removing $(basename "$_jj")"
-            sudo rm -f "$_jj"
-        done < <(find "$MOUNT_SYS/app" "$MOUNT_SYS/priv-app" -maxdepth 1 \
-            \( -iname '*themoon*' -o -iname '*jj*launcher*' -o -iname 'com.themoon.y1.apk' \) \
-            2>/dev/null || true)
-        if [ -n "${MOUNT_USER:-}" ] && [ -d "$MOUNT_USER" ]; then
-            sudo rm -rf "$MOUNT_USER/data/org.rockbox" "$MOUNT_USER/data/com.themoon.y1" \
-                "$MOUNT_USER/app/org.rockbox" "$MOUNT_USER/app/com.themoon.y1" 2>/dev/null || true
-            while IFS= read -r _uapk; do
-                [ -n "$_uapk" ] || continue
-                echo "  removing userdata $(basename "$_uapk")"
-                sudo rm -f "$_uapk"
-            done < <(find "$MOUNT_USER" -iname 'com.themoon.y1.apk' -o -iname '*_launcher.apk' \
-                2>/dev/null || true)
-        fi
+# 2026-07-19 — Solar-only: strip org.rockbox + JJ from every ROM type (no LEGACY bake).
+# Was: Y1 heal install_rockbox_stock_y1; Y2 LEGACY_ROCKBOX=1 bake. Reversal: restore those branches.
+strip_rockbox_and_jj_from_pack() {
+    local mount_sys="$1"
+    echo "==> Force-remove org.rockbox + com.themoon.y1 (JJ) from Solar pack (TYPE=$TYPE)"
+    sudo rm -f "$mount_sys/app/org.rockbox.apk" "$mount_sys/lib/librockbox.so"
+    sudo rm -f "$mount_sys/app/com.themoon.y1.apk" "$mount_sys/priv-app/com.themoon.y1.apk"
+    sudo rm -f "$mount_sys/xbin/solar-rb-launch" 2>/dev/null || true
+    while IFS= read -r _jj; do
+        [ -n "$_jj" ] || continue
+        echo "  removing $(basename "$_jj")"
+        sudo rm -f "$_jj"
+    done < <(find "$mount_sys/app" "$mount_sys/priv-app" -maxdepth 1 \
+        \( -iname '*themoon*' -o -iname '*jj*launcher*' -o -iname 'com.themoon.y1.apk' \
+           -o -iname 'org.rockbox.apk' \) \
+        2>/dev/null || true)
+    if [ -n "${MOUNT_USER:-}" ] && [ -d "$MOUNT_USER" ]; then
+        sudo rm -rf "$MOUNT_USER/data/org.rockbox" "$MOUNT_USER/data/com.themoon.y1" \
+            "$MOUNT_USER/app/org.rockbox" "$MOUNT_USER/app/com.themoon.y1" 2>/dev/null || true
+        while IFS= read -r _uapk; do
+            [ -n "$_uapk" ] || continue
+            echo "  removing userdata $(basename "$_uapk")"
+            sudo rm -f "$_uapk"
+        done < <(find "$MOUNT_USER" \( -iname 'com.themoon.y1.apk' -o -iname 'org.rockbox.apk' \
+            -o -iname '*_launcher.apk' \) 2>/dev/null || true)
     fi
-elif [ "$TYPE" = "a" ] || [ "$TYPE" = "b" ]; then
-    # 2026-07-15 — Y1 ATA zip may lack Rockbox; heal from rockbox-y1 asset cache.
-    if [ ! -f "$MOUNT_SYS/app/org.rockbox.apk" ] || [ ! -f "$MOUNT_SYS/lib/librockbox.so" ]; then
-        install_rockbox_stock_y1 "$MOUNT_SYS"
-    fi
-fi
+}
 
-# Keep org.rockbox.apk + librockbox.so from base firmware for launcher switching.
+if [ "$TYPE" = "y2" ]; then
+    : # FM already handled above for y2
+fi
+strip_rockbox_and_jj_from_pack "$MOUNT_SYS"
+
+# Legacy launcher-init removed; Rockbox no longer baked for switch.
 sudo rm -f "$MOUNT_SYS/etc/init.d/99Y1LauncherInit.sh"
 
 sudo mkdir -p "$MOUNT_SYS/app" "$MOUNT_SYS/usr/keylayout"
@@ -1433,7 +1408,8 @@ sudo chown root:root "$MOUNT_SYS/etc/solar/solar-rescue-hud-watch.sh" \
     "$MOUNT_SYS/etc/solar/solar-rescue-exec.sh" "$MOUNT_SYS/etc/solar/solar-rescue-daemon.sh" \
     "$MOUNT_SYS/etc/solar/solar-launcher-exec.sh" "$MOUNT_SYS/etc/solar/solar-platform-daemon.sh"
 sudo cp "$SCRIPT_DIR/switch-to-stock.sh" "$MOUNT_SYS/etc/solar/switch-to-stock.sh"
-sudo cp "$SCRIPT_DIR/switch-to-rockbox.sh" "$MOUNT_SYS/etc/solar/switch-to-rockbox.sh"
+# 2026-07-19 — Do not pack switch-to-rockbox.sh (Solar-only HOME). Reversal: restore cp below.
+sudo rm -f "$MOUNT_SYS/etc/solar/switch-to-rockbox.sh"
 sudo cp "$SCRIPT_DIR/sync-rockbox-libs.sh" "$MOUNT_SYS/etc/solar/sync-rockbox-libs.sh"
 sudo cp "$SCRIPT_DIR/sync-rockbox-assets.sh" "$MOUNT_SYS/etc/solar/sync-rockbox-assets.sh"
 sudo cp "$REPO_ROOT/solar-rom/system/rockbox-y2-config.cfg" "$MOUNT_SYS/etc/solar/rockbox-y2-config.cfg"
@@ -1447,7 +1423,7 @@ sudo cp "$REPO_ROOT/app/src/main/assets/y1/solar-enable-ums.sh" "$MOUNT_SYS/etc/
 sudo cp "$REPO_ROOT/app/src/main/assets/y1/solar-disable-ums.sh" "$MOUNT_SYS/etc/solar/solar-disable-ums.sh"
 sudo cp "$REPO_ROOT/app/src/main/assets/y1/y1-enable-ums.sh" "$MOUNT_SYS/etc/solar/y1-enable-ums.sh"
 sudo cp "$REPO_ROOT/app/src/main/assets/y1/y1-disable-ums.sh" "$MOUNT_SYS/etc/solar/y1-disable-ums.sh"
-sudo chmod 755 "$MOUNT_SYS/etc/solar/switch-to-stock.sh" "$MOUNT_SYS/etc/solar/switch-to-rockbox.sh" \
+sudo chmod 755 "$MOUNT_SYS/etc/solar/switch-to-stock.sh" \
     "$MOUNT_SYS/etc/solar/sync-rockbox-libs.sh" "$MOUNT_SYS/etc/solar/sync-rockbox-assets.sh" \
     "$MOUNT_SYS/etc/solar/sync-y1-keymap.sh" \
     "$MOUNT_SYS/etc/solar/disable-rockbox-for-solar.sh" \
@@ -1458,7 +1434,7 @@ sudo chmod 755 "$MOUNT_SYS/etc/solar/switch-to-stock.sh" "$MOUNT_SYS/etc/solar/s
     "$MOUNT_SYS/etc/solar/solar-enable-ums.sh" "$MOUNT_SYS/etc/solar/solar-disable-ums.sh" \
     "$MOUNT_SYS/etc/solar/y1-enable-ums.sh" "$MOUNT_SYS/etc/solar/y1-disable-ums.sh"
 sudo chmod 644 "$MOUNT_SYS/etc/solar/rockbox-y2-config.cfg"
-sudo chown root:root "$MOUNT_SYS/etc/solar/switch-to-stock.sh" "$MOUNT_SYS/etc/solar/switch-to-rockbox.sh" \
+sudo chown root:root "$MOUNT_SYS/etc/solar/switch-to-stock.sh" \
     "$MOUNT_SYS/etc/solar/sync-rockbox-libs.sh" "$MOUNT_SYS/etc/solar/sync-rockbox-assets.sh" \
     "$MOUNT_SYS/etc/solar/rockbox-y2-config.cfg" \
     "$MOUNT_SYS/etc/solar/sync-y1-keymap.sh" \
@@ -1581,6 +1557,26 @@ else
     sudo "$SCRIPT_DIR/apply-avrcp-patches.sh" "$MOUNT_SYS"
 fi
 
+# 2026-07-19 — Koensayr pairing conf (all families when etc/bluetooth exists).
+echo "==> Bluetooth pairing conf (audio.conf / auto_pairing / CoD props)"
+chmod +x "$SCRIPT_DIR/install-bluetooth-pairing-conf.sh"
+sudo "$SCRIPT_DIR/install-bluetooth-pairing-conf.sh" "$MOUNT_SYS"
+
+# 2026-07-19 — AirPods RTP proxy (Y1 3.0.7 stock MD5 only; soft-skip elsewhere).
+if [ "$TYPE" = "a" ] || [ "$TYPE" = "b" ]; then
+    echo "==> AirPods RTP libbluetoothdrv proxy (Y1)"
+    chmod +x "$SCRIPT_DIR/install-airpods-rtp-proxy.sh"
+    # Ensure prebuilt exists when NDK is available.
+    if [ ! -f "$SCRIPT_DIR/../patches/bluetooth-rtp/prebuilt/libbluetoothdrv.so" ]; then
+        chmod +x "$SCRIPT_DIR/../patches/bluetooth-rtp/build-airpods-rtp-proxy.sh" || true
+        "$SCRIPT_DIR/../patches/bluetooth-rtp/build-airpods-rtp-proxy.sh" || \
+            echo "==> WARN: RTP proxy build skipped — install will soft-skip" >&2
+    fi
+    sudo "$SCRIPT_DIR/install-airpods-rtp-proxy.sh" "$MOUNT_SYS"
+else
+    echo "==> Skipping AirPods RTP proxy (TYPE=$TYPE — Y1 A/B only)"
+fi
+
 install_solar_boot_assets "$BASE_DIR" "$MOUNT_SYS"
 
 # Solar install-recovery + daemonsu boot chain — Y1 rockbox base has su but stock install-recovery
@@ -1588,10 +1584,8 @@ install_solar_boot_assets "$BASE_DIR" "$MOUNT_SYS"
 echo "==> Install Solar boot recovery chain (install-recovery + init.d hooks)"
 chmod +x "$SCRIPT_DIR/install-y1-su-system.sh"
 sudo "$SCRIPT_DIR/install-y1-su-system.sh" "$MOUNT_SYS"
+# 2026-07-19 — Do not install solar-rb-launch (no Rockbox bake). Reversal: restore Y2 install block.
 if [ "$TYPE" = "y2" ]; then
-    echo "==> Install Rockbox system() launcher shim"
-    sudo install -m 755 -o root -g root \
-        "$REPO_ROOT/solar-rom/system/solar-rb-launch" "$MOUNT_SYS/xbin/solar-rb-launch"
     # #region agent log
     debug_rom_log "D" "build-rom.sh:install_su" "Y1 permissive su baked" \
         "su_mode=$(stat -c%a "$MOUNT_SYS/xbin/su" 2>/dev/null || echo missing)"
@@ -1630,16 +1624,19 @@ sudo rm -f "$MOUNT_USER/data/*_launcher_initialized"
 sudo rm -f "$MOUNT_USER/data/.solar_rom_home_ready"
 sudo rm -f "$MOUNT_USER/data/initialized"
 
-echo "==> Seed Rockbox switch scripts in userdata (overwrite rockbox-y1 reboot/keylayout script)"
+echo "==> Seed Solar HOME scripts in userdata (no Rockbox switch)"
 sudo mkdir -p "$MOUNT_USER/data"
-# 2026-07-08 — Ship executor next to Rockbox's /data/data/switch-to-stock.sh wrapper.
+# 2026-07-19 — Drop switch-to-rockbox userdata seed. Was: cp switch-to-rockbox.sh.
 sudo cp "$SCRIPT_DIR/switch-to-stock.sh" "$MOUNT_USER/data/switch-to-stock.sh"
-sudo cp "$SCRIPT_DIR/switch-to-rockbox.sh" "$MOUNT_USER/data/switch-to-rockbox.sh"
+sudo rm -f "$MOUNT_USER/data/switch-to-rockbox.sh"
 sudo cp "$SCRIPT_DIR/solar-launcher-exec.sh" "$MOUNT_USER/data/solar-launcher-exec.sh"
-sudo chmod 755 "$MOUNT_USER/data/switch-to-stock.sh" "$MOUNT_USER/data/switch-to-rockbox.sh" \
+sudo chmod 755 "$MOUNT_USER/data/switch-to-stock.sh" \
     "$MOUNT_USER/data/solar-launcher-exec.sh"
-sudo chown root:root "$MOUNT_USER/data/switch-to-stock.sh" "$MOUNT_USER/data/switch-to-rockbox.sh" \
+sudo chown root:root "$MOUNT_USER/data/switch-to-stock.sh" \
     "$MOUNT_USER/data/solar-launcher-exec.sh"
+
+# Final strip after any late installs (su / xposed / userdata seeds).
+strip_rockbox_and_jj_from_pack "$MOUNT_SYS"
 
 audit_rom_contents "$BASE_DIR" "$MOUNT_SYS" "$MOUNT_USER"
 

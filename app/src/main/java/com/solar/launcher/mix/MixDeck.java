@@ -5,6 +5,7 @@ import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
 
+import com.solar.launcher.audio.SolarTransport;
 import com.solar.launcher.stem.StemSoundTouch;
 import com.solar.launcher.video.SolarIjkPlayerFactory;
 
@@ -16,8 +17,9 @@ import tv.danmaku.ijk.media.player.IjkMediaPlayer;
 /**
  * One Mix deck — full track via IJK + optional SoundTouch rate.
  * Layman: one song playing under one pad, speed-matched without chipmunking.
- * Technical: IjkMediaPlayer audio-only; setSpeed for beat sync; fade via volume ramp.
- * 2026-07-19
+ * Technical: IjkMediaPlayer audio-only; setSpeed for beat sync; fade on solar-audio looper.
+ * Was: fade ticks on main Looper. Reversal: audio = new Handler(Looper.getMainLooper()).
+ * 2026-07-19 / 2026-07-20
  */
 public final class MixDeck {
     public interface Listener {
@@ -26,7 +28,8 @@ public final class MixDeck {
         void onComplete(MixDeck deck);
     }
 
-    private final Handler main = new Handler(Looper.getMainLooper());
+    private final Handler audio;
+    private final Handler ui = new Handler(Looper.getMainLooper());
     private IjkMediaPlayer player;
     private Listener listener;
     private float gain;
@@ -52,12 +55,12 @@ public final class MixDeck {
             if (t > 1f) t = 1f;
             gain = fadeFrom + (fadeTo - fadeFrom) * t;
             applyVolume();
-            if (fadeStepsLeft > 0) main.postDelayed(this, 40);
+            if (fadeStepsLeft > 0) audio.postDelayed(this, 40);
         }
     };
 
     public MixDeck(Context ignored) {
-        // Context reserved for future cache paths. 2026-07-19
+        this.audio = SolarTransport.get().audioHandler();
     }
 
     public void setListener(Listener listener) {
@@ -110,25 +113,40 @@ public final class MixDeck {
                     player.setSpeed(speed);
                 } catch (Exception ignored) {}
                 applyVolume();
-                if (listener != null) listener.onReady(MixDeck.this);
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (listener != null) listener.onReady(MixDeck.this);
+                    }
+                });
             }
         });
         player.setOnCompletionListener(new tv.danmaku.ijk.media.player.IMediaPlayer.OnCompletionListener() {
             @Override
             public void onCompletion(tv.danmaku.ijk.media.player.IMediaPlayer mp) {
                 if (released) return;
-                try {
-                    player.seekTo(0);
-                    player.start();
-                } catch (Exception ignored) {}
-                if (listener != null) listener.onComplete(MixDeck.this);
+                // Host decides: queue advance soft-replace vs restart. Was: always loop here.
+                // Reversal: seekTo(0); start(); then onComplete.
+                // 2026-07-21
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (listener != null) listener.onComplete(MixDeck.this);
+                    }
+                });
             }
         });
         player.setOnErrorListener(new tv.danmaku.ijk.media.player.IMediaPlayer.OnErrorListener() {
             @Override
             public boolean onError(tv.danmaku.ijk.media.player.IMediaPlayer mp, int what, int extra) {
                 if (listener != null) {
-                    listener.onError(MixDeck.this, "Mix error " + what + "/" + extra);
+                    final String msg = "Mix error " + what + "/" + extra;
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (listener != null) listener.onError(MixDeck.this, msg);
+                        }
+                    });
                 }
                 return true;
             }
@@ -163,7 +181,7 @@ public final class MixDeck {
     }
 
     public void setGain(float g) {
-        main.removeCallbacks(fadeTick);
+        audio.removeCallbacks(fadeTick);
         fadeStepsLeft = 0;
         gain = g < 0f ? 0f : (g > 1f ? 1f : g);
         applyVolume();
@@ -174,23 +192,23 @@ public final class MixDeck {
         return gain;
     }
 
-    /** Smooth fade to target (~400ms) then optional callback. 2026-07-19 */
+    /** Smooth fade to target (~400ms) then optional callback on UI thread. 2026-07-19 */
     public void fadeTo(float target, final Runnable onDone) {
-        main.removeCallbacks(fadeTick);
+        audio.removeCallbacks(fadeTick);
         fadeFrom = gain;
         fadeTo = target < 0f ? 0f : (target > 1f ? 1f : target);
         fadeStepsLeft = 10;
-        main.post(new Runnable() {
+        audio.post(new Runnable() {
             @Override
             public void run() {
                 if (released) {
-                    if (onDone != null) onDone.run();
+                    if (onDone != null) ui.post(onDone);
                     return;
                 }
                 if (fadeStepsLeft <= 0) {
                     gain = fadeTo;
                     applyVolume();
-                    if (onDone != null) onDone.run();
+                    if (onDone != null) ui.post(onDone);
                     return;
                 }
                 fadeStepsLeft--;
@@ -199,7 +217,7 @@ public final class MixDeck {
                 if (t > 1f) t = 1f;
                 gain = fadeFrom + (fadeTo - fadeFrom) * t;
                 applyVolume();
-                main.postDelayed(this, 40);
+                audio.postDelayed(this, 40);
             }
         });
     }
@@ -227,7 +245,7 @@ public final class MixDeck {
             int p = ms;
             if (dur > 0) {
                 if (p < 0) p = 0;
-                if (p >= dur) p = 0; // wrap for Mix scrub
+                if (p >= dur) p = 0;
             } else if (p < 0) {
                 p = 0;
             }
@@ -246,7 +264,7 @@ public final class MixDeck {
 
     public void release() {
         released = true;
-        main.removeCallbacks(fadeTick);
+        audio.removeCallbacks(fadeTick);
         releasePlayerOnly();
         listener = null;
     }
@@ -254,7 +272,17 @@ public final class MixDeck {
     private void applyVolume() {
         if (player == null) return;
         try {
-            player.setVolume(gain, gain);
+            // Volume-only mute — keep playhead (StemPadMutePolicy lockstep). 2026-07-21
+            // Was: pause when silent + start on unmute. Reversal: restore pause/start.
+            boolean silent = gain <= 0.001f;
+            player.setVolume(silent ? 0f : gain, silent ? 0f : gain);
+            if (com.solar.launcher.stem.StemPadMutePolicy.shouldPauseWhenSilent()) {
+                if (silent) {
+                    if (player.isPlaying()) player.pause();
+                } else if (started && !released && !player.isPlaying()) {
+                    player.start();
+                }
+            }
         } catch (Exception ignored) {}
     }
 

@@ -27,7 +27,7 @@ public final class Debug8b0481Log {
             "/home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/.cursor/debug-8b0481.log";
 
     /** On while hunting wrong-stem identity (Headlock→Glue). Flip false before ship. */
-    public static final boolean ENABLED = true;
+    public static final boolean ENABLED = false; // 2026-07-20 — off: no SD/HTTP metering on device
 
     private Debug8b0481Log() {}
 

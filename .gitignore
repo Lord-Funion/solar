@@ -29,6 +29,9 @@ build/
 # Local Soulseek share-browse harness (generated fixtures, nicotine iteration)
 .soulseek-browse-test/
 
+# 2026-07-19 — Wheel input lab APK (local diagnostics only; never commit)
+/input-lab/
+
 # Docs & Artifacts
 /docs/
 /*.md
@@ -82,3 +85,5 @@ session_data/
 # Solar Designer — local developer GUI tool only (never ship to users)
 /solar-designer/
 
+lab-readbacks/
+**/build/

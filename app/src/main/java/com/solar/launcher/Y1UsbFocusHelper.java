@@ -186,12 +186,31 @@ public final class Y1UsbFocusHelper {
             hostConnected = true;
             usbConnected = true;
             UsbHostSessionPolicy.onUsbHostConnected(activity.getApplicationContext());
+            // Fresh PC plug — export may drive eject UI again (cleared after prior unplug).
+            UsbMassStorageController.clearExportUiIgnoreAfterUnplug();
             // Stock USB UI — pause Solar reclaim/prompt so Android dialog stays (2026-07-19).
             boolean stockUi = UsbStorageSessionFlags.preferStockUsbUi(
                     activity.getApplicationContext());
             if (stockUi || flapWhileDeclined || isSessionIdle()) {
                 interceptPaused = true;
                 stopUmsWatchdog();
+                // Stock: do not notify MainActivity — avoids UnauthorizedUmsGuard / route on PC plug.
+                if (stockUi) {
+                    // #region agent log
+                    try {
+                        JSONObject d = new JSONObject();
+                        d.put("stockUi", true);
+                        d.put("skipListener", true);
+                        d.put("auto", UsbStorageSessionFlags.isAutoConnectEnabled(
+                                activity.getApplicationContext()));
+                        DebugSessionLog.log("Y1UsbFocusHelper.handleUsbStateIntent",
+                                "stock host — no Solar notify", "H-USB", d);
+                        Debug050a40Log.log(activity, "Y1UsbFocusHelper.handleUsbStateIntent",
+                                "stock host — Solar idle (Android should own UI)", "H1,H3", d);
+                    } catch (Exception ignored) {}
+                    // #endregion
+                    return;
+                }
             } else if (!userDeclinedHostSession) {
                 interceptPaused = false;
                 if (massStorageIntercept && isSystemUiUsbOnTop()) {

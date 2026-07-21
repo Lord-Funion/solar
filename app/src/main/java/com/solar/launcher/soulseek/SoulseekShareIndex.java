@@ -51,6 +51,27 @@ public final class SoulseekShareIndex {
     }
 
     /**
+     * 2026-07-20 — Music File list from SQLite path→size (SEGMENTED empty customLibrary).
+     * Layman: build the share file list from the library database when RAM has no full song list.
+     * Technical: {@code MusicLibraryStore.loadPathSizes()} keys; size &gt; 0; no {@code isFile} here
+     * (caller / {@link #addShareableFile} checks disk on the share worker).
+     * Was: snapshot customLibrary only → empty/missing shares under SEGMENTED. Reversal: RAM File list only.
+     */
+    public static List<File> musicFilesFromPathSizes(Map<String, Long> pathSizes) {
+        ArrayList<File> out = new ArrayList<File>();
+        if (pathSizes == null || pathSizes.isEmpty()) return out;
+        for (Map.Entry<String, Long> e : pathSizes.entrySet()) {
+            if (e == null) continue;
+            String path = e.getKey();
+            Long sizeObj = e.getValue();
+            if (path == null || path.length() == 0 || sizeObj == null) continue;
+            if (sizeObj.longValue() <= 0L) continue;
+            out.add(new File(path));
+        }
+        return out;
+    }
+
+    /**
      * @param knownMusicFiles when non-empty, index Music from this list instead of re-walking the tree
      *        (ponytail: avoids a second O(files) filesystem walk after library scan).
      * @param podcastRoots all Podcasts/ folders to share (multi-volume).

@@ -75,25 +75,15 @@ public class WheelPhysicsTest {
         assertFalse(r.sectionJump);
     }
 
-    @Test public void micBoostAcceleratesRampWithoutChangingDirection() {
-        WheelPhysics slow = new WheelPhysics();
-        WheelPhysics fast = new WheelPhysics();
+    @Test public void rapidNotchesRampWithoutMicBoost() {
+        // 2026-07-19 — Mic boost removed; KEY impulse alone still ramps multi-row.
+        WheelPhysics p = new WheelPhysics();
         WheelPhysics.Result r = new WheelPhysics.Result();
         long t = 5_000_000_000L;
-        slow.setMicBoost(1f);
-        fast.setMicBoost(1.5f);
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             t += 30_000_000L;
-            slow.tick(t, 1, r);
+            p.tick(t, 1, r);
         }
-        int stepsSlow = r.rowSteps;
-        t = 6_000_000_000L;
-        for (int i = 0; i < 3; i++) {
-            t += 30_000_000L;
-            fast.tick(t, 1, r);
-        }
-        // Mic firm scrape should reach multi-row as soon as or sooner than plain spin.
-        assertTrue(r.rowSteps >= stepsSlow || r.sectionJump);
         assertTrue(r.rowSteps > 0 || r.sectionJump);
     }
 

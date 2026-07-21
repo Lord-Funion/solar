@@ -62,6 +62,13 @@ public final class ScreenTransition {
     private static volatile boolean animating;
     private static volatile boolean modalAnimating;
     private static volatile long lastFrameNanos;
+    /** 2026-07-19 — Views in the live root transition (abort cancels these). */
+    private static View activeOut;
+    private static View activeIn;
+    private static View activeOutBackdrop;
+    private static View activeInBackdrop;
+    /** Forward complete from interrupted anim — abort skips this (Back applies its own dest). */
+    private static Runnable activeComplete;
 
     private ScreenTransition() {}
 
@@ -98,8 +105,55 @@ public final class ScreenTransition {
     static float playerInterpolation(float t) { return PLAYER_EASE.getInterpolation(t); }
     static float modalInterpolation(float t) { return MODAL_EASE.getInterpolation(t); }
 
+    /**
+     * 2026-07-19 — Flag-only clear (legacy). Prefer {@link #abort()} when interrupting for Back.
+     * Was: sole cancel path. Reversal: callers that only need the flag can keep using this.
+     */
     public static void cancel() {
         animating = false;
+        modalAnimating = false;
+    }
+
+    /**
+     * 2026-07-19 — Hard-stop in-flight root slide/crossfade without running the old onComplete.
+     * Layman: Back mid-slide must not leave the next screen invisible with a stuck spinner.
+     * Technical: cancel ViewPropertyAnimators, reset transforms, drop animating; skip activeComplete
+     * so changeScreen can sync-apply the parent. Reversal: restore cancel()-only in changeScreen.
+     */
+    public static void abort() {
+        View o = activeOut;
+        View i = activeIn;
+        View ob = activeOutBackdrop;
+        View ib = activeInBackdrop;
+        activeOut = null;
+        activeIn = null;
+        activeOutBackdrop = null;
+        activeInBackdrop = null;
+        activeComplete = null;
+        animating = false;
+        modalAnimating = false;
+        resetView(o);
+        resetView(i);
+        resetView(ob);
+        resetView(ib);
+    }
+
+    /** Remember views for {@link #abort()} while a root transition runs. */
+    private static void trackActive(View outView, View inView, View outBackdrop, View inBackdrop,
+            Runnable onComplete) {
+        activeOut = outView;
+        activeIn = inView;
+        activeOutBackdrop = outBackdrop;
+        activeInBackdrop = inBackdrop;
+        activeComplete = onComplete;
+    }
+
+    private static void clearActiveTracking() {
+        activeOut = null;
+        activeIn = null;
+        activeOutBackdrop = null;
+        activeInBackdrop = null;
+        activeComplete = null;
     }
 
     public static void animatePushPop(final View outView, final View inView, final boolean forward,
@@ -138,6 +192,7 @@ public final class ScreenTransition {
         final Runnable done = new Runnable() {
             @Override
             public void run() {
+                clearActiveTracking();
                 animating = false;
                 resetView(outView);
                 resetView(inView);
@@ -147,6 +202,7 @@ public final class ScreenTransition {
                 if (onComplete != null) onComplete.run();
             }
         };
+        trackActive(outView, inView, outBackdrop, inBackdrop, done);
         inView.animate().translationX(0f).setDuration(PUSH_MS).setInterpolator(PUSH_EASE)
                 .setListener(endListener(done)).start();
         if (outView != null) {
@@ -191,6 +247,7 @@ public final class ScreenTransition {
         final Runnable done = new Runnable() {
             @Override
             public void run() {
+                clearActiveTracking();
                 animating = false;
                 resetView(outView);
                 resetView(inView);
@@ -200,6 +257,7 @@ public final class ScreenTransition {
                 if (onComplete != null) onComplete.run();
             }
         };
+        trackActive(outView, inView, outBackdrop, inBackdrop, done);
         inView.animate().translationY(0f).setDuration(PLAYER_MS).setInterpolator(PLAYER_EASE)
                 .setListener(endListener(done)).start();
         if (outView != null) {
@@ -245,6 +303,7 @@ public final class ScreenTransition {
         final Runnable done = new Runnable() {
             @Override
             public void run() {
+                clearActiveTracking();
                 animating = false;
                 resetView(outView);
                 inView.setAlpha(1f);
@@ -254,6 +313,7 @@ public final class ScreenTransition {
                 if (onComplete != null) onComplete.run();
             }
         };
+        trackActive(outView, inView, outBackdrop, inBackdrop, done);
         inView.animate().alpha(1f).setDuration(CROSSFADE_MS).setInterpolator(MODAL_EASE)
                 .setListener(endListener(done)).start();
         if (outView != null) {
@@ -587,6 +647,14 @@ public final class ScreenTransition {
                 // 2026-07-06 — Clear animating on cancel so wheel keys are not stuck swallowed.
                 animating = false;
                 modalAnimating = false;
+                // #region agent log
+                try {
+                    org.json.JSONObject d = new org.json.JSONObject();
+                    d.put("hadComplete", onComplete != null);
+                    com.solar.launcher.Debug54d8beLog.log("ScreenTransition.endListener",
+                            "anim cancel — onComplete NOT run", "H1", d);
+                } catch (Exception ignored) {}
+                // #endregion
             }
         };
     }

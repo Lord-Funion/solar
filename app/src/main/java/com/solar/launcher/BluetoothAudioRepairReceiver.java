@@ -5,7 +5,10 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 
-/** Manifest receiver — PAIRING_REQUEST and bond events for all apps (Settings, Rockbox, Solar). */
+/**
+ * Manifest receiver — PAIRING_REQUEST and bond events for all apps (Settings, Rockbox, Solar).
+ * 2026-07-19 — Sole PAIRING_REQUEST owner; notifies coordinator on BOND_BONDED to cancel delayed PIN.
+ */
 public class BluetoothAudioRepairReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -22,6 +25,12 @@ public class BluetoothAudioRepairReceiver extends BroadcastReceiver {
                 abortBroadcast();
             }
             return;
+        }
+        if (BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(intent.getAction())) {
+            int bondState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR);
+            if (bondState == BluetoothDevice.BOND_BONDED) {
+                BluetoothPairingCoordinator.onBonded(device);
+            }
         }
         if (BluetoothAudioRepair.isBondAuthFailure(intent)) {
             BluetoothPairingCoordinator.onAuthFailure(context, device);

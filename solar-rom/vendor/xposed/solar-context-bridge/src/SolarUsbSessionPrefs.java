@@ -22,16 +22,12 @@ final class SolarUsbSessionPrefs {
     private SolarUsbSessionPrefs() {}
 
     /**
-     * Leave stock UsbStorageActivity alone — skip Solar prompt and not auto-connecting.
-     * 2026-07-19
+     * Always leave stock UsbStorageActivity alone — Solar never finishes SystemUI USB.
+     * 2026-07-19 — Was: stock when Auto-Connect off. Now: always stock (hooks also removed).
+     * Auto-Connect still enables UMS via USB_STATE / Settings without stealing the dialog.
      */
     static boolean preferStockUsbUi() {
-        if (isAutoConnectEnabled()) return false;
-        String stock = readSysProp(SYSPROP_STOCK_UI, "");
-        if ("1".equals(stock)) return true;
-        if ("0".equals(stock)) return false;
-        // Unset props: default skip Solar prompt → stock UI (matches app DEFAULT_SKIP).
-        return !"0".equals(readSysProp(SYSPROP_SKIP_PROMPT, "1"));
+        return true;
     }
 
     /** False when user skips Solar prompt (stock or silent auto). */

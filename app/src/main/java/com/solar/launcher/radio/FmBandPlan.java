@@ -2,7 +2,10 @@ package com.solar.launcher.radio;
 
 import java.util.Locale;
 
-/** FM broadcast band limits per regulatory region. */
+/**
+ * FM broadcast band limits per regulatory region.
+ * 2026-07-20 — Step/floor match MT6627 (76–108 MHz, 50 kHz); RU OIRT below chip is clamped.
+ */
 public final class FmBandPlan {
   public final String regionCode;
   public final float minMhz;
@@ -16,16 +19,25 @@ public final class FmBandPlan {
     this.stepMhz = stepMhz;
   }
 
-  /** Resolve plan for region code; unknown codes fall back to US. */
+  /**
+   * Resolve plan for region code; unknown codes fall back to US.
+   * 2026-07-20 — All regions use 0.05 MHz (50 kHz) to match MT6627 seek grid.
+   * RU: keep label RU but clamp to 76–108 (chip floor); old OIRT 65.9–74 was untunable.
+   * Layman: radio dial steps like the chip; Russia no longer aims below what hardware can hear.
+   * Reversal: step 0.1f everywhere; RU min 65.9 / max 74.0.
+   */
   public static FmBandPlan fromRegionCode(String regionCode) {
+    // 2026-07-20 — Shared 50 kHz grid for every region plan below.
+    final float step = 0.05f;
     String r = regionCode == null ? "US" : regionCode.trim().toUpperCase(Locale.US);
-    if ("EU".equals(r)) return new FmBandPlan("EU", 87.5f, 108.0f, 0.1f);
-    if ("JP".equals(r)) return new FmBandPlan("JP", 76.0f, 90.0f, 0.1f);
-    if ("AU".equals(r)) return new FmBandPlan("AU", 87.5f, 108.0f, 0.1f);
-    if ("KR".equals(r)) return new FmBandPlan("KR", 88.0f, 108.0f, 0.1f);
-    if ("RU".equals(r)) return new FmBandPlan("RU", 65.9f, 74.0f, 0.1f);
+    if ("EU".equals(r)) return new FmBandPlan("EU", 87.5f, 108.0f, step);
+    if ("JP".equals(r)) return new FmBandPlan("JP", 76.0f, 90.0f, step);
+    if ("AU".equals(r)) return new FmBandPlan("AU", 87.5f, 108.0f, step);
+    if ("KR".equals(r)) return new FmBandPlan("KR", 88.0f, 108.0f, step);
+    // 2026-07-20 — MT6627 cannot tune classic RU OIRT; stay on chip 76–108 window.
+    if ("RU".equals(r)) return new FmBandPlan("RU", 76.0f, 108.0f, step);
     // US / CA / default — includes 87.9 commercial low end
-    return new FmBandPlan("US", 87.9f, 107.9f, 0.1f);
+    return new FmBandPlan("US", 87.9f, 107.9f, step);
   }
 
   public int minKhz() {
@@ -59,7 +71,7 @@ public final class FmBandPlan {
 
   /**
    * Fractional MHz display for kHz input — e.g. 101100 → {@code 101.1}.
-   * ponytail: one decimal place matches 0.1 MHz step UI.
+   * 2026-07-20 — Still one decimal in UI; snap uses 50 kHz under the hood.
    */
   public static String khzToFraction(int khz, FmBandPlan plan) {
     if (plan == null) plan = fromRegionCode("US");

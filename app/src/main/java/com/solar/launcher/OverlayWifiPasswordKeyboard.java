@@ -124,12 +124,13 @@ final class OverlayWifiPasswordKeyboard {
 
     private void refreshUi() {
         if (shellHost == null || controller == null) return;
-        String statusTitle = context.getString(R.string.keyboard_enter_wifi_password);
-        if (targetSsid != null && targetSsid.length() > 0) {
-            statusTitle = statusTitle + " — " + targetSsid;
-        }
-        shellHost.applyShellTheme(statusTitle, true);
+        // 2026-07-20 — Status = clock (shell); no subtitle title; password hint only in field.
+        shellHost.applyShellTheme("", true);
         String buffer = controller.getBuffer();
-        shellHost.getKeyboardUi().refresh(controller, statusTitle, buffer, buffer.length() == 0);
+        boolean empty = buffer == null || buffer.length() == 0;
+        String input = empty
+                ? context.getString(R.string.keyboard_enter_wifi_password)
+                : buffer;
+        shellHost.getKeyboardUi().refresh(controller, null, input, empty);
     }
 }

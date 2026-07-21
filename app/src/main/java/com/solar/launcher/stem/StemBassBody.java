@@ -29,15 +29,31 @@ public final class StemBassBody {
     private StemBassBody() {}
 
     /**
+     * Peek for a ready bass_body.wav — never decode or write.
+     * Layman: if the thick-bass file is already there, use it; otherwise skip.
+     * Was: open path called ensure() (full MediaCodec mix) and stuck on “Bass body…”.
+     * Reversal: call ensure(stemDir, sources, cancelled) again from startJob.
+     * 2026-07-20
+     */
+    public static File existingOrNull(File stemDir) {
+        if (stemDir == null) return null;
+        File out = new File(stemDir, BASS_BODY_WAV);
+        if (out.isFile() && out.length() > 1000) return out;
+        return null;
+    }
+
+    /**
      * Build bass_body.wav from vocals+drums+melody files in stem dir (or explicit list).
      * Returns existing file if already present and non-empty.
+     * Heavy on Y1/Y2 — do not call from Stem Player open path (use existingOrNull).
      * 2026-07-19
      */
     public static File ensure(File stemDir, List<File> nonBassSources, AtomicBoolean cancelled)
             throws Exception {
         if (stemDir == null) throw new IOException("stem dir missing");
-        File out = new File(stemDir, BASS_BODY_WAV);
-        if (out.isFile() && out.length() > 1000) return out;
+        File out = existingOrNull(stemDir);
+        if (out != null) return out;
+        out = new File(stemDir, BASS_BODY_WAV);
         List<File> ok = new ArrayList<File>();
         if (nonBassSources != null) {
             for (int i = 0; i < nonBassSources.size(); i++) {

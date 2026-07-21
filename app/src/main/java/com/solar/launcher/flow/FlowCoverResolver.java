@@ -147,7 +147,7 @@ public final class FlowCoverResolver {
                     return b;
                 }
             }
-            Bitmap embedded = readEmbeddedArt(track);
+            Bitmap embedded = readEmbeddedArt(track, thumbPx);
             if (embedded != null) {
                 // #region agent log
                 try {
@@ -158,6 +158,7 @@ public final class FlowCoverResolver {
                             "art found", "H7", d);
                 } catch (Exception ignored) {}
                 // #endregion
+                // Already sampled to ~thumbPx; scaleForFlow finalizes LCD size.
                 Bitmap out = AlbumCoverPipeline.scaleForFlow(embedded, thumbPx, thumbPx);
                 if (embedded != out && !embedded.isRecycled()) embedded.recycle();
                 maybeCacheAlbumArt(artDir, albumKey, out);
@@ -307,9 +308,11 @@ public final class FlowCoverResolver {
 
     private static Bitmap downloadBitmap(String url, int thumbPx) {
         try {
+            // 2026-07-19 — Skip network decode under RAM pressure (same gate as embedded).
+            if (com.solar.launcher.LowMemoryGate.shouldDeferHeavyWork(null)) return null;
             byte[] raw = com.solar.launcher.net.SolarHttp.getBytes(url);
             if (raw == null || raw.length == 0) return null;
-            Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.length);
+            Bitmap bmp = decodeByteArraySampled(raw, thumbPx);
             if (bmp == null) return null;
             return AlbumCoverPipeline.scaleForFlow(bmp, thumbPx, thumbPx);
         } catch (Exception ignored) {
@@ -317,15 +320,50 @@ public final class FlowCoverResolver {
         }
     }
 
-    private static Bitmap readEmbeddedArt(File track) {
+    /**
+     * 2026-07-19 — Bound embedded JPEG decode (was full decodeByteArray → AlbumArtIngest OOM).
+     * Layman: shrink big cover pictures before loading them so the player does not run out of RAM.
+     * Technical: Bounds + inSampleSize + RGB_565; skip when LowMemoryGate pressured.
+     * Reversal: return BitmapFactory.decodeByteArray(raw, 0, raw.length) without sample.
+     */
+    private static Bitmap readEmbeddedArt(File track, int thumbPx) {
         try {
+            if (com.solar.launcher.LowMemoryGate.shouldDeferHeavyWork(null)) return null;
             android.media.MediaMetadataRetriever mmr = new android.media.MediaMetadataRetriever();
             mmr.setDataSource(track.getAbsolutePath());
             byte[] raw = mmr.getEmbeddedPicture();
             mmr.release();
             if (raw == null || raw.length == 0) return null;
-            return android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.length);
+            return decodeByteArraySampled(raw, thumbPx > 0 ? thumbPx : AlbumArtCache.THUMB_PX);
+        } catch (OutOfMemoryError oom) {
+            return null;
         } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /** Decode JPEG/PNG bytes with inSampleSize so max edge ≈ 2× target. */
+    static Bitmap decodeByteArraySampled(byte[] raw, int thumbPx) {
+        if (raw == null || raw.length == 0) return null;
+        int target = thumbPx > 0 ? thumbPx : AlbumArtCache.THUMB_PX;
+        android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.length, bounds);
+        int w = bounds.outWidth;
+        int h = bounds.outHeight;
+        int sample = 1;
+        if (w > 0 && h > 0) {
+            int max = Math.max(w, h);
+            while (max / sample > target * 2) sample *= 2;
+        } else {
+            sample = 2; // unknown size — still avoid full decode when possible
+        }
+        android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+        opts.inSampleSize = sample;
+        opts.inPreferredConfig = Bitmap.Config.RGB_565;
+        try {
+            return android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.length, opts);
+        } catch (OutOfMemoryError oom) {
             return null;
         }
     }

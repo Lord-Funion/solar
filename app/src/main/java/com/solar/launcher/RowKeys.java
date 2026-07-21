@@ -75,6 +75,11 @@ public final class RowKeys {
     public static final String AUTO_FETCH = "settings.auto_fetch";
     /** 2026-07-18 — Lalal.ai license key for Stem Player. */
     public static final String LALAL = "settings.lalal";
+    /**
+     * 2026-07-19 — Enable Stem features (demo key path; default off).
+     * Was: no toggle — user key only. Reversal: remove row + PREF_STEM_FEATURES_ENABLED.
+     */
+    public static final String STEM_FEATURES = "settings.stem_features";
     /** 2026-07-19 — Experimental Melody premix (default off = live multi-player). */
     public static final String STEM_PREMIX = "settings.stem_premix";
     public static final String LIBRARY_BROWSE = "settings.library_browse";
@@ -114,7 +119,7 @@ public final class RowKeys {
     public static final String DIAG_AUTO_REPORT = "settings.diag_auto_report";
     /** Root Settings — GitHub Issues URL screen. */
     public static final String REPORT_ISSUE = "settings.report_issue";
-    /** Report Issue sub-row → Solar Development conversation (device diagnostics). */
+    /** Report Issue sub-row → optional message keyboard + one-shot USER_REPORT (2026-07-19). */
     public static final String REPORT_FROM_DEVICE = "settings.report_from_device";
     /** Dev-support experiment — in-app report thread (2026-07-05). */
     public static final String REPORT_PROBLEM = "settings.report_problem";
@@ -203,7 +208,7 @@ public final class RowKeys {
     public static final String SOULSEEK_SHARING = "soulseek.sharing";
     public static final String SOULSEEK_REACH_ENABLED = "soulseek.reach_enabled";
     public static final String SOULSEEK_ENABLED = "soulseek.enabled";
-    public static final String SOULSEEK_INCLUDE_GET_MUSIC = "soulseek.include_get_music";
+    // 2026-07-19 — Dead SOULSEEK_INCLUDE_GET_MUSIC removed (no UI writer). Reversal: restore const + title map.
     public static final String SOULSEEK_MESSAGING = "soulseek.messaging";
     public static final String SOULSEEK_FIND_USER = "soulseek.find_user";
     public static final String SOULSEEK_FIND_REACH = "soulseek.find_reach";
@@ -339,6 +344,7 @@ public final class RowKeys {
         if (SOULSEEK.equals(rowKey)) return R.string.settings_soulseek;
         if (DEEZER.equals(rowKey)) return R.string.settings_deezer;
         if (LALAL.equals(rowKey)) return R.string.settings_lalal;
+        if (STEM_FEATURES.equals(rowKey)) return R.string.settings_stem_features;
         if (STEM_PREMIX.equals(rowKey)) return R.string.settings_stem_premix;
         if (AUTO_FETCH.equals(rowKey)) return R.string.settings_auto_fetch;
         if (LIBRARY_BROWSE.equals(rowKey)) return R.string.settings_library_browse;
@@ -367,7 +373,7 @@ public final class RowKeys {
         if (ABOUT.equals(rowKey)) return R.string.settings_about;
         if (DIAG_AUTO_REPORT.equals(rowKey)) return R.string.settings_diag_auto_report;
         if (REPORT_ISSUE.equals(rowKey)) return R.string.settings_report_issue;
-        if (REPORT_FROM_DEVICE.equals(rowKey)) return R.string.report_issue_from_device;
+        if (REPORT_FROM_DEVICE.equals(rowKey)) return R.string.report_issue_send_logs;
         if (SUPPORT_DEVELOPER.equals(rowKey)) return R.string.settings_support_developer;
         if (OUR_DONORS.equals(rowKey)) return R.string.settings_our_donors;
         if (DEBUG.equals(rowKey)) return R.string.settings_sub_debug;
@@ -434,7 +440,6 @@ public final class RowKeys {
         if (SOULSEEK_SHARING.equals(rowKey)) return R.string.soulseek_share_library;
         if (SOULSEEK_REACH_ENABLED.equals(rowKey)) return R.string.soulseek_reach_enabled;
         if (SOULSEEK_ENABLED.equals(rowKey)) return R.string.soulseek_enabled;
-        if (SOULSEEK_INCLUDE_GET_MUSIC.equals(rowKey)) return R.string.get_music_include_reach;
         if (SOULSEEK_MESSAGING.equals(rowKey)) return R.string.soulseek_allow_messaging;
         if (SOULSEEK_FIND_USER.equals(rowKey)) return R.string.soulseek_find_user;
         if (SOULSEEK_FIND_REACH.equals(rowKey)) return R.string.soulseek_find_reach_users;

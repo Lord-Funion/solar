@@ -27,6 +27,7 @@ import android.widget.TextView;
 
 import com.solar.launcher.theme.ThemeManager;
 import com.solar.launcher.ui.HardwareButtonGlyph;
+import com.solar.launcher.ui.RowBusyChrome;
 import com.solar.launcher.DebugAgentLog;
 import com.solar.launcher.DebugF9ef0bLog;
 import com.solar.launcher.FocusScrollHelper;
@@ -212,6 +213,19 @@ public final class MediaSuiteHost {
         /** Open wheel keyboard for YouTube search — result delivered via {@link #onYouTubeSearchSubmitted}. */
         void openYouTubeSearchKeyboard(String prefill);
 
+        /**
+         * 2026-07-19 — Open wheel keyboard to find a local video by filename (My Videos lists).
+         * Layman: type part of the name instead of scrolling a long video folder.
+         */
+        void openVideoFileSearchKeyboard();
+
+        /**
+         * 2026-07-20 — Open wheel keyboard for Online Radio name search.
+         * Layman: type a station name; we look it up online. Technical: KEYBOARD_RADIO_NET_SEARCH.
+         * Reversal: Search row toast-only (no IME).
+         */
+        void openRadioNetSearchKeyboard(String prefill);
+
         /** Save YouTube stream via downloader (video or audio-only). */
         void requestYouTubeSave(YouTubeVideo video, boolean audioOnly);
 
@@ -220,6 +234,12 @@ public final class MediaSuiteHost {
          * Layman: open the song player with this file. Technical: playTrackList singleton.
          */
         void playAudioFileInNowPlaying(java.io.File file);
+
+        /**
+         * 2026-07-19 — YouTube Audio with catalog title/artist (avoids NP “Failed” from empty tags).
+         * Was: file-only overload. Reversal: call file-only and ignore title/artist.
+         */
+        void playAudioFileInNowPlaying(java.io.File file, String title, String artist);
 
         /** Title + subtitle row for virtual browse lists (YouTube, podcasts pattern). */
         View createTwoLineBrowseRow(String title, String subtitle);
@@ -301,6 +321,12 @@ public final class MediaSuiteHost {
     private List<RadioBrowserClient.Tag> netTags = new ArrayList<RadioBrowserClient.Tag>();
     private List<RadioBrowserClient.Station> netStations = new ArrayList<RadioBrowserClient.Station>();
     private boolean netLoading;
+    /** 2026-07-20 — Name-search query; empty means country/tag browse. Reversal: always empty. */
+    private String netSearchQuery = "";
+    /** 2026-07-20 — True when station list came from IME search (Back → country hub). */
+    private boolean netFromSearch;
+    /** 2026-07-20 — Last page was full (NET_PAGE_SIZE) so Show more is offered. */
+    private boolean netStationsHasMore;
 
     private File videoBrowseFolder;
     private List<File> videoFiles = new ArrayList<File>();
@@ -321,6 +347,14 @@ public final class MediaSuiteHost {
     private String youtubeStreamQuality;
     /** 2026-07-14 — Prevent double quality-fallback from rapid IJK error callbacks. */
     private boolean youtubeIjkFallbackPending;
+    /**
+     * 2026-07-19 — Already tried SolarHttp progressive download for this stream (avoid loops).
+     * Layman: only download-to-file once per play attempt. Reversal: always false.
+     */
+    private boolean youtubeTriedProgDownload;
+    /** 2026-07-19 — Cancel in-flight progressive download when leaving the player. */
+    private final java.util.concurrent.atomic.AtomicBoolean youtubeProgCancel =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
     private String youtubePendingSearch;
     private String youtubeNowPlayingTitle;
     private String youtubeNowPlayingId;
@@ -962,6 +996,42 @@ public final class MediaSuiteHost {
      * Was: always jumped to first preset when any existed. Reversal: presets.get(0) wins again.
      */
     public void openFmFromHome() {
+        // 2026-07-20 — Phone chrome: block non-MTK; warn then allow on MTK phones.
+        // Was: always tried FM path. Reversal: delete gate block.
+        try {
+            boolean chrome = com.solar.launcher.phone.PhoneChromePolicy.active(host.context());
+            com.solar.launcher.phone.PhoneFmGate.Decision gate =
+                    com.solar.launcher.phone.PhoneFmGate.decideLive(chrome);
+            if (gate == com.solar.launcher.phone.PhoneFmGate.Decision.BLOCK_NON_MTK) {
+                host.offerFmMtkFallback(host.getString(R.string.radio_fm_phone_needs_mtk));
+                return;
+            }
+            if (gate == com.solar.launcher.phone.PhoneFmGate.Decision.WARN_THEN_ALLOW) {
+                host.showThemedConfirm(
+                        host.getString(R.string.radio_fm_phone_mtk_warn_title),
+                        host.getString(R.string.radio_fm_phone_mtk_warn_message),
+                        host.getString(R.string.common_ok),
+                        host.getString(R.string.common_cancel),
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                openFmFromHomeAfterGate();
+                            }
+                        },
+                        null);
+                return;
+            }
+        } catch (Throwable ignored) {}
+        openFmFromHomeAfterGate();
+    }
+
+    /**
+     * 2026-07-20 — Existing FM home entry after phone chrome gate (or when chrome inactive).
+     * Home menu FM — import JJ presets once, open NP, auto-start last frequency.
+     * 2026-07-15 — Prefer last tuned kHz (then session dial, then first preset, then band default).
+     * Was: always jumped to first preset when any existed. Reversal: presets.get(0) wins again.
+     */
+    private void openFmFromHomeAfterGate() {
         FmJjPresetImport.importIfEmpty(host.context());
         if (!fmEngine.isAvailable()) {
             host.offerFmMtkFallback(host.getString(R.string.radio_fm_unavailable));
@@ -1499,7 +1569,7 @@ public final class MediaSuiteHost {
                         ? host.getString(R.string.radio_fm_tuning_active)
                         : host.getString(R.string.radio_fm_tune_click);
         // 2026-07-18 — Settings row stays prose (String API); NP track line uses OK glyph.
-        addActionRow(host.getString(R.string.radio_fm_tune_row) + " — " + tuneHint, new Runnable() {
+        addActionRow(host.getString(R.string.radio_fm_tune_row) + ": " + tuneHint, new Runnable() {
             @Override
             public void run() {
                 fmTuningMode = !fmTuningMode;
@@ -1585,7 +1655,22 @@ public final class MediaSuiteHost {
                 });
 
         addStatusRow(host.getString(R.string.radio_fm_onboarding_hint));
+        // 2026-07-20 — Show auto-detect band + Scan-vs-streams note (Settings parity).
+        addStatusRow(detectedFmBandSummary());
+        addStatusRow(host.getString(R.string.radio_fm_stations_from_scan));
         focusFirstBrowserChild();
+    }
+
+    /**
+     * Human line for auto-detected FM limits, e.g. Detected: EU (87.5–108).
+     * 2026-07-20 — From locale/SIM/geo; not the manual override. Layman: what dial Solar guessed.
+     */
+    public String detectedFmBandSummary() {
+        String region = RadioSettings.detectFmBandFromLocale(host.context());
+        FmBandPlan plan = FmBandPlan.fromRegionCode(region);
+        // Host getString max 2 args — build Detected line without a 3-arg overload.
+        return host.getString(R.string.radio_fm_detected_band, region,
+                FmBandPlan.formatMhz(plan.minMhz) + "–" + FmBandPlan.formatMhz(plan.maxMhz));
     }
 
     /** Label for current FM output mode (Wired / Bluetooth / Speaker). */
@@ -2175,6 +2260,10 @@ public final class MediaSuiteHost {
 
     // --- Internet radio browse ---
 
+    /**
+     * Online Radio browse shell — country → state → tag → stations (or IME search).
+     * 2026-07-20 — Pin/focus home country; Search uses Solar IME; Show more pages.
+     */
     private void buildNetBrowseUi() {
         host.applyReachBrowseLayoutMode();
         host.showReachBrowseList(true);
@@ -2198,9 +2287,14 @@ public final class MediaSuiteHost {
         }
     }
 
+    /**
+     * Country hub chrome: Back / Favorites / Search + country rows.
+     * 2026-07-20 — Search opens IME (was toast). Layman: pick a country or type a name.
+     */
     private void buildNetCountryHubUi() {
         prepareVirtualListBrowse();
         virtualLabels.clear();
+        virtualSubtitles.clear();
         virtualLabels.add(host.getString(R.string.common_back_short));
         virtualLabels.add(host.getString(R.string.radio_net_favorites));
         virtualLabels.add(host.getString(R.string.radio_net_search));
@@ -2218,7 +2312,9 @@ public final class MediaSuiteHost {
                     return;
                 }
                 if (position == 2) {
-                    Toast.makeText(host.context(), R.string.radio_net_search_hint, Toast.LENGTH_SHORT).show();
+                    // 2026-07-20 — Was toast; now Solar IME → searchByName. Reversal: toast-only.
+                    if (!host.requireInternet(R.string.toast_internet_required)) return;
+                    host.openRadioNetSearchKeyboard(netSearchQuery);
                     return;
                 }
                 int countryIdx = position - 3;
@@ -2228,6 +2324,10 @@ public final class MediaSuiteHost {
                     netCountryName = c.name;
                     netStateName = "";
                     netTagName = "";
+                    netSearchQuery = "";
+                    netFromSearch = false;
+                    // 2026-07-20 — New country clears remembered state until user picks again.
+                    RadioSettings.setInternetRadioState(host.context(), "");
                     radioSubMode = RADIO_NET_STATE;
                     loadNetStatesAsync();
                 }
@@ -2236,9 +2336,14 @@ public final class MediaSuiteHost {
         loadNetCountriesAsync();
     }
 
+    /**
+     * Fetch countries, pin effective country first, focus that row (do not auto-enter).
+     * 2026-07-20 — Geo/pref pin so home country sits under Search chrome.
+     */
     private void loadNetCountriesAsync() {
         final int gen = ++netLoadGen;
         netLoading = true;
+        final String pinIso = RadioSettings.effectiveInternetRadioCountry(host.context());
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -2249,38 +2354,76 @@ public final class MediaSuiteHost {
                 } catch (Exception e) {
                     err = e.getMessage();
                 }
-                final List<RadioBrowserClient.Country> fLoaded = loaded;
+                // 2026-07-20 — Move detected/saved country to top; rest keep API order.
+                final List<RadioBrowserClient.Country> ordered = pinCountryFirst(loaded, pinIso);
                 final String fErr = err;
                 host.runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
                         if (gen != netLoadGen || radioSubMode != RADIO_NET_COUNTRY) return;
                         netLoading = false;
-                        netCountries = fLoaded;
+                        netCountries = ordered;
                         virtualLabels.clear();
+                        virtualSubtitles.clear();
                         virtualLabels.add(host.getString(R.string.common_back_short));
                         virtualLabels.add(host.getString(R.string.radio_net_favorites));
                         virtualLabels.add(host.getString(R.string.radio_net_search));
                         if (fErr != null) {
                             virtualLabels.add(host.getString(R.string.radio_net_load_error, fErr));
-                        } else if (fLoaded.isEmpty()) {
+                            if (virtualAdapter != null) virtualAdapter.notifyDataSetChanged();
+                            return;
+                        }
+                        if (ordered.isEmpty()) {
                             virtualLabels.add(host.getString(R.string.radio_net_no_countries));
-                        } else {
-                            for (RadioBrowserClient.Country c : fLoaded) {
-                                virtualLabels.add(c.name + " (" + c.stationcount + ")");
-                            }
+                            if (virtualAdapter != null) virtualAdapter.notifyDataSetChanged();
+                            return;
+                        }
+                        for (RadioBrowserClient.Country c : ordered) {
+                            virtualLabels.add(c.name + " (" + c.stationcount + ")");
                         }
                         if (virtualAdapter != null) virtualAdapter.notifyDataSetChanged();
+                        // 2026-07-20 — Focus pinned country (index 3 after Back/Fav/Search); OK still required.
+                        focusVirtualListAt(3);
                     }
                 });
             }
         }).start();
     }
 
+    /**
+     * Put matching ISO country first when present; otherwise leave list as returned.
+     * 2026-07-20 — Pin only; never invent a fake country row.
+     */
+    private static List<RadioBrowserClient.Country> pinCountryFirst(
+            List<RadioBrowserClient.Country> src, String iso) {
+        List<RadioBrowserClient.Country> out = new ArrayList<RadioBrowserClient.Country>();
+        if (src == null || src.isEmpty()) return out;
+        String want = iso == null ? "" : iso.trim().toUpperCase(Locale.US);
+        RadioBrowserClient.Country pinned = null;
+        for (RadioBrowserClient.Country c : src) {
+            if (c == null) continue;
+            if (pinned == null && want.length() == 2
+                    && want.equalsIgnoreCase(c.isoCode != null ? c.isoCode.trim() : "")) {
+                pinned = c;
+            } else {
+                out.add(c);
+            }
+        }
+        if (pinned != null) {
+            out.add(0, pinned);
+        }
+        return out;
+    }
+
+    /**
+     * Load Radio Browser states for the chosen country; focus saved state if any.
+     * 2026-07-20 — Persist on pick; focus remembered row without auto-enter.
+     */
     private void loadNetStatesAsync() {
         final int gen = ++netLoadGen;
         prepareVirtualListBrowse();
         virtualLabels.clear();
+        virtualSubtitles.clear();
         virtualLabels.add(host.getString(R.string.common_back_short));
         virtualLabels.add(host.getString(R.string.radio_net_loading_states));
         bindVirtualAdapter(new VirtualClickHandler() {
@@ -2294,6 +2437,8 @@ public final class MediaSuiteHost {
                 int idx = position - 2;
                 if (idx >= 0 && idx < netStates.size()) {
                     netStateName = netStates.get(idx).name;
+                    // 2026-07-20 — Remember region so next visit can focus this row.
+                    RadioSettings.setInternetRadioState(host.context(), netStateName);
                     radioSubMode = RADIO_NET_TAG;
                     loadNetTagsAsync();
                 } else if (netStates.isEmpty() && position == 2) {
@@ -2314,37 +2459,57 @@ public final class MediaSuiteHost {
                 }
                 final List<RadioBrowserClient.State> fLoaded = loaded;
                 final String fErr = err;
+                final String savedState = RadioSettings.getInternetRadioState(host.context());
                 host.runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
                         if (gen != netLoadGen) return;
                         netStates = fLoaded;
                         virtualLabels.clear();
+                        virtualSubtitles.clear();
                         virtualLabels.add(host.getString(R.string.common_back_short));
                         virtualLabels.add(host.getString(R.string.radio_net_country_header, netCountryName));
                         if (fErr != null) {
                             virtualLabels.add(host.getString(R.string.radio_net_load_error, fErr));
-                        } else if (fLoaded.isEmpty()) {
+                            if (virtualAdapter != null) virtualAdapter.notifyDataSetChanged();
+                            return;
+                        }
+                        if (fLoaded.isEmpty()) {
                             virtualLabels.add(host.getString(R.string.radio_net_skip_states));
+                            if (virtualAdapter != null) virtualAdapter.notifyDataSetChanged();
                             radioSubMode = RADIO_NET_TAG;
                             loadNetTagsAsync();
                             return;
-                        } else {
-                            for (RadioBrowserClient.State s : fLoaded) {
-                                virtualLabels.add(s.name + " (" + s.stationcount + ")");
+                        }
+                        int focusIdx = -1;
+                        for (int i = 0; i < fLoaded.size(); i++) {
+                            RadioBrowserClient.State s = fLoaded.get(i);
+                            virtualLabels.add(s.name + " (" + s.stationcount + ")");
+                            if (focusIdx < 0 && savedState.length() > 0
+                                    && savedState.equalsIgnoreCase(s.name)) {
+                                focusIdx = i;
                             }
                         }
                         if (virtualAdapter != null) virtualAdapter.notifyDataSetChanged();
+                        // 2026-07-20 — Focus matching saved state (list index = 2 + i); still need OK.
+                        if (focusIdx >= 0) {
+                            focusVirtualListAt(2 + focusIdx);
+                        }
                     }
                 });
             }
         }).start();
     }
 
+    /**
+     * Genre tags for the country; first action row is All genres (tag=null stations).
+     * 2026-07-20 — Explicit All genres; was tags-only. Reversal: drop All genres row.
+     */
     private void loadNetTagsAsync() {
         final int gen = ++netLoadGen;
         prepareVirtualListBrowse();
         virtualLabels.clear();
+        virtualSubtitles.clear();
         virtualLabels.add(host.getString(R.string.common_back_short));
         virtualLabels.add(host.getString(R.string.radio_net_loading_tags));
         bindVirtualAdapter(new VirtualClickHandler() {
@@ -2360,9 +2525,24 @@ public final class MediaSuiteHost {
                     }
                     return;
                 }
-                int idx = position - 2;
+                // 2026-07-20 — pos 1 header; 2 All genres (when present); 3+ tag rows.
+                if (position == 2) {
+                    if (position < virtualLabels.size()
+                            && host.getString(R.string.radio_net_all_genres)
+                                    .equals(virtualLabels.get(2))) {
+                        netTagName = "";
+                        netFromSearch = false;
+                        netSearchQuery = "";
+                        radioSubMode = RADIO_NET_STATIONS;
+                        loadNetStationsAsync();
+                    }
+                    return;
+                }
+                int idx = position - 3;
                 if (idx >= 0 && idx < netTags.size()) {
                     netTagName = netTags.get(idx).name;
+                    netFromSearch = false;
+                    netSearchQuery = "";
                     radioSubMode = RADIO_NET_STATIONS;
                     loadNetStationsAsync();
                 }
@@ -2386,15 +2566,20 @@ public final class MediaSuiteHost {
                         if (gen != netLoadGen) return;
                         netTags = fLoaded;
                         virtualLabels.clear();
+                        virtualSubtitles.clear();
                         virtualLabels.add(host.getString(R.string.common_back_short));
                         virtualLabels.add(host.getString(R.string.radio_net_tags_header, netCountryName));
                         if (fErr != null) {
                             virtualLabels.add(host.getString(R.string.radio_net_load_error, fErr));
-                        } else if (fLoaded.isEmpty()) {
-                            virtualLabels.add(host.getString(R.string.radio_net_no_tags));
                         } else {
-                            for (RadioBrowserClient.Tag t : fLoaded) {
-                                virtualLabels.add(t.name + " (" + t.stationcount + ")");
+                            // 2026-07-20 — Always offer All genres even when tag list is empty.
+                            virtualLabels.add(host.getString(R.string.radio_net_all_genres));
+                            if (fLoaded.isEmpty()) {
+                                // Keep All genres; no per-tag rows.
+                            } else {
+                                for (RadioBrowserClient.Tag t : fLoaded) {
+                                    virtualLabels.add(t.name + " (" + t.stationcount + ")");
+                                }
                             }
                         }
                         if (virtualAdapter != null) virtualAdapter.notifyDataSetChanged();
@@ -2404,24 +2589,22 @@ public final class MediaSuiteHost {
         }).start();
     }
 
+    /**
+     * First page of stations for country/state/tag (or empty tag = all genres).
+     * 2026-07-20 — Offset 0; Show more appends. Loading stays on this screen.
+     */
     private void loadNetStationsAsync() {
         final int gen = ++netLoadGen;
+        netFromSearch = false;
         prepareVirtualListBrowse();
         virtualLabels.clear();
+        virtualSubtitles.clear();
         virtualLabels.add(host.getString(R.string.common_back_short));
         virtualLabels.add(host.getString(R.string.radio_net_loading_stations));
         bindVirtualAdapter(new VirtualClickHandler() {
             @Override
             public void onClick(int position) {
-                if (position == 0) {
-                    radioSubMode = RADIO_NET_TAG;
-                    loadNetTagsAsync();
-                    return;
-                }
-                int idx = position - 2;
-                if (idx >= 0 && idx < netStations.size()) {
-                    startInternetStation(netStations.get(idx));
-                }
+                handleNetStationsClick(position);
             }
         });
         new Thread(new Runnable() {
@@ -2443,7 +2626,23 @@ public final class MediaSuiteHost {
                     @Override
                     public void run() {
                         if (gen != netLoadGen) return;
-                        netStations = fLoaded;
+                        netStations = fLoaded != null ? fLoaded
+                                : new ArrayList<RadioBrowserClient.Station>();
+                        netStationsHasMore = netStations.size() == NET_PAGE_SIZE;
+                        if (fErr != null) {
+                            prepareVirtualListBrowse();
+                            virtualLabels.clear();
+                            virtualSubtitles.clear();
+                            virtualLabels.add(host.getString(R.string.common_back_short));
+                            virtualLabels.add(host.getString(R.string.radio_net_load_error, fErr));
+                            bindVirtualAdapter(new VirtualClickHandler() {
+                                @Override
+                                public void onClick(int position) {
+                                    if (position == 0) handleNetStationsBack();
+                                }
+                            });
+                            return;
+                        }
                         showNetStationsUi();
                     }
                 });
@@ -2451,39 +2650,243 @@ public final class MediaSuiteHost {
         }).start();
     }
 
+    /**
+     * IME name search → station list (country filter from effective/current country).
+     * 2026-07-20 — Cancels via netLoadGen when user leaves. Reversal: toast Search only.
+     */
+    public void onRadioNetSearchSubmitted(String query) {
+        if (query == null || query.trim().isEmpty()) return;
+        if (!host.requireInternet(R.string.toast_internet_required)) return;
+        netSearchQuery = query.trim();
+        netFromSearch = true;
+        netTagName = "";
+        if (netCountryCode == null || netCountryCode.isEmpty()) {
+            netCountryCode = RadioSettings.effectiveInternetRadioCountry(host.context());
+        }
+        radioSubMode = RADIO_NET_STATIONS;
+        if (host.getCurrentScreenState() != STATE_RADIO_NET_BROWSE) {
+            host.changeScreen(STATE_RADIO_NET_BROWSE);
+        }
+        loadNetStationsFromSearchAsync(false);
+    }
+
+    /**
+     * Run searchByName page 0 or append Show more pages.
+     * 2026-07-20 — append=true keeps existing rows; bump gen only on fresh search.
+     */
+    private void loadNetStationsFromSearchAsync(final boolean append) {
+        final int gen = append ? netLoadGen : ++netLoadGen;
+        if (!append) {
+            prepareVirtualListBrowse();
+            virtualLabels.clear();
+            virtualSubtitles.clear();
+            virtualLabels.add(host.getString(R.string.common_back_short));
+            virtualLabels.add(host.getString(R.string.radio_net_loading_stations));
+            bindVirtualAdapter(new VirtualClickHandler() {
+                @Override
+                public void onClick(int position) {
+                    handleNetStationsClick(position);
+                }
+            });
+        }
+        netLoading = true;
+        final int offset = append ? netStations.size() : 0;
+        final String q = netSearchQuery;
+        final String country = netCountryCode;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                List<RadioBrowserClient.Station> loaded = new ArrayList<RadioBrowserClient.Station>();
+                String err = null;
+                try {
+                    loaded = radioBrowser.searchByName(q, country, NET_PAGE_SIZE, offset);
+                } catch (Exception e) {
+                    err = e.getMessage();
+                }
+                final List<RadioBrowserClient.Station> fLoaded = loaded;
+                final String fErr = err;
+                host.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (gen != netLoadGen) return;
+                        netLoading = false;
+                        if (fErr != null && !append) {
+                            prepareVirtualListBrowse();
+                            virtualLabels.clear();
+                            virtualSubtitles.clear();
+                            virtualLabels.add(host.getString(R.string.common_back_short));
+                            virtualLabels.add(host.getString(R.string.radio_net_load_error, fErr));
+                            bindVirtualAdapter(new VirtualClickHandler() {
+                                @Override
+                                public void onClick(int position) {
+                                    if (position == 0) handleNetStationsBack();
+                                }
+                            });
+                            return;
+                        }
+                        if (!append) {
+                            netStations = fLoaded != null ? fLoaded
+                                    : new ArrayList<RadioBrowserClient.Station>();
+                        } else if (fLoaded != null) {
+                            netStations.addAll(fLoaded);
+                        }
+                        netStationsHasMore = fLoaded != null && fLoaded.size() == NET_PAGE_SIZE;
+                        showNetStationsUi();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /**
+     * Append next offset page for browse or search when Show more is tapped.
+     * 2026-07-20 — Does not bump netLoadGen so a fresh search can still cancel us.
+     */
+    private void loadMoreNetStationsAsync() {
+        if (netLoading || !netStationsHasMore) return;
+        if (netFromSearch) {
+            loadNetStationsFromSearchAsync(true);
+            return;
+        }
+        final int gen = netLoadGen;
+        netLoading = true;
+        final int offset = netStations.size();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                List<RadioBrowserClient.Station> loaded = new ArrayList<RadioBrowserClient.Station>();
+                try {
+                    loaded = radioBrowser.searchStations(netCountryCode,
+                            netStateName.isEmpty() ? null : netStateName,
+                            netTagName.isEmpty() ? null : netTagName,
+                            NET_PAGE_SIZE, offset);
+                } catch (Exception ignored) {}
+                final List<RadioBrowserClient.Station> fLoaded = loaded;
+                host.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (gen != netLoadGen) return;
+                        netLoading = false;
+                        if (fLoaded != null) netStations.addAll(fLoaded);
+                        netStationsHasMore = fLoaded != null && fLoaded.size() == NET_PAGE_SIZE;
+                        showNetStationsUi();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /**
+     * Bind station list with codec·bitrate subtitles and optional Show more.
+     * 2026-07-20 — Subtitles + pagination. Reversal: name-only rows, offset stuck at 0.
+     */
     private void showNetStationsUi() {
         prepareVirtualListBrowse();
         virtualLabels.clear();
+        virtualSubtitles.clear();
         virtualLabels.add(host.getString(R.string.common_back_short));
-        String header = netTagName != null && !netTagName.isEmpty()
-                ? netTagName : netCountryName;
+        virtualSubtitles.add("");
+        String header;
+        if (netFromSearch && netSearchQuery != null && netSearchQuery.length() > 0) {
+            header = netSearchQuery;
+        } else if (netTagName != null && !netTagName.isEmpty()) {
+            header = netTagName;
+        } else if (netTagName != null && netTagName.isEmpty() && !netFromSearch) {
+            header = host.getString(R.string.radio_net_all_genres);
+        } else {
+            header = netCountryName;
+        }
         virtualLabels.add(host.getString(R.string.radio_net_stations_header, header));
+        virtualSubtitles.add("");
         if (netStations.isEmpty()) {
             virtualLabels.add(host.getString(R.string.radio_net_no_stations));
+            virtualSubtitles.add("");
         } else {
             for (RadioBrowserClient.Station s : netStations) {
                 virtualLabels.add(s.name);
+                virtualSubtitles.add(stationMetaSubtitle(s));
+            }
+            if (netStationsHasMore) {
+                virtualLabels.add(host.getString(R.string.radio_net_show_more));
+                virtualSubtitles.add("");
             }
         }
         bindVirtualAdapter(new VirtualClickHandler() {
             @Override
             public void onClick(int position) {
-                if (position == 0) {
-                    radioSubMode = RADIO_NET_TAG;
-                    loadNetTagsAsync();
-                    return;
-                }
-                int idx = position - 2;
-                if (idx >= 0 && idx < netStations.size()) {
-                    startInternetStation(netStations.get(idx));
-                }
+                handleNetStationsClick(position);
             }
         });
     }
 
+    /** Back from stations: search → country hub; browse → tags. 2026-07-20 */
+    private void handleNetStationsBack() {
+        if (netFromSearch) {
+            netFromSearch = false;
+            netSearchQuery = "";
+            radioSubMode = RADIO_NET_COUNTRY;
+            buildNetCountryHubUi();
+        } else {
+            radioSubMode = RADIO_NET_TAG;
+            loadNetTagsAsync();
+        }
+    }
+
+    /** Station / Show more / Back clicks on the stations list. 2026-07-20 */
+    private void handleNetStationsClick(int position) {
+        if (position == 0) {
+            handleNetStationsBack();
+            return;
+        }
+        int idx = position - 2;
+        if (idx >= 0 && idx < netStations.size()) {
+            startInternetStation(netStations.get(idx));
+            return;
+        }
+        // Show more sits after the last station when hasMore.
+        if (netStationsHasMore && position == 2 + netStations.size()) {
+            loadMoreNetStationsAsync();
+        }
+    }
+
+    /**
+     * Codec · bitrate subtitle when either is present; empty otherwise.
+     * 2026-07-20 — Prefer combined string; fail-open blank. Layman: shows stream quality under the name.
+     */
+    private String stationMetaSubtitle(RadioBrowserClient.Station s) {
+        if (s == null) return "";
+        boolean hasCodec = s.codec != null && s.codec.trim().length() > 0;
+        boolean hasBr = s.bitrate > 0;
+        if (hasCodec && hasBr) {
+            return host.getString(R.string.radio_net_station_meta, s.codec.trim(), s.bitrate);
+        }
+        if (hasCodec) return host.getString(R.string.radio_net_station_codec, s.codec.trim());
+        if (hasBr) return host.getString(R.string.radio_net_station_bitrate, s.bitrate);
+        return "";
+    }
+
+    /** Focus a virtual list row after async fill (country/state pin). 2026-07-20 */
+    private void focusVirtualListAt(final int position) {
+        final ListView lv = host.listVirtualSongs();
+        if (lv == null || position < 0) return;
+        lv.post(new Runnable() {
+            @Override
+            public void run() {
+                if (virtualAdapter == null) return;
+                if (position >= virtualAdapter.getCount()) return;
+                FocusScrollHelper.focusListPosition(lv, position);
+            }
+        });
+    }
+
+    /**
+     * Saved favorites list — play on OK; long-OK removes via context.
+     * 2026-07-20 — Same play path as browse (click-report on start).
+     */
     private void buildNetFavoritesUi() {
         prepareVirtualListBrowse();
         virtualLabels.clear();
+        virtualSubtitles.clear();
         virtualLabels.add(host.getString(R.string.common_back_short));
         final List<InternetRadioFavorites.Favorite> favs = netFavorites.listAll();
         if (favs.isEmpty()) {
@@ -2512,6 +2915,57 @@ public final class MediaSuiteHost {
         });
     }
 
+    /**
+     * Focused Online Radio station for long-OK context (browse or favorites).
+     * 2026-07-20 — Mirrors YouTube getFocusedYouTubeVideo. Reversal: NP-only favorites.
+     */
+    public RadioBrowserClient.Station getFocusedNetStation() {
+        if (host.getCurrentScreenState() != STATE_RADIO_NET_BROWSE) return null;
+        ListView lv = host.listVirtualSongs();
+        if (lv == null) return null;
+        int pos = lv.getSelectedItemPosition();
+        if (pos < 0) return null;
+        if (radioSubMode == RADIO_NET_STATIONS) {
+            int idx = pos - 2;
+            if (idx >= 0 && idx < netStations.size()) return netStations.get(idx);
+            return null;
+        }
+        if (radioSubMode == RADIO_NET_FAVORITES) {
+            List<InternetRadioFavorites.Favorite> favs = netFavorites.listAll();
+            int idx = pos - 1;
+            if (idx < 0 || idx >= favs.size()) return null;
+            InternetRadioFavorites.Favorite f = favs.get(idx);
+            return new RadioBrowserClient.Station(
+                    f.stationuuid, f.name, f.url, f.countrycode, "", "");
+        }
+        return null;
+    }
+
+    /**
+     * Toggle favorite for a browse/NP station; returns true if now favorited.
+     * 2026-07-20 — Shared by context menu (browse + NP).
+     */
+    public boolean toggleNetFavorite(RadioBrowserClient.Station station) {
+        if (station == null || station.stationuuid == null || station.stationuuid.isEmpty()) {
+            return false;
+        }
+        if (netFavorites.isFavorite(station.stationuuid)) {
+            netFavorites.remove(station.stationuuid);
+            return false;
+        }
+        netFavorites.add(station);
+        return true;
+    }
+
+    /** True when stationuuid is in the favorites DB. 2026-07-20 */
+    public boolean isNetFavorite(String stationuuid) {
+        return netFavorites.isFavorite(stationuuid);
+    }
+
+    /**
+     * Start stream + queue + click-report, then open Now Playing.
+     * 2026-07-20 — Keep reportClick on every play (directory health).
+     */
     private void startInternetStation(final RadioBrowserClient.Station station) {
         if (station == null || station.urlResolved == null || station.urlResolved.isEmpty()) {
             Toast.makeText(host.context(), R.string.radio_net_play_error, Toast.LENGTH_SHORT).show();
@@ -2551,6 +3005,7 @@ public final class MediaSuiteHost {
         host.playback().startRadioStation(PlayQueue.QueueItem.internetRadio(
                 station.stationuuid, station.name, station.urlResolved,
                 station.countrycode, station.favicon));
+        // 2026-07-20 — Directory click-report (popularity); keep on every successful play start.
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -2699,7 +3154,13 @@ public final class MediaSuiteHost {
                 && !(t instanceof android.text.Spanned)) {
             return;
         }
-        tv.setText(t);
+        // 2026-07-20 — Glyph spans need system typeface (NP theme font → □).
+        // Was: tv.setText(t) only. Reversal: drop bindGlyphText branch.
+        if (HardwareButtonGlyph.hasGlyphSpans(t)) {
+            HardwareButtonGlyph.bindGlyphText(tv, t);
+        } else {
+            tv.setText(t);
+        }
     }
 
     /** Start RDS polls while FM is on Now Playing — idempotent. */
@@ -3228,16 +3689,15 @@ public final class MediaSuiteHost {
             if (cur == null) return false;
             switch (index) {
                 case 0:
-                    if (netFavorites.isFavorite(cur.radioStationUuid)) {
-                        netFavorites.remove(cur.radioStationUuid);
-                        Toast.makeText(host.context(), R.string.radio_ctx_favorite_removed,
-                                Toast.LENGTH_SHORT).show();
-                    } else {
-                        netFavorites.add(cur.radioStationUuid, cur.radioName, cur.radioUrl,
-                                cur.radioSubtitle);
-                        Toast.makeText(host.context(), R.string.radio_ctx_favorite_added,
-                                Toast.LENGTH_SHORT).show();
-                    }
+                    // 2026-07-20 — Same toggle as browse long-OK.
+                    RadioBrowserClient.Station st = new RadioBrowserClient.Station(
+                            cur.radioStationUuid, cur.radioName, cur.radioUrl,
+                            cur.radioSubtitle, "", "");
+                    boolean nowFav = toggleNetFavorite(st);
+                    Toast.makeText(host.context(),
+                            nowFav ? R.string.radio_ctx_favorite_added
+                                    : R.string.radio_ctx_favorite_removed,
+                            Toast.LENGTH_SHORT).show();
                     return true;
                 case 1:
                     if (!host.requireInternet(R.string.toast_internet_required)) return true;
@@ -3681,6 +4141,15 @@ public final class MediaSuiteHost {
     private void loadYouTubeSearch(final String query) {
         youtubeLoading = true;
         final int gen = ++youtubeLoadGen;
+        // #region agent log
+        try {
+            org.json.JSONObject d = new org.json.JSONObject();
+            d.put("query", query != null ? query : "");
+            d.put("gen", gen);
+            com.solar.launcher.Debug712c71Log.log(host.context(),
+                    "MediaSuiteHost.loadYouTubeSearch", "ui search start", "F", d);
+        } catch (Exception ignored) {}
+        // #endregion
         updateYouTubeStatusPath();
         rebuildYouTubeVirtualRows();
         // Keep focus on Search/Back while results load (was always reset to row 0).
@@ -3688,15 +4157,51 @@ public final class MediaSuiteHost {
         YouTubeClient.getInstance(host.context()).search(query, new YouTubeClient.Callback() {
             @Override
             public void onSuccess(String payloadJson) {
-                if (gen != youtubeLoadGen) return;
+                if (gen != youtubeLoadGen) {
+                    // #region agent log
+                    try {
+                        org.json.JSONObject d = new org.json.JSONObject();
+                        d.put("gen", gen);
+                        d.put("curGen", youtubeLoadGen);
+                        d.put("jsonLen", payloadJson != null ? payloadJson.length() : 0);
+                        com.solar.launcher.Debug712c71Log.log(host.context(),
+                                "MediaSuiteHost.loadYouTubeSearch",
+                                "success stale gen", "D", d);
+                    } catch (Exception ignored) {}
+                    // #endregion
+                    return;
+                }
                 if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) return;
                 youtubeLoading = false;
+                int parsed = 0;
                 try {
                     youtubeVideos.clear();
                     youtubeVideos.addAll(YouTubeResultJson.parseVideos(payloadJson));
+                    parsed = youtubeVideos.size();
                 } catch (Exception e) {
                     youtubeVideos.clear();
+                    // #region agent log
+                    try {
+                        org.json.JSONObject d = new org.json.JSONObject();
+                        d.put("err", e.getMessage() != null ? e.getMessage() : "");
+                        d.put("jsonLen", payloadJson != null ? payloadJson.length() : 0);
+                        com.solar.launcher.Debug712c71Log.log(host.context(),
+                                "MediaSuiteHost.loadYouTubeSearch",
+                                "parse failed", "C", d);
+                    } catch (Exception ignored) {}
+                    // #endregion
                 }
+                // #region agent log
+                try {
+                    org.json.JSONObject d = new org.json.JSONObject();
+                    d.put("query", query != null ? query : "");
+                    d.put("parsed", parsed);
+                    d.put("jsonLen", payloadJson != null ? payloadJson.length() : 0);
+                    com.solar.launcher.Debug712c71Log.log(host.context(),
+                            "MediaSuiteHost.loadYouTubeSearch",
+                            "ui search success", "B", d);
+                } catch (Exception ignored) {}
+                // #endregion
                 // Prefer incremental notify over full rebind (keeps selection).
                 updateYouTubeStatusPath();
                 rebuildYouTubeVirtualRows();
@@ -3709,6 +4214,16 @@ public final class MediaSuiteHost {
                 if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) return;
                 youtubeLoading = false;
                 youtubeVideos.clear();
+                // #region agent log
+                try {
+                    org.json.JSONObject d = new org.json.JSONObject();
+                    d.put("query", query != null ? query : "");
+                    d.put("err", message != null ? message : "");
+                    com.solar.launcher.Debug712c71Log.log(host.context(),
+                            "MediaSuiteHost.loadYouTubeSearch",
+                            "ui search error", "A", d);
+                } catch (Exception ignored) {}
+                // #endregion
                 updateYouTubeStatusPath();
                 rebuildYouTubeVirtualRows();
                 notifyVirtualDataChangedPreserveFocus();
@@ -3793,7 +4308,8 @@ public final class MediaSuiteHost {
                 } catch (Exception ignored) {}
                 // #endregion
                 if (savedFile != null && savedFile.isFile()) {
-                    host.playAudioFileInNowPlaying(savedFile);
+                    // 2026-07-19 — Pass browse title/author so NP never shows “Failed” from empty m4a tags.
+                    host.playAudioFileInNowPlaying(savedFile, video.title, video.author);
                 } else {
                     toastYouTubePlayError(null);
                 }
@@ -4088,6 +4604,8 @@ public final class MediaSuiteHost {
         videoFiles.clear();
         virtualLabels.clear();
         virtualLabels.add(host.getString(R.string.common_back_short));
+        // 2026-07-19 — Search… opens wheel keyboard for filename filter (skip long folder scrolls).
+        virtualLabels.add(host.getString(R.string.browser_search_ellipsis));
         virtualLabels.add(host.getString(R.string.video_folder_header, videoBrowseFolder.getName()));
 
         List<File> folders = VideoLibrary.listChildFoldersWithVideos(videoBrowseFolder);
@@ -4108,7 +4626,7 @@ public final class MediaSuiteHost {
             for (File f : videoFiles) virtualLabels.add(f.getName());
         }
 
-        final int folderStart = 2;
+        final int folderStart = 3;
         final int folderCount = folders.size();
         final int allVideosPos = showAllVideosRow ? folderStart + folderCount : -1;
         final int fileStart = folderStart + folderCount + (showAllVideosRow ? 1 : 0);
@@ -4120,7 +4638,11 @@ public final class MediaSuiteHost {
                     handleBack();
                     return;
                 }
-                if (position == 1) return;
+                if (position == 1) {
+                    host.openVideoFileSearchKeyboard();
+                    return;
+                }
+                if (position == 2) return;
                 if (position >= folderStart && position < folderStart + folderCount) {
                     videoBrowseFolder = folders.get(position - folderStart);
                     buildVideosUi();
@@ -4143,6 +4665,7 @@ public final class MediaSuiteHost {
         final List<File> all = VideoLibrary.scanAll();
         virtualLabels.clear();
         virtualLabels.add(host.getString(R.string.common_back_short));
+        virtualLabels.add(host.getString(R.string.browser_search_ellipsis));
         if (all.isEmpty()) {
             virtualLabels.add(host.getString(R.string.video_none_found));
         } else {
@@ -4155,9 +4678,71 @@ public final class MediaSuiteHost {
                     buildVideosUi();
                     return;
                 }
-                int idx = position - 1;
+                if (position == 1) {
+                    host.openVideoFileSearchKeyboard();
+                    return;
+                }
+                int idx = position - 2;
                 if (idx >= 0 && idx < all.size()) {
                     videoFiles = all;
+                    videoIndex = idx;
+                    host.changeScreen(STATE_VIDEO_PLAYER);
+                }
+            }
+        });
+    }
+
+    /**
+     * 2026-07-19 — Re-open My Videos folder UI after empty video search.
+     * Layman: Back out of a blank search to the normal video list.
+     */
+    public void buildVideosUiPublic() {
+        buildVideosUi();
+    }
+
+    /**
+     * 2026-07-19 — Filtered flat list of local videos matching {@code query} (filename).
+     * Layman: only show videos whose names contain what you typed.
+     * Technical: substring match on name; reuse video player path. Reversal: delete call sites.
+     */
+    public void showVideoSearchResults(String query) {
+        final String q = query != null ? query.trim().toLowerCase(java.util.Locale.US) : "";
+        final List<File> all = VideoLibrary.scanAll();
+        final List<File> matched = new ArrayList<File>();
+        if (q.length() > 0) {
+            for (File f : all) {
+                if (f == null || f.getName() == null) continue;
+                if (f.getName().toLowerCase(java.util.Locale.US).contains(q)) {
+                    matched.add(f);
+                }
+            }
+        }
+        prepareVirtualListBrowse();
+        host.applyReachBrowseLayoutMode();
+        host.showReachBrowseList(true);
+        host.setBrowserStatusTitle(host.getString(R.string.status_videos));
+        virtualLabels.clear();
+        virtualLabels.add(host.getString(R.string.common_back_short));
+        virtualLabels.add(host.getString(R.string.browser_search_ellipsis));
+        if (matched.isEmpty()) {
+            virtualLabels.add(host.getString(R.string.video_search_none));
+        } else {
+            for (File f : matched) virtualLabels.add(f.getName());
+        }
+        bindVirtualAdapter(new VirtualClickHandler() {
+            @Override
+            public void onClick(int position) {
+                if (position == 0) {
+                    buildVideosUi();
+                    return;
+                }
+                if (position == 1) {
+                    host.openVideoFileSearchKeyboard();
+                    return;
+                }
+                int idx = position - 2;
+                if (idx >= 0 && idx < matched.size()) {
+                    videoFiles = matched;
                     videoIndex = idx;
                     host.changeScreen(STATE_VIDEO_PLAYER);
                 }
@@ -4724,13 +5309,13 @@ public final class MediaSuiteHost {
     }
 
     /**
-     * YouTube playback — notPipe-aligned: prefer progressive download then local play on Y1.
-     * 2026-07-16 — CRITICAL: do NOT call stopNonFmPlayback() here. That path calls
-     * stopVideoAndYoutubeStream() and wipes youtubeStreamUrl → "Could not play: no url".
-     * Capture the URL first; only stop music; releaseVideoPlayer handles prior video.
+     * YouTube playback — notPipe-aligned: progressive download then local MediaPlayer is the
+     * reliable path (SolarHttp TLS); JIT proxy is a fast path that must fail-open to download.
+     * 2026-07-16 — CRITICAL: do NOT call stopNonFmPlayback() here (wipes youtubeStreamUrl).
+     * 2026-07-19 — Y2/A5 prefer download-first (API 19 IJK/proxy fragile); Y1 tries proxy then download.
+     * Was: proxy-only with no download. Reversal: remove preferDownload / downloadYoutubeThenPlay.
      */
     private void startYoutubeStreamPlayback() {
-        // Capture before any stop helpers — stopNonFmPlayback used to null this field.
         final String url = youtubeStreamUrl;
         final String vid = youtubeNowPlayingId != null ? youtubeNowPlayingId : "yt";
         final String q = youtubeStreamQuality != null ? youtubeStreamQuality : "360";
@@ -4740,12 +5325,12 @@ public final class MediaSuiteHost {
             leaveYouTubePlayerOnError();
             return;
         }
-        // Keep field in sync in case a later stop wiped it; download uses captured url.
         youtubeStreamUrl = url;
         videoPlaybackYoutube = true;
+        youtubeTriedProgDownload = false;
+        youtubeProgCancel.set(false);
         android.util.Log.i("SolarYouTube", "start play q=" + q
                 + " url=" + (url.length() > 120 ? url.substring(0, 120) : url));
-        // Music only — never stopNonFmPlayback (clears YouTube stream state).
         host.stopMusicPlayback();
         releaseVideoPlayer();
         com.solar.launcher.HearingSafetyVolume.ensureFullVolumeRange(host.context());
@@ -4763,12 +5348,18 @@ public final class MediaSuiteHost {
         videoController.setBufferingListener(videoBufferingListener());
         videoController.attachHolder(videoSurface.getHolder());
 
-        // 2026-07-16 — Real-time JIT streaming via SolarStreamProxy without pre-downloading entire file.
-        // If already cached on disk from prior run, open local file instantly.
         final int gen = ++youtubeLoadGen;
         final File cached = YouTubeProgressiveCache.cacheFile(host.context(), vid, q);
         if (YouTubeProgressiveCache.isUsable(cached) && cached.length() > 1024L * 1024L) {
             openYoutubeCachedFile(cached);
+            return;
+        }
+        // Y2/A5: download via SolarHttp then open(file) — same stack that works for podcasts/OTA.
+        // Y1: try loopback proxy first for instant start; download if open throws.
+        boolean preferDownload = com.solar.launcher.DeviceFeatures.isY2()
+                || com.solar.launcher.DeviceFeatures.isA5();
+        if (preferDownload) {
+            downloadYoutubeThenPlay(url, vid, q, gen);
             return;
         }
         setVideoStatusText(host.getString(R.string.youtube_resolve_opening));
@@ -4785,8 +5376,7 @@ public final class MediaSuiteHost {
                             if (gen != youtubeLoadGen) return;
                             try {
                                 if (videoController == null) {
-                                    toastYouTubePlayError(null);
-                                    leaveYouTubePlayerOnError();
+                                    downloadYoutubeThenPlay(url, vid, q, gen);
                                     return;
                                 }
                                 setVideoStatusText(host.getString(R.string.youtube_resolve_opening));
@@ -4795,38 +5385,103 @@ public final class MediaSuiteHost {
                                 startVideoProgressUpdates();
                                 updateVideoProgressUi(0);
                             } catch (Exception e) {
-                                toastYouTubePlayError(e.getMessage());
-                                leaveYouTubePlayerOnError();
+                                android.util.Log.w("SolarYouTube", "proxy open failed → download", e);
+                                downloadYoutubeThenPlay(url, vid, q, gen);
                             }
                         }
                     });
                 } catch (final Exception e) {
-                    android.util.Log.e("SolarYouTube", "proxy start failed", e);
+                    android.util.Log.e("SolarYouTube", "proxy start failed → download", e);
                     if (gen != youtubeLoadGen) return;
                     host.runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             if (gen != youtubeLoadGen) return;
-                            try {
-                                setVideoStatusText(host.getString(R.string.youtube_resolve_connecting));
-                                if (videoController == null) {
-                                    toastYouTubePlayError(e.getMessage());
-                                    leaveYouTubePlayerOnError();
-                                    return;
-                                }
-                                videoController.openUrl(url);
-                                videoController.play();
-                                startVideoProgressUpdates();
-                                updateVideoProgressUi(0);
-                            } catch (Exception e2) {
-                                toastYouTubePlayError(e.getMessage());
-                                leaveYouTubePlayerOnError();
-                            }
+                            downloadYoutubeThenPlay(url, vid, q, gen);
                         }
                     });
                 }
             }
         }, "YouTubeProxyPlay").start();
+    }
+
+    /**
+     * 2026-07-19 — Download progressive MP4 with SolarHttp (Conscrypt), then MediaPlayer open(file).
+     * Layman: save the video briefly, then play the file like a local clip (works when live stream fails).
+     * Technical: YouTubeProgressiveCache.download; cancels on leave via youtubeProgCancel.
+     * Reversal: toast + leaveYouTubePlayerOnError on proxy failure only.
+     */
+    private void downloadYoutubeThenPlay(final String url, final String vid, final String q,
+            final int gen) {
+        if (youtubeTriedProgDownload) {
+            toastYouTubePlayError(null);
+            leaveYouTubePlayerOnError();
+            return;
+        }
+        youtubeTriedProgDownload = true;
+        youtubeProgCancel.set(false);
+        setVideoStatusText(host.getString(R.string.youtube_resolve_saving, 0));
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final File playFile = YouTubeProgressiveCache.download(
+                            host.context(), url, vid, q, youtubeProgCancel,
+                            new YouTubeProgressiveCache.Progress() {
+                                @Override
+                                public void onProgress(final int percent, long done, long total) {
+                                    if (gen != youtubeLoadGen) return;
+                                    host.runOnUiThread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            if (gen != youtubeLoadGen) return;
+                                            setVideoStatusText(host.getString(
+                                                    R.string.youtube_resolve_saving, percent));
+                                        }
+                                    });
+                                }
+                            });
+                    if (gen != youtubeLoadGen || youtubeProgCancel.get()) return;
+                    host.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (gen != youtubeLoadGen) return;
+                            // Rebuild surface/controller if release raced during download.
+                            if (videoController == null || videoSurface == null) {
+                                FrameLayout surfaceHost = host.findViewById(R.id.video_surface_host);
+                                if (surfaceHost == null) {
+                                    toastYouTubePlayError(null);
+                                    leaveYouTubePlayerOnError();
+                                    return;
+                                }
+                                surfaceHost.removeAllViews();
+                                videoSurface = new SurfaceRenderView(host.context());
+                                videoSurface.setAspectRatio(
+                                        com.solar.launcher.video.VideoSettings.ijkAspectRatio(
+                                                host.context()));
+                                surfaceHost.addView(videoSurface, centeredVideoSurfaceLp());
+                                videoController = new VideoPlayerController(host.context());
+                                videoController.setPlaybackListener(videoPlaybackListener());
+                                videoController.setBufferingListener(videoBufferingListener());
+                                videoController.attachHolder(videoSurface.getHolder());
+                            }
+                            openYoutubeCachedFile(playFile);
+                        }
+                    });
+                } catch (final Exception e) {
+                    android.util.Log.e("SolarYouTube", "progressive download failed", e);
+                    if (gen != youtubeLoadGen) return;
+                    host.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (gen != youtubeLoadGen) return;
+                            // Quality ladder after download miss (CDN / format).
+                            handleYoutubeIjkError();
+                        }
+                    });
+                }
+            }
+        }, "YouTubeProgDownload").start();
     }
 
     /**
@@ -4879,12 +5534,30 @@ public final class MediaSuiteHost {
     }
 
     /**
-     * 2026-07-14 — IJK failed current URL; try lower quality once, else leave player.
-     * Layman: if 480p link is broken, ask for 360p; if that fails too, go back.
+     * 2026-07-14 — IJK failed current URL; try download then lower quality.
+     * 2026-07-19 — Progressive download before quality ladder (Y2/A5 stream TLS/IJK miss).
+     * Layman: if live play breaks, download the file; if that fails, try a smaller stream.
+     * Was: quality ladder only. Reversal: skip downloadYoutubeThenPlay block.
      */
     private void handleYoutubeIjkError() {
         if (!videoPlaybackYoutube) return;
         if (youtubeIjkFallbackPending) return;
+        final String url = youtubeStreamUrl;
+        final String vid = youtubeNowPlayingId != null ? youtubeNowPlayingId : "yt";
+        final String q = youtubeStreamQuality != null ? youtubeStreamQuality : "360";
+        // First miss: SolarHttp download → local MediaPlayer (bypasses IJK HTTPS).
+        if (!youtubeTriedProgDownload && url != null && url.length() > 0) {
+            youtubeIjkFallbackPending = true;
+            final int gen = youtubeLoadGen;
+            host.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    youtubeIjkFallbackPending = false;
+                    downloadYoutubeThenPlay(url, vid, q, gen);
+                }
+            });
+            return;
+        }
         final String next = YouTubeClient.fallbackVideoQuality(youtubeStreamQuality);
         if (next != null && youtubeNowPlayingId != null && youtubeNowPlayingId.length() > 0) {
             youtubeIjkFallbackPending = true;
@@ -4893,7 +5566,7 @@ public final class MediaSuiteHost {
             releaseVideoPlayer();
             videoPlaybackYoutube = false;
             youtubeStreamUrl = null;
-            // Stay / return to detail so resolve UX is visible, then re-enter player.
+            youtubeTriedProgDownload = false;
             if (host.getCurrentScreenState() == STATE_VIDEO_PLAYER) {
                 if (youtubeDetailVideo != null
                         && youtubeNowPlayingId.equals(youtubeDetailVideo.id)) {
@@ -4926,6 +5599,8 @@ public final class MediaSuiteHost {
     }
 
     private void releaseVideoPlayer() {
+        // 2026-07-19 — Abort progressive download when leaving so we do not open a stale file.
+        youtubeProgCancel.set(true);
         stopVideoProgressUpdates();
         clearVideoScrubMode(false);
         clearVideoStatusText();
@@ -5421,16 +6096,33 @@ public final class MediaSuiteHost {
             final String title = virtualLabels.get(position);
             final String subtitle = position < virtualSubtitles.size()
                     ? virtualSubtitles.get(position) : "";
-            final boolean statusRow = position < youtubeBrowseRows.size()
-                    && youtubeBrowseRows.get(position).kind == YoutubeBrowseRow.KIND_STATUS;
+            // 2026-07-20 — Status-only rows from the *current* screen’s kind list (not stale browse).
+            final boolean statusRow = isYoutubeStatusOnlyRow(position);
+            // 2026-07-20 — Busy title rows: browse loading / comments / Play while resolving.
+            // Layman: little spinner next to the busy line. Technical: RowBusyChrome; UiBusy stays status.
+            // Reversal: ignore rowBusy; Button/two-line only.
+            final boolean rowBusy = isYoutubeTitleRowBusy(position);
 
             if (subtitle != null && subtitle.length() > 0) {
                 android.widget.LinearLayout row;
                 android.widget.TextView tvTitle;
                 android.widget.TextView tvSub;
+                ProgressBar spin = null;
                 if (convertView instanceof android.widget.LinearLayout
-                        && "solar_two_line_row".equals(convertView.getTag())
+                        && "solar_two_line_busy_row".equals(convertView.getTag())
                         && ((android.widget.LinearLayout) convertView).getChildCount() >= 2) {
+                    row = (android.widget.LinearLayout) convertView;
+                    android.widget.LinearLayout titleLine =
+                            (android.widget.LinearLayout) row.getChildAt(0);
+                    tvTitle = (android.widget.TextView) titleLine.getChildAt(0);
+                    spin = (ProgressBar) titleLine.findViewWithTag(RowBusyChrome.TAG_SPIN);
+                    tvSub = (android.widget.TextView) row.getChildAt(1);
+                    tvTitle.setText(title);
+                    tvSub.setText(subtitle);
+                } else if (convertView instanceof android.widget.LinearLayout
+                        && "solar_two_line_row".equals(convertView.getTag())
+                        && ((android.widget.LinearLayout) convertView).getChildCount() >= 2
+                        && !rowBusy) {
                     row = (android.widget.LinearLayout) convertView;
                     tvTitle = (android.widget.TextView) row.getChildAt(0);
                     tvSub = (android.widget.TextView) row.getChildAt(1);
@@ -5466,12 +6158,30 @@ public final class MediaSuiteHost {
                                 }
                             });
                         }
+                        if (rowBusy) {
+                            return RowBusyChrome.wrapTitleWithSpinner(
+                                    host.context(), btn, true);
+                        }
                         return btn;
                     }
                     row = (android.widget.LinearLayout) created;
-                    row.setTag("solar_two_line_row");
                     tvTitle = (android.widget.TextView) row.getChildAt(0);
                     tvSub = (android.widget.TextView) row.getChildAt(1);
+                    if (rowBusy) {
+                        // Promote to title+spinner | subtitle so Play shows inline busy.
+                        row.removeView(tvTitle);
+                        android.widget.LinearLayout titleLine =
+                                RowBusyChrome.wrapTitleWithSpinner(
+                                        host.context(), tvTitle, true);
+                        row.addView(titleLine, 0);
+                        row.setTag("solar_two_line_busy_row");
+                        spin = (ProgressBar) titleLine.findViewWithTag(RowBusyChrome.TAG_SPIN);
+                    } else {
+                        row.setTag("solar_two_line_row");
+                    }
+                }
+                if (spin != null) {
+                    spin.setVisibility(rowBusy ? View.VISIBLE : View.GONE);
                 }
                 // 2026-07-14 — A5 two-tap on two-line YouTube/browse rows (was raw one-tap).
                 if (statusRow) {
@@ -5491,6 +6201,35 @@ public final class MediaSuiteHost {
                     attachFmPresetTouchReorder(row, position);
                 }
                 return row;
+            }
+
+            // Single-line status / action — wrap loading titles with RowBusyChrome.
+            if (rowBusy) {
+                if (convertView instanceof LinearLayout
+                        && convertView.findViewWithTag(RowBusyChrome.TAG_SPIN) != null
+                        && ((LinearLayout) convertView).getChildCount() >= 1
+                        && ((LinearLayout) convertView).getChildAt(0) instanceof Button) {
+                    LinearLayout wrapped = (LinearLayout) convertView;
+                    Button btn = (Button) wrapped.getChildAt(0);
+                    btn.setText(title);
+                    btn.setEnabled(!statusRow);
+                    ProgressBar spin = (ProgressBar) wrapped.findViewWithTag(RowBusyChrome.TAG_SPIN);
+                    if (spin != null) spin.setVisibility(View.VISIBLE);
+                    return wrapped;
+                }
+                Button btn = host.createListButton(title);
+                btn.setLayoutParams(new ListView.LayoutParams(rowWidth, host.y1RowHeightPx()));
+                btn.setEnabled(!statusRow);
+                btn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        if (statusRow) return;
+                        host.clickFeedback();
+                        handler.onClick(position);
+                    }
+                });
+                if (!statusRow) attachFmPresetTouchReorder(btn, position);
+                return RowBusyChrome.wrapTitleWithSpinner(host.context(), btn, true);
             }
 
             Button btn;
@@ -5514,6 +6253,48 @@ public final class MediaSuiteHost {
             if (!statusRow) attachFmPresetTouchReorder(btn, position);
             return btn;
         }
+    }
+
+    /**
+     * 2026-07-20 — Non-clickable status / header chrome for the active YouTube screen.
+     * Layman: “Loading…” and section headers are not OK targets.
+     * Was: only youtubeBrowseRows KIND_STATUS (wrong on detail). Reversal: browse-only check.
+     */
+    private boolean isYoutubeStatusOnlyRow(int position) {
+        int st = host.getCurrentScreenState();
+        if (st == STATE_YOUTUBE_BROWSE) {
+            if (position < 0 || position >= youtubeBrowseRows.size()) return false;
+            int k = youtubeBrowseRows.get(position).kind;
+            return k == YoutubeBrowseRow.KIND_STATUS;
+        }
+        if (st == STATE_YOUTUBE_DETAIL) {
+            if (position < 0 || position >= youtubeDetailRows.size()) return false;
+            int k = youtubeDetailRows.get(position).kind;
+            return k == YoutubeDetailRow.KIND_STATUS || k == YoutubeDetailRow.KIND_HEADER;
+        }
+        return false;
+    }
+
+    /**
+     * 2026-07-20 — True when this virtual row should show an inline busy spinner.
+     * Layman: loading / resolving lines get a little wheel next to the title.
+     * Technical: browse KIND_STATUS while loading, detail Play while resolving, comments load.
+     */
+    private boolean isYoutubeTitleRowBusy(int position) {
+        int st = host.getCurrentScreenState();
+        if (st == STATE_YOUTUBE_BROWSE) {
+            if (!youtubeLoading) return false;
+            if (position < 0 || position >= youtubeBrowseRows.size()) return false;
+            return youtubeBrowseRows.get(position).kind == YoutubeBrowseRow.KIND_STATUS;
+        }
+        if (st == STATE_YOUTUBE_DETAIL) {
+            if (position < 0 || position >= youtubeDetailRows.size()) return false;
+            YoutubeDetailRow row = youtubeDetailRows.get(position);
+            if (row.kind == YoutubeDetailRow.KIND_PLAY && youtubeResolvingStream) return true;
+            if (row.kind == YoutubeDetailRow.KIND_STATUS && youtubeCommentsLoading) return true;
+            return false;
+        }
+        return false;
     }
 
     /**

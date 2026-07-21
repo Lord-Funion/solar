@@ -48,6 +48,12 @@ public final class FlowFlipController {
     private final Stack<BackLevel> backStack = new Stack<BackLevel>();
     private Runnable onFlipComplete;
     private Runnable onHandoffReady;
+    /**
+     * 2026-07-20 — True after the user scrolls the flipped list at least once.
+     * Layman: tip at top/bottom only after you have moved — not the first open.
+     * Reversal: leave false forever (no edge tip).
+     */
+    private boolean userScrolledBack;
 
     public int getState() {
         return state;
@@ -122,6 +128,7 @@ public final class FlowFlipController {
         headerSubtitle = "";
         onFlipComplete = null;
         onHandoffReady = null;
+        userScrolledBack = false; // 2026-07-20 — fresh flip: no edge tip yet
     }
 
     public void setBackContent(String title, String subtitle, List<FlowScreenHost.FlowBackRow> rows) {
@@ -136,6 +143,7 @@ public final class FlowFlipController {
         headerSubtitle = subtitle != null ? subtitle : "";
         backIndex = selectedIndex >= 0 && selectedIndex < backRows.size() ? selectedIndex : 0;
         scrollOffset = 0;
+        userScrolledBack = false; // 2026-07-20 — landing on list must not flash edge tip
         visibleBackRowStart();
     }
 
@@ -155,6 +163,7 @@ public final class FlowFlipController {
         headerSubtitle = level.subtitle;
         backIndex = level.backIndex;
         scrollOffset = 0;
+        userScrolledBack = false; // 2026-07-20 — parent list: no edge tip until scroll
         return true;
     }
 
@@ -211,8 +220,26 @@ public final class FlowFlipController {
         int next = backIndex + delta;
         if (next < 0 || next >= backRows.size()) return false;
         backIndex = next;
+        userScrolledBack = true; // 2026-07-20 — enables top/bottom ↻↺ tip
         visibleBackRowStart();
         return true;
+    }
+
+    /**
+     * 2026-07-20 — Which edge tip to paint above the flipped cover (NONE/TOP/BOTTOM).
+     * Layman: after you scroll to the first or last song, arrows tip you to keep going for covers.
+     */
+    public String edgeHintMode() {
+        if (state != STATE_BACK) return FlowListEdgeHintPolicy.NONE;
+        int n = backRows.size();
+        return FlowListEdgeHintPolicy.edgeHint(userScrolledBack,
+                FlowListEdgeHintPolicy.atTop(backIndex, n),
+                FlowListEdgeHintPolicy.atBottom(backIndex, n));
+    }
+
+    /** 2026-07-20 — True after at least one successful flipped-list scroll. */
+    public boolean hasUserScrolledBack() {
+        return userScrolledBack;
     }
 
     /**

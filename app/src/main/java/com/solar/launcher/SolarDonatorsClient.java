@@ -39,7 +39,7 @@ public final class SolarDonatorsClient {
         /** Wheel list label — note appended when present. */
         public String listLabel() {
             if (note.isEmpty()) return name;
-            return name + " — " + note;
+            return name + ": " + note;
         }
     }
 

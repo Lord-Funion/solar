@@ -9,7 +9,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -22,6 +21,8 @@ import com.solar.launcher.R;
 import com.solar.launcher.net.TlsHelper;
 import com.solar.launcher.theme.ThemeManager;
 import com.solar.launcher.soulseek.SoulseekSearchSuggestions;
+import com.solar.launcher.ui.RowBusyChrome;
+import com.solar.launcher.ui.UiBusy;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -711,6 +712,8 @@ public final class DeezerScreen {
         activeDownload = r;
         downloadPercent = 0;
         transferStartMs = System.currentTimeMillis();
+        // 2026-07-20 — Status throbber for Deezer transfer (was status row text only).
+        UiBusy.beginAutoEnd(UiBusy.REASON_DOWNLOAD, 600_000L);
         buildDownloadUi(r, action);
         if (downloader != null) downloader.cancel();
         downloader = new DeezerDownloader(client);
@@ -773,6 +776,7 @@ public final class DeezerScreen {
                         host.prefetchDeezerCover(destFile);
                         downloadPercent = 100;
                         activeDownload = null;
+                        UiBusy.clear(UiBusy.REASON_DOWNLOAD);
                         if (pendingAction == ACTION_SAVE) {
                             host.scanMediaLibraryAsync();
                             if (!host.isDeezerAlbumBatchTransfer()) {
@@ -811,6 +815,7 @@ public final class DeezerScreen {
                         downloadFailureReason = message != null ? message : host.string(R.string.deezer_error_unknown);
                         activeDownload = null;
                         pendingAction = 0;
+                        // Keep UiBusy during auto-retry; clear only when failure UI sticks.
                         host.onDeezerStreamDownloadFailed();
                         if (!downloadAutoRetryUsed) {
                             downloadAutoRetryUsed = true;
@@ -828,6 +833,7 @@ public final class DeezerScreen {
                             } else {
                                 restoreUserArlSessionIfNeeded();
                                 downloadFailed = true;
+                                UiBusy.clear(UiBusy.REASON_DOWNLOAD);
                                 // #region agent log
                                 try {
                                     org.json.JSONObject d = new org.json.JSONObject();
@@ -878,7 +884,9 @@ public final class DeezerScreen {
         container.removeAllViews();
         Button title = host.createListButton(r.displayTitle());
         title.setEnabled(false);
-        container.addView(title);
+        // 2026-07-20 — Inline spinner beside title while Deezer downloads.
+        // Was: title Button alone. Reversal: container.addView(title) only.
+        container.addView(RowBusyChrome.wrapTitleWithSpinner(host.context(), title, true));
         searchStatusRow = host.createListButton(host.string(R.string.deezer_downloading, downloadPercent));
         searchStatusRow.setEnabled(false);
         container.addView(searchStatusRow);
@@ -891,6 +899,7 @@ public final class DeezerScreen {
                 restoreUserArlSessionIfNeeded();
                 if (downloader != null) downloader.cancel();
                 activeDownload = null;
+                UiBusy.clear(UiBusy.REASON_DOWNLOAD);
                 if (actionResult != null) buildActionUi(actionResult);
                 else if (host.getMusicEmbedded()) host.onGetMusicBackToResults();
                 else popToResults();
@@ -999,16 +1008,9 @@ public final class DeezerScreen {
         container.removeAllViews();
         Button title = host.createListButton(r.displayTitle());
         title.setEnabled(false);
-        container.addView(title);
-        // ponytail: spinner instead of "Retrying download…" — looks like progress, not failure
-        ProgressBar spinner = new ProgressBar(host.context(), null, android.R.attr.progressBarStyleSmall);
-        LinearLayout.LayoutParams spinLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        spinLp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
-        int pad = (int) (host.context().getResources().getDisplayMetrics().density * 16);
-        spinLp.topMargin = pad;
-        spinLp.bottomMargin = pad;
-        container.addView(spinner, spinLp);
+        // 2026-07-20 — Spinner beside title while auto-retry waits (was centered spinner below).
+        // Reversal: addView(title) + standalone ProgressBar under it.
+        container.addView(RowBusyChrome.wrapTitleWithSpinner(host.context(), title, true));
     }
 
     private void cancelAutoRetrySchedule() {
@@ -1046,5 +1048,6 @@ public final class DeezerScreen {
         activeDownload = null;
         pendingAction = 0;
         growingFile = null;
+        UiBusy.clear(UiBusy.REASON_DOWNLOAD);
     }
 }

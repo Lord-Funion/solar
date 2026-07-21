@@ -97,7 +97,8 @@ public final class SolarWheelKeyboardUi {
         }
         if (tvHint != null) {
             tvHint.setTextSize(TypedValue.COMPLEX_UNIT_PX, menuTextPx * 0.85f);
-            tvHint.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.NORMAL);
+            // 2026-07-20 — ImageSpan hints need system typeface (theme font tofu-boxes U+FFFC).
+            tvHint.setTypeface(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.NORMAL);
             ThemeManager.applyThemedTextStyle(tvHint, ThemeManager.getHintTextColor());
             // 2026-07-18 — Y1/Y2: glyph legend (Prev/Play/Next/Wheel/OK/Back). A5 keeps setHintText(a5).
             // Reversal: remove branch — XML @string/keyboard_hint stays as inflate default.
@@ -107,7 +108,8 @@ public final class SolarWheelKeyboardUi {
                         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 6f,
                                 context.getResources().getDisplayMetrics()),
                         1.1f);
-                tvHint.setText(HardwareButtonGlyph.keyboardHint(context));
+                HardwareButtonGlyph.bindGlyphText(tvHint,
+                        HardwareButtonGlyph.keyboardHint(context));
             }
         }
         if (tvInput != null) {

@@ -78,4 +78,74 @@ public class PlaylistManagerTest {
         root.delete();
         if (!hasEmpty) throw new AssertionError("empty playlist not scanned");
     }
+
+    /**
+     * 2026-07-20 — Streamed path chunks write + soft-cap without a giant File ArrayList.
+     * Layman: prove playlist save can take songs in small batches.
+     */
+    @Test
+    public void pathChunks_createAndAppend_windowed() throws Exception {
+        File root = new File(System.getProperty("java.io.tmpdir"), "solar_pl_chunks");
+        File plDir = new File(root, "Playlists");
+        plDir.mkdirs();
+        final File t1 = new File(root, "c1.mp3");
+        final File t2 = new File(root, "c2.mp3");
+        final File t3 = new File(root, "c3.mp3");
+        t1.createNewFile();
+        t2.createNewFile();
+        t3.createNewFile();
+        PlaylistManager.PathChunkSource src = new PlaylistManager.PathChunkSource() {
+            int step;
+
+            @Override
+            public List<String> nextChunk() {
+                if (step == 0) {
+                    step = 1;
+                    List<String> a = new ArrayList<String>();
+                    a.add(t1.getAbsolutePath());
+                    a.add(t2.getAbsolutePath());
+                    return a;
+                }
+                if (step == 1) {
+                    step = 2;
+                    List<String> a = new ArrayList<String>();
+                    a.add(t3.getAbsolutePath());
+                    return a;
+                }
+                return null;
+            }
+        };
+        PlaylistManager.ChunkWriteResult created = PlaylistManager.createPlaylistFromPathChunks(
+                root, "Chunked", src, PlaylistManager.PATH_CHUNK_SOFT_CAP);
+        if (created.added != 3) throw new AssertionError("create added=" + created.added);
+        PlaylistManager.Entry parsed = PlaylistManager.parse(created.entry.sourceFile, root);
+        if (parsed.tracks.size() != 3) throw new AssertionError("parse count");
+
+        // Soft cap stops after 1 new path when appending.
+        PlaylistManager.PathChunkSource oneMore = new PlaylistManager.PathChunkSource() {
+            boolean once;
+
+            @Override
+            public List<String> nextChunk() {
+                if (once) return null;
+                once = true;
+                List<String> a = new ArrayList<String>();
+                a.add(t1.getAbsolutePath()); // dup
+                a.add(t2.getAbsolutePath()); // dup — should not grow
+                return a;
+            }
+        };
+        PlaylistManager.ChunkWriteResult ap = PlaylistManager.appendPathChunks(
+                created.entry.sourceFile, root, oneMore, PlaylistManager.PATH_CHUNK_SOFT_CAP);
+        if (ap.added != 0) throw new AssertionError("dedupe added=" + ap.added);
+        parsed = PlaylistManager.parse(created.entry.sourceFile, root);
+        if (parsed.tracks.size() != 3) throw new AssertionError("still 3 after dup append");
+
+        t1.delete();
+        t2.delete();
+        t3.delete();
+        created.entry.sourceFile.delete();
+        plDir.delete();
+        root.delete();
+    }
 }

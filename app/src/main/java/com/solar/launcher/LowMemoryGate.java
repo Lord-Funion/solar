@@ -5,20 +5,33 @@ import android.content.ComponentCallbacks2;
 import android.content.Context;
 
 /**
- * 2026-07-16 — Y1 (~512 MB) memory-pressure gate for heavy background work.
+ * 2026-07-16/20 — Memory-pressure gate for heavy background work (256MB / ~64MB-avail floor).
  * Layman: when free RAM is tight, Solar pauses expensive scans and art baking
  * so the UI and music keep working instead of thrashing into restarts.
  * Technical: {@link ActivityManager.MemoryInfo} + optional {@code /proc/meminfo}
- * MemFree; {@link #onSystemTrim} from Application callbacks. Pure thresholds —
- * no profile framework. Reversal: always return false from isPressured / shouldDefer.
+ * MemFree; fraction of totalMem when known; {@link #onSystemTrim} from Application.
+ * Was: fixed 48/32MB floors + “Y1 ~512MB” comments. Reversal: AVAIL 48 / MEMFREE 32 / DEFER 12s.
  */
 public final class LowMemoryGate {
-    /** availMem / MemFree below this → pressured (Y1 safe floor). */
-    public static final long AVAIL_FLOOR_BYTES = 48L * 1024L * 1024L;
-    /** MemFree alone under this is also pressure (page cache may still look "cached"). */
-    public static final long MEMFREE_FLOOR_BYTES = 32L * 1024L * 1024L;
-    /** Defer heavy work this long when pressured (then re-check). */
-    public static final long DEFER_MS = 12_000L;
+    /**
+     * 2026-07-20 — Default availMem floor when totalMem unknown (~28MB for 256MB class).
+     * Was 48MB (too high when ~64MB free is normal). Reversal: 48MB.
+     */
+    public static final long AVAIL_FLOOR_BYTES = 28L * 1024L * 1024L;
+    /**
+     * 2026-07-20 — MemFree alone under this is also pressure.
+     * Was 32MB. Reversal: 32MB.
+     */
+    public static final long MEMFREE_FLOOR_BYTES = 16L * 1024L * 1024L;
+    /**
+     * 2026-07-20 — Defer heavy work this long when pressured (then re-check).
+     * Was 12s — chores resume sooner once free. Reversal: 12_000L.
+     */
+    public static final long DEFER_MS = 6_000L;
+    /** Soft fraction of totalMem for avail floor (clamped). 2026-07-20 */
+    public static final double AVAIL_TOTAL_FRACTION = 0.10;
+    public static final long AVAIL_FLOOR_MIN_BYTES = 20L * 1024L * 1024L;
+    public static final long AVAIL_FLOOR_MAX_BYTES = 40L * 1024L * 1024L;
 
     private static volatile int lastTrimLevel = -1;
     private static volatile long pressureGen;
@@ -59,7 +72,20 @@ public final class LowMemoryGate {
     }
 
     /**
-     * True when system reports low memory or free RAM is under Y1-safe floors.
+     * 2026-07-20 — availMem pressure floor from totalMem (256MB → ~26MB; clamp 20–40MB).
+     * Layman: smaller phones use a lower “almost out of RAM” line; never invent huge floors.
+     * Technical: max(MIN, min(MAX, total×10%)). Reversal: always return {@link #AVAIL_FLOOR_BYTES}.
+     */
+    public static long availFloorBytes(long totalMem) {
+        if (totalMem <= 0L) return AVAIL_FLOOR_BYTES;
+        long byFrac = (long) (totalMem * AVAIL_TOTAL_FRACTION);
+        if (byFrac < AVAIL_FLOOR_MIN_BYTES) return AVAIL_FLOOR_MIN_BYTES;
+        if (byFrac > AVAIL_FLOOR_MAX_BYTES) return AVAIL_FLOOR_MAX_BYTES;
+        return byFrac;
+    }
+
+    /**
+     * True when system reports low memory or free RAM is under safe floors.
      * Null-safe: false when context/services unavailable.
      */
     public static boolean isPressured(Context context) {
@@ -98,11 +124,13 @@ public final class LowMemoryGate {
                     am.getMemoryInfo(mi);
                     s.availMem = mi.availMem;
                     s.threshold = mi.threshold;
+                    s.totalMem = mi.totalMem;
                     s.systemLowMemory = mi.lowMemory;
+                    long floor = availFloorBytes(mi.totalMem);
                     if (mi.lowMemory) {
                         s.pressured = true;
                         s.reason = "lowMemory_flag";
-                    } else if (mi.availMem > 0L && mi.availMem < AVAIL_FLOOR_BYTES) {
+                    } else if (mi.availMem > 0L && mi.availMem < floor) {
                         s.pressured = true;
                         s.reason = "availMem=" + mi.availMem;
                     }
@@ -128,13 +156,23 @@ public final class LowMemoryGate {
      */
     public static boolean isPressuredSnapshot(long availMem, long memFreeBytes,
             boolean systemLowMemory, int trimLevel) {
+        return isPressuredSnapshot(availMem, memFreeBytes, systemLowMemory, trimLevel, 0L);
+    }
+
+    /**
+     * 2026-07-20 — Pure threshold with optional totalMem for fractional avail floor.
+     * Layman: same pressure rules as on-device, but tests pass fake RAM numbers.
+     */
+    public static boolean isPressuredSnapshot(long availMem, long memFreeBytes,
+            boolean systemLowMemory, int trimLevel, long totalMem) {
         if (systemLowMemory) return true;
         if (trimLevel >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
                 || trimLevel == ComponentCallbacks2.TRIM_MEMORY_COMPLETE
                 || trimLevel == ComponentCallbacks2.TRIM_MEMORY_MODERATE) {
             return true;
         }
-        if (availMem > 0L && availMem < AVAIL_FLOOR_BYTES) return true;
+        long floor = availFloorBytes(totalMem);
+        if (availMem > 0L && availMem < floor) return true;
         if (memFreeBytes > 0L && memFreeBytes < MEMFREE_FLOOR_BYTES) return true;
         return false;
     }
@@ -173,6 +211,10 @@ public final class LowMemoryGate {
                 com.solar.launcher.diag.SolarDiagFeatureLog.warn("app",
                         "mem_pressure_on " + (reason != null ? reason : ""));
             } else {
+                // 2026-07-20 — Resume opportunistic YT cache growth when pressure clears.
+                try {
+                    com.solar.launcher.youtube.YouTubeProgressiveCache.setGrowthPaused(false);
+                } catch (Throwable ignored) {}
                 com.solar.launcher.diag.SolarDiagFeatureLog.event("app", "mem_pressure_off");
             }
         } catch (Throwable ignored) {}
@@ -206,6 +248,8 @@ public final class LowMemoryGate {
         public long availMem;
         public long threshold;
         public long memFree;
+        /** 2026-07-20 — MemoryInfo.totalMem when sampled. */
+        public long totalMem;
         public boolean systemLowMemory;
         public int trimLevel = -1;
         public String reason;

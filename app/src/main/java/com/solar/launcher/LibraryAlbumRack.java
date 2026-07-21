@@ -22,6 +22,34 @@ public final class LibraryAlbumRack {
 
     private LibraryAlbumRack() {}
 
+    /**
+     * 2026-07-20 — Flow album shells from Tier-0 DISTINCT titles (SEGMENTED empty libraryRows).
+     * Layman: show every album cover in Flow without loading every song into RAM first.
+     * Technical: empty track lists; flip/play resolve via SQL pages.
+     * multiTrackOnly: filter titles before calling (SQL HAVING COUNT&gt;1) — this helper ignores the flag.
+     * Reversal: require full SongRow walk via {@link #build}.
+     */
+    public static List<FlowItem> buildShellsFromTitles(List<String> albumTitles) {
+        if (albumTitles == null || albumTitles.isEmpty()) return Collections.emptyList();
+        List<FlowItem> out = new ArrayList<FlowItem>(albumTitles.size());
+        for (int i = 0; i < albumTitles.size(); i++) {
+            String album = albumTitles.get(i);
+            if (album == null) continue;
+            album = album.trim();
+            if (album.isEmpty() || AlbumNames.isUnknownAlbum(album)) continue;
+            String itemKey = FlowCoverResolver.albumMatchKey(album, "");
+            out.add(FlowItem.album(album, "", itemKey,
+                    Collections.<File>emptyList(), ""));
+        }
+        Collections.sort(out, new Comparator<FlowItem>() {
+            @Override
+            public int compare(FlowItem a, FlowItem b) {
+                return titleCompare(a, b);
+            }
+        });
+        return out;
+    }
+
     /** Ordered Flow carousel / library album list. */
     public static List<FlowItem> build(List<FlowCatalog.SongRow> library, LibraryBrowsePrefs prefs,
             List<ArtistBrowsePolicy.Track> policyTracks, boolean multiTrackOnly) {
@@ -74,6 +102,9 @@ public final class LibraryAlbumRack {
         }
 
         List<FlowItem> out = new ArrayList<FlowItem>();
+        // 2026-07-19 — One album-owner index for the whole rack (was O(albums×n) nested walks).
+        ArtistBrowsePolicy.AlbumOwnerIndex ownerIndex =
+                ArtistBrowsePolicy.AlbumOwnerIndex.build(policyTracks, prefs);
         for (String rackKey : tracksByAlbumKey.keySet()) {
             List<File> tracks = tracksByAlbumKey.get(rackKey);
             if (multiTrackOnly && (tracks == null || tracks.size() <= 1)) continue;
@@ -88,7 +119,7 @@ public final class LibraryAlbumRack {
                         artistVotesByAlbumKey.get(rackKey), "");
             }
             String itemKey = FlowCoverResolver.albumMatchKey(album, artist);
-            String sub = ArtistBrowsePolicy.albumBrowseSubtitle(album, artist, policyTracks, prefs);
+            String sub = ArtistBrowsePolicy.albumBrowseSubtitle(album, artist, ownerIndex, prefs);
             if (sub == null || sub.isEmpty()) sub = artist;
             FlowItem item = FlowItem.album(album, sub, itemKey,
                     java.util.Collections.<java.io.File>emptyList(), "");

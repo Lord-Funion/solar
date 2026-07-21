@@ -56,11 +56,26 @@ public class LibraryBrowsePrefsTest {
         for (int i = 0; i < 3; i++) prefs.cycleArtistSort();
         assertEquals(LibraryBrowsePrefs.ARTIST_SORT_NAME, prefs.artistSort());
 
-        for (int i = 0; i < 4; i++) prefs.cycleSongSort();
+        for (int i = 0; i < 5; i++) prefs.cycleSongSort();
         assertEquals(LibraryBrowsePrefs.SONG_SORT_TITLE, prefs.songSort());
 
-        for (int i = 0; i < 4; i++) prefs.cycleAlbumSongSort();
+        for (int i = 0; i < 5; i++) prefs.cycleAlbumSongSort();
         assertEquals(LibraryBrowsePrefs.SONG_SORT_ALBUM, prefs.albumSongSort());
+    }
+
+    @Test
+    public void setSongSortClampsAndPersistsLength() {
+        // 2026-07-20 — Stem-pick writes Length without cycling.
+        prefs.setSongSort(LibraryBrowsePrefs.SONG_SORT_LENGTH);
+        assertEquals(LibraryBrowsePrefs.SONG_SORT_LENGTH, prefs.songSort());
+        prefs.setSongSort(99);
+        assertEquals(LibraryBrowsePrefs.SONG_SORT_TITLE, prefs.songSort());
+    }
+
+    @Test
+    public void lengthSortLabel() {
+        assertEquals(R.string.library_sort_length,
+                LibraryBrowsePrefs.songSortLabelRes(LibraryBrowsePrefs.SONG_SORT_LENGTH));
     }
 
     @Test

@@ -25,6 +25,21 @@ public final class PlatformPrepLauncher {
         if (ctx == null) return;
         try {
             PlatformPrepManifest manifest = PlatformPrepManifest.load(ctx);
+            // #region agent log
+            try {
+                JSONObject d = new JSONObject();
+                d.put("prepVersion", manifest.prepVersion);
+                d.put("applied", PlatformPrepState.getAppliedVersion(ctx));
+                d.put("needsSilent", PlatformPrepState.needsSilentPrep(ctx, manifest));
+                d.put("gettingReady",
+                        com.solar.launcher.FirstSessionReadyGate.shouldShowGettingReady(ctx));
+                d.put("uiReady",
+                        com.solar.launcher.FirstSessionReadyGate.isUiReadyComplete(ctx));
+                d.put("rebootPending", PlatformPrepState.isRebootPending(ctx));
+                com.solar.launcher.DebugA1f293Log.log(ctx, "PlatformPrepLauncher.ensureAsync",
+                        "prep gate", "A", d);
+            } catch (Exception ignored) {}
+            // #endregion
             if (!PlatformPrepState.needsSilentPrep(ctx, manifest)) {
                 silentPrepScheduled = false;
                 // #region agent log
@@ -46,6 +61,14 @@ public final class PlatformPrepLauncher {
         if (com.solar.launcher.FirstSessionReadyGate.shouldShowGettingReady(ctx)
                 && !com.solar.launcher.DeviceFeatures.isA5()) {
             try {
+                // #region agent log
+                try {
+                    JSONObject d = new JSONObject();
+                    d.put("launchWizard", true);
+                    com.solar.launcher.DebugA1f293Log.log(ctx, "PlatformPrepLauncher.ensureAsync",
+                            "launch first-boot wizard", "A", d);
+                } catch (Exception ignored) {}
+                // #endregion
                 Intent i = new Intent(ctx, PlatformPrepWizardActivity.class);
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 i.putExtra(PlatformPrepWizardActivity.EXTRA_FIRST_BOOT, true);
@@ -68,8 +91,9 @@ public final class PlatformPrepLauncher {
     }
 
     /**
-     * 2026-07-06 — User-visible reboot after module install/enable — never silent reboot.
-     * Layman: tells the user Solar updated hook modules and needs one restart.
+     * 2026-07-19 — After module install/enable: show getting-ready face and auto-reboot.
+     * Layman: no “press Restart” — Solar restarts the player while the ready message stays up.
+     * Was: reboot confirm button. Reversal: restore EXTRA_REBOOT_ONLY confirm UI.
      */
     public static void launchRebootWizard(Context ctx) {
         if (ctx == null) return;

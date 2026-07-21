@@ -28,7 +28,7 @@ public final class DeezerTrackResolver {
         String url = "https://www.deezer.com/us/" + type + "/" + id;
         String html = client.getAuthenticatedText(url);
         if (html.contains("MD5_ORIGIN") == false && !html.contains("TRACK_TOKEN")) {
-            throw new IOException("Not logged in — update ARL cookie");
+            throw new IOException("Not logged in: update ARL cookie");
         }
         Matcher m = DATA_JSON.matcher(html);
         while (m.find()) {

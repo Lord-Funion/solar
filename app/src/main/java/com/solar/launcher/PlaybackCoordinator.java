@@ -133,16 +133,23 @@ public final class PlaybackCoordinator {
         return musicOriginal;
     }
 
+    /**
+     * Music-like ordinal of the play-head (0-based).
+     * Layman: which song slot is “now” in the music list, even if two rows are the same file.
+     * Technical: count music-like rows up to queue.index() — not first musicLikeSame match.
+     * Was: first equal file won → skip to a twin kept showing/preparing the earlier row. 2026-07-20
+     * Reversal: restore musicLikeSame(cur) scan below.
+     */
     public int musicIndex() {
         syncLegacyMusicIndex();
-        PlayQueue.QueueItem cur = queue.current();
-        if (cur == null) return 0;
-        int idx = 0;
-        for (PlayQueue.QueueItem q : queue.items()) {
-            if (isMusicLike(q)) {
-                if (musicLikeSame(q, cur)) return idx;
-                idx++;
-            }
+        int qi = queue.index();
+        int musicIdx = 0;
+        java.util.List<PlayQueue.QueueItem> items = queue.items();
+        for (int i = 0; i < items.size(); i++) {
+            PlayQueue.QueueItem q = items.get(i);
+            if (!isMusicLike(q)) continue;
+            if (i == qi) return musicIdx;
+            musicIdx++;
         }
         return 0;
     }
@@ -172,7 +179,7 @@ public final class PlaybackCoordinator {
     }
 
     public static String formatTrackPosition(int index, int total) {
-        if (total <= 0) return "— / —";
+        if (total <= 0) return "- / -";
         int pos = index + 1;
         if (pos < 1) pos = 1;
         if (pos > total) pos = total;
@@ -181,7 +188,7 @@ public final class PlaybackCoordinator {
 
     /** Now Playing line 4 — track position without leading zeros (e.g. "4 / 12"). */
     public static String formatTrackPositionPlain(int index, int total) {
-        if (total <= 0) return "— / —";
+        if (total <= 0) return "- / -";
         int pos = index + 1;
         if (pos < 1) pos = 1;
         if (pos > total) pos = total;
@@ -196,15 +203,23 @@ public final class PlaybackCoordinator {
         return queue.podcastEpisodes();
     }
 
+    /**
+     * Podcast ordinal of the play-head (0-based), or -1 if head is not an episode.
+     * Layman: which episode number is playing when the queue mixes music + shows.
+     * Technical: slot-based like musicIndex — duplicate episode refs must not pin to first. 2026-07-20
+     * Reversal: restore episode==cur.episode first-match loop.
+     */
     public int podcastIndex() {
         PlayQueue.QueueItem cur = queue.current();
         if (cur == null || cur.kind != PlayQueue.ItemKind.PODCAST_EPISODE) return -1;
+        int qi = queue.index();
         int idx = 0;
-        for (PlayQueue.QueueItem q : queue.items()) {
-            if (q.kind == PlayQueue.ItemKind.PODCAST_EPISODE) {
-                if (q.episode == cur.episode) return idx;
-                idx++;
-            }
+        java.util.List<PlayQueue.QueueItem> items = queue.items();
+        for (int i = 0; i < items.size(); i++) {
+            PlayQueue.QueueItem q = items.get(i);
+            if (q.kind != PlayQueue.ItemKind.PODCAST_EPISODE) continue;
+            if (i == qi) return idx;
+            idx++;
         }
         return -1;
     }
@@ -263,15 +278,28 @@ public final class PlaybackCoordinator {
         musicOriginal.addAll(playlist);
         List<PlayQueue.QueueItem> items = new ArrayList<PlayQueue.QueueItem>();
         List<File> order = new ArrayList<File>(playlist);
-        File currentSong = playlist.get(Math.max(0, Math.min(startIndex, playlist.size() - 1)));
+        // 2026-07-20 — Slot index wins when unshuffled; equals()-last-match jumped to a twin.
+        // Layman: tap song #1 of two identical files — play that row, not the later copy.
+        // Technical: qStart = clamped when !shuffle; shuffle uses first equals match.
+        // Reversal: loop equals without break setting qStart = i each hit.
+        int clamped = Math.max(0, Math.min(startIndex, playlist.size() - 1));
+        File currentSong = playlist.get(clamped);
         musicInitiator = currentSong;
         if (shuffle) {
             java.util.Collections.shuffle(order);
         }
-        int qStart = 0;
         for (int i = 0; i < order.size(); i++) {
             items.add(PlayQueue.QueueItem.music(order.get(i)));
-            if (order.get(i).equals(currentSong)) qStart = i;
+        }
+        int qStart = clamped;
+        if (shuffle) {
+            qStart = 0;
+            for (int i = 0; i < order.size(); i++) {
+                if (order.get(i).equals(currentSong)) {
+                    qStart = i;
+                    break;
+                }
+            }
         }
         queue.setAll(items, qStart);
     }
@@ -294,17 +322,27 @@ public final class PlaybackCoordinator {
         musicActivePlaylistName = (playlistLabel != null && !playlistLabel.isEmpty()) ? playlistLabel : null;
         List<PlayQueue.QueueItem> items = new ArrayList<PlayQueue.QueueItem>();
         List<NavidromeSong> order = new ArrayList<NavidromeSong>(songs);
+        // 2026-07-20 — Same twin-id trap as activateMusic; slot when !shuffle.
         int clamped = Math.max(0, Math.min(startIndex, songs.size() - 1));
         NavidromeSong currentSong = songs.get(clamped);
         if (shuffle) {
             java.util.Collections.shuffle(order);
         }
-        int qStart = 0;
         for (int i = 0; i < order.size(); i++) {
             NavidromeSong s = order.get(i);
             items.add(PlayQueue.QueueItem.navidrome(
                     s.id, s.title, s.artist, s.album, s.coverArtId));
-            if (s.id != null && s.id.equals(currentSong.id)) qStart = i;
+        }
+        int qStart = clamped;
+        if (shuffle) {
+            qStart = 0;
+            for (int i = 0; i < order.size(); i++) {
+                NavidromeSong s = order.get(i);
+                if (s.id != null && s.id.equals(currentSong.id)) {
+                    qStart = i;
+                    break;
+                }
+            }
         }
         queue.setAll(items, qStart);
     }
@@ -324,18 +362,28 @@ public final class PlaybackCoordinator {
         musicActivePlaylistName = (playlistLabel != null && !playlistLabel.isEmpty()) ? playlistLabel : null;
         List<PlayQueue.QueueItem> items = new ArrayList<PlayQueue.QueueItem>();
         List<PlexSong> order = new ArrayList<PlexSong>(songs);
+        // 2026-07-20 — Slot when !shuffle; avoid last-id-match twin jump.
         int clamped = Math.max(0, Math.min(startIndex, songs.size() - 1));
         PlexSong currentSong = songs.get(clamped);
         if (shuffle) {
             java.util.Collections.shuffle(order);
         }
-        int qStart = 0;
         for (int i = 0; i < order.size(); i++) {
             PlexSong s = order.get(i);
             // 2026-07-15: Keep Part.key/container so preparePlexStream can direct-play mp3/m4a.
             items.add(PlayQueue.QueueItem.plex(s.id, s.title, s.artist, s.album, s.coverArtId,
                     s.mediaPartKey, s.container));
-            if (s.id != null && s.id.equals(currentSong.id)) qStart = i;
+        }
+        int qStart = clamped;
+        if (shuffle) {
+            qStart = 0;
+            for (int i = 0; i < order.size(); i++) {
+                PlexSong s = order.get(i);
+                if (s.id != null && s.id.equals(currentSong.id)) {
+                    qStart = i;
+                    break;
+                }
+            }
         }
         // #region agent log
         try {
@@ -368,16 +416,26 @@ public final class PlaybackCoordinator {
         musicActivePlaylistName = (playlistLabel != null && !playlistLabel.isEmpty()) ? playlistLabel : null;
         List<PlayQueue.QueueItem> items = new ArrayList<PlayQueue.QueueItem>();
         List<JellyfinSong> order = new ArrayList<JellyfinSong>(songs);
+        // 2026-07-20 — Slot when !shuffle; avoid last-id-match twin jump.
         int clamped = Math.max(0, Math.min(startIndex, songs.size() - 1));
         JellyfinSong currentSong = songs.get(clamped);
         if (shuffle) {
             java.util.Collections.shuffle(order);
         }
-        int qStart = 0;
         for (int i = 0; i < order.size(); i++) {
             JellyfinSong s = order.get(i);
             items.add(PlayQueue.QueueItem.jellyfin(s.id, s.title, s.artist, s.album, s.coverArtId));
-            if (s.id != null && s.id.equals(currentSong.id)) qStart = i;
+        }
+        int qStart = clamped;
+        if (shuffle) {
+            qStart = 0;
+            for (int i = 0; i < order.size(); i++) {
+                JellyfinSong s = order.get(i);
+                if (s.id != null && s.id.equals(currentSong.id)) {
+                    qStart = i;
+                    break;
+                }
+            }
         }
         queue.setAll(items, qStart);
     }
@@ -725,6 +783,58 @@ public final class PlaybackCoordinator {
         queue.clear();
         musicOriginal.clear();
         activeMode = Mode.NONE;
+    }
+
+    /**
+     * Stem/Mix session start — wipe play queue and seed jam tracks (unified spine).
+     * Layman: when a jam begins, the play queue becomes those jam songs.
+     * Technical: {@link com.solar.launcher.stem.StemMixQueuePolicy#clearAndSeed} + MUSIC mode.
+     * Was: jam slots only; music queue left untouched. Reversal: drop call at openStem/openMix.
+     * 2026-07-21
+     */
+    public void seedStemMixJam(java.util.List<java.io.File> tracks) {
+        musicInitiator = null;
+        musicActivePlaylistName = null;
+        podcastShowTitle = "";
+        podcastFromSavedLibrary = false;
+        com.solar.launcher.stem.StemMixQueuePolicy.clearAndSeed(queue, tracks);
+        musicOriginal.clear();
+        musicOriginal.addAll(queue.musicFiles());
+        activeMode = queue.isEmpty() ? Mode.NONE : Mode.MUSIC;
+        if (!queue.isEmpty() && queue.current() != null && queue.current().file != null) {
+            musicInitiator = queue.current().file;
+        }
+    }
+
+    /**
+     * Hold-replace reorder on the unified queue (live slot ↔ pick).
+     * Layman: put the chosen song on that pad’s seat in the shared queue.
+     * 2026-07-21
+     */
+    public boolean applyStemMixHoldReplace(int liveSlot, int pickIndex, boolean mixMode) {
+        int win = com.solar.launcher.stem.StemMixQueuePolicy.liveWindow(mixMode);
+        boolean ok = com.solar.launcher.stem.StemMixQueuePolicy.applyHoldReplaceOrder(
+                queue, liveSlot, pickIndex, win);
+        if (ok) {
+            musicOriginal.clear();
+            musicOriginal.addAll(queue.musicFiles());
+        }
+        return ok;
+    }
+
+    /**
+     * Pair/triple advance: swap finished live seat with Next-up source.
+     * 2026-07-21
+     */
+    public boolean applyStemMixAdvance(int liveSlot, int sourceIndex, boolean mixMode) {
+        int win = com.solar.launcher.stem.StemMixQueuePolicy.liveWindow(mixMode);
+        boolean ok = com.solar.launcher.stem.StemMixQueuePolicy.applyAdvanceOrder(
+                queue, liveSlot, sourceIndex, win);
+        if (ok) {
+            musicOriginal.clear();
+            musicOriginal.addAll(queue.musicFiles());
+        }
+        return ok;
     }
 
     public int nextIndex(boolean repeatAll) {

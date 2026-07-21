@@ -72,9 +72,30 @@ public class ThemeManager {
 
     public static List<ThemeEntry> availableThemes = new ArrayList<>();
     private static int currentThemeIndex = 0;
-    private static final Map<String, Bitmap> bitmapCache = new HashMap<>();
-    /** ponytail: cache scaled row tiles — focus scroll was re-scaling on every D-pad step (Y1 jank) */
-    private static final Map<String, Bitmap> scaledRowBitmapCache = new HashMap<>();
+    /**
+     * 2026-07-20 — Theme PNG RAM via ByteBudgetLruMap (was unbounded HashMap).
+     * Layman: remember theme pictures, but forget old ones when RAM gets full.
+     * Reversal: HashMap&lt;String,Bitmap&gt; bitmapCache / scaledRowBitmapCache.
+     */
+    private static final int THEME_BITMAP_BUDGET_BYTES = 8 * 1024 * 1024;
+    private static final int SCALED_ROW_BUDGET_BYTES = 4 * 1024 * 1024;
+    private static final ByteBudgetLruMap.SizeOf<Bitmap> BITMAP_BYTES =
+            new ByteBudgetLruMap.SizeOf<Bitmap>() {
+                @Override
+                public int sizeOf(Bitmap value) {
+                    if (value == null || value.isRecycled()) return 0;
+                    try {
+                        return value.getByteCount();
+                    } catch (Throwable t) {
+                        return value.getRowBytes() * value.getHeight();
+                    }
+                }
+            };
+    private static final ByteBudgetLruMap<String, Bitmap> bitmapCache =
+            new ByteBudgetLruMap<String, Bitmap>(THEME_BITMAP_BUDGET_BYTES, BITMAP_BYTES);
+    /** Scaled row tiles — focus scroll was re-scaling on every D-pad step (Y1 jank). */
+    private static final ByteBudgetLruMap<String, Bitmap> scaledRowBitmapCache =
+            new ByteBudgetLruMap<String, Bitmap>(SCALED_ROW_BUDGET_BYTES, BITMAP_BYTES);
     private static Typeface cachedFont;
     private static String cachedFontKey = "";
     /** :overlay process finished full theme bootstrap — skip heavy I/O on every modal open. */
@@ -366,6 +387,31 @@ public class ThemeManager {
         cachedFont = null;
         cachedFontKey = "";
         auraFont = null;
+    }
+
+    /**
+     * 2026-07-20 — MemoryRelease ladder: drop rebuildable theme tiles under pressure.
+     * Layman: forget scaled row pictures first; on hard squeeze, clear theme PNGs too (reload on next paint).
+     * Technical: soft → scaledRow evictAll + bitmap trim half; severe → both evictAll. Never touches NP art.
+     * Reversal: no-op; HashMap clear only on theme switch.
+     */
+    public static void releaseMemoryCaches(boolean severe) {
+        try {
+            scaledRowBitmapCache.evictAll();
+            if (severe) {
+                bitmapCache.evictAll();
+            } else {
+                bitmapCache.trimToBytes(THEME_BITMAP_BUDGET_BYTES / 2);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * 2026-07-20 — Alias for {@link #releaseMemoryCaches} (MemoryRelease ladder name).
+     * Layman: free warm theme pictures when Android asks for RAM.
+     */
+    public static void releaseWarmBitmaps(boolean severe) {
+        releaseMemoryCaches(severe);
     }
 
     /** App-private MMC copy of themes — survives USB mass-storage export of MicroSD. */
@@ -2642,19 +2688,64 @@ public class ThemeManager {
         if (entry == null || relativePath == null || relativePath.isEmpty()) return null;
         Bitmap bmp = null;
         String folderPath = entry.folderPath;
+        // #region agent log
+        String via = "none";
+        String diskPath = "";
+        // #endregion
         if (folderPath != null && folderPath.startsWith("asset://")) {
             bmp = decodeBundledThemeAsset(relativePath, maxSide);
+            // #region agent log
+            via = bmp != null ? "asset" : "asset_miss";
+            // #endregion
         } else {
             File f = resolveThemeAssetFile(folderPath, relativePath);
             if (f != null && f.isFile()) {
+                // #region agent log
+                diskPath = f.getAbsolutePath();
+                // #endregion
                 bmp = maxSide > 0
                         ? decodeBitmapFileMaxSide(f.getAbsolutePath(), maxSide)
                         : decodeBitmapFile(f.getAbsolutePath());
+                // #region agent log
+                via = bmp != null ? "disk" : "disk_decode_fail";
+                // #endregion
+            } else {
+                // #region agent log
+                via = "disk_miss";
+                // #endregion
             }
         }
         if (bmp == null && isBuiltInDefault(entry)) {
             bmp = decodeBundledThemeAsset(relativePath, maxSide);
+            // #region agent log
+            if (bmp != null) via = via + "+bundled";
+            else via = via + "+bundled_miss";
+            // #endregion
         }
+        // #region agent log
+        try {
+            if (relativePath != null && (relativePath.contains("Music")
+                    || relativePath.contains("Videos")
+                    || relativePath.contains("Photos")
+                    || relativePath.contains("Settings")
+                    || relativePath.contains("Now Playing")
+                    || relativePath.contains("FM")
+                    || relativePath.contains("Bluetooth")
+                    || relativePath.contains("Audiobooks"))) {
+                org.json.JSONObject d = new org.json.JSONObject();
+                d.put("rel", relativePath);
+                d.put("via", via);
+                d.put("diskPath", diskPath);
+                d.put("folder", entry.folderName);
+                d.put("folderPath", folderPath);
+                d.put("ok", bmp != null && !bmp.isRecycled());
+                d.put("assetCtx", assetContext != null);
+                d.put("fileLen", diskPath.length() > 0 ? new File(diskPath).length() : -1L);
+                com.solar.launcher.Debug6a626eLog.log(
+                        "ThemeManager.decodeThemeBitmapForEntry", "decode", "B,C,E", d);
+            }
+        } catch (Exception ignored) {}
+        // #endregion
         return bmp;
     }
 
@@ -2701,33 +2792,111 @@ public class ThemeManager {
      */
     public static Bitmap getHomeMenuIcon(Context context, HomeMenuConfig.Entry entry) {
         if (context == null || entry == null) return null;
+        // #region agent log
+        String arm = "start";
+        // #endregion
         if (HomeMenuConfig.ID_THEMES.equals(entry.id)
                 || HomeMenuConfig.ID_GET_THEMES.equals(entry.id)) {
             Bitmap themes = getSolarAppIcon("Themes");
-            if (themes != null) return themes;
-            return getThemeSettingBitmap("theme");
+            if (themes != null) {
+                // #region agent log
+                arm = "themes_solar";
+                debugHomeIcon(entry, arm, themes);
+                // #endregion
+                return themes;
+            }
+            Bitmap setting = getThemeSettingBitmap("theme");
+            // #region agent log
+            arm = "themes_setting";
+            debugHomeIcon(entry, arm, setting);
+            // #endregion
+            return setting;
         }
         String enLabel = entry.englishLabel(context);
         Bitmap solar = getSolarAppIcon(enLabel);
-        if (solar != null) return solar;
+        if (solar != null) {
+            // #region agent log
+            arm = "solar_en";
+            debugHomeIcon(entry, arm, solar);
+            // #endregion
+            return solar;
+        }
         if (entry.solarAppName != null && !entry.solarAppName.equals(enLabel)) {
             solar = getSolarAppIcon(entry.solarAppName);
-            if (solar != null) return solar;
+            if (solar != null) {
+                // #region agent log
+                arm = "solar_app";
+                debugHomeIcon(entry, arm, solar);
+                // #endregion
+                return solar;
+            }
         }
         if (entry.stockIconKey != null) {
             Bitmap stock = getThemeHomeBitmap(entry.stockIconKey);
-            if (stock != null) return stock;
+            if (stock != null) {
+                // #region agent log
+                arm = "stock_" + entry.stockIconKey;
+                debugHomeIcon(entry, arm, stock);
+                // #endregion
+                return stock;
+            }
         }
         String fallbackKey = HomeMenuConfig.y1HomeIconFallbackKey(entry.id);
         if (fallbackKey != null) {
             Bitmap fb = getThemeHomeBitmap(fallbackKey);
-            if (fb != null) return fb;
+            if (fb != null) {
+                // #region agent log
+                arm = "fb_" + fallbackKey;
+                debugHomeIcon(entry, arm, fb);
+                // #endregion
+                return fb;
+            }
         }
         // Cold-start / partial seed: never leave Music on stock drawable placeholder.
         if (HomeMenuConfig.ID_MUSIC.equals(entry.id) && isBuiltInDefault(getCurrentTheme())) {
-            return decodeBundledThemeAsset("Music_YS.png", 0);
+            Bitmap bundled = decodeBundledThemeAsset("Music_YS.png", 0);
+            // #region agent log
+            arm = "bundled_music";
+            debugHomeIcon(entry, arm, bundled);
+            // #endregion
+            return bundled;
         }
+        // #region agent log
+        arm = "null";
+        debugHomeIcon(entry, arm, null);
+        // #endregion
         return null;
+    }
+
+    /**
+     * 2026-07-20 — Debug 6a626e: log home-icon resolution arm + active theme path.
+     * Layman: writes which lookup found (or missed) the Music/Videos picture.
+     * Reversal: delete with Debug6a626eLog after fix verified.
+     */
+    private static void debugHomeIcon(HomeMenuConfig.Entry entry, String arm, Bitmap bmp) {
+        try {
+            ThemeEntry t = getCurrentTheme();
+            org.json.JSONObject d = new org.json.JSONObject();
+            d.put("entryId", entry != null ? entry.id : "");
+            d.put("stockKey", entry != null ? entry.stockIconKey : "");
+            d.put("arm", arm != null ? arm : "");
+            d.put("ok", bmp != null && !bmp.isRecycled());
+            d.put("w", bmp != null ? bmp.getWidth() : 0);
+            d.put("h", bmp != null ? bmp.getHeight() : 0);
+            d.put("folder", t != null ? t.folderName : "");
+            d.put("folderPath", t != null ? t.folderPath : "");
+            d.put("assetCtx", assetContext != null);
+            d.put("themesN", availableThemes.size());
+            d.put("blockSd", blockSdcardThemeAssets);
+            JSONObject home = t != null && t.root != null
+                    ? t.root.optJSONObject("homePageConfig") : null;
+            d.put("homeKeys", home != null ? home.length() : -1);
+            if (entry != null && entry.stockIconKey != null && home != null) {
+                d.put("homePath", home.optString(entry.stockIconKey, ""));
+            }
+            com.solar.launcher.Debug6a626eLog.log(
+                    "ThemeManager.getHomeMenuIcon", "icon resolve", "A,B,C", d);
+        } catch (Exception ignored) {}
     }
 
     /** {@code homePageConfig} asset from active theme only; null when unset or missing file. */

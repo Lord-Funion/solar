@@ -13,6 +13,7 @@ import android.widget.TextView;
 
 import com.solar.launcher.ArtistBrowsePolicy;
 import com.solar.launcher.AlbumCoverPipeline;
+import com.solar.launcher.LibraryAlbumRack;
 import com.solar.launcher.LibraryBrowsePrefs;
 import com.solar.launcher.R;
 import com.solar.launcher.DebugSessionLog;
@@ -48,6 +49,35 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         File coverFileForTrack(File track);
         LibraryBrowsePrefs libraryBrowsePrefs();
         List<FlowCatalog.SongRow> libraryRows();
+        /**
+         * 2026-07-20 — Tier-0 DISTINCT album titles when {@link #libraryRows()} is empty (SEGMENTED).
+         * Layman: album name list for Flow without every song in RAM.
+         * Reversal: return empty; Flow only builds from libraryRows.
+         */
+        List<String> tier0AlbumTitles();
+        /**
+         * 2026-07-20 — Tier-0 DISTINCT artist names for Flow Artists under SEGMENTED.
+         * Reversal: return empty; use policyTracks only.
+         */
+        List<String> tier0ArtistNames();
+        /**
+         * 2026-07-20 — Resolve album/artist track Files (SQL pages under SEGMENTED).
+         * Layman: when the cover has no embedded song list, look them up in the DB.
+         * Reversal: FlowCatalog.tracksForAlbum(libraryRows) only.
+         */
+        List<File> resolveFlowItemTracks(FlowItem item);
+        /**
+         * 2026-07-20 — One sample track for cover decode (SEGMENTED shells).
+         * Layman: peek a single song file to find album art without loading the whole album.
+         * Was: resolveFlowItemTracks → full paged collect per warm slot. Reversal: call resolveFlowItemTracks.
+         */
+        List<File> resolveFlowItemCoverSample(FlowItem item);
+        /**
+         * 2026-07-20 — Tier-0 album titles with 2+ tracks (multi-track Flow setting under shells).
+         * Layman: album names that are real multi-song discs when “multi-track only” is on.
+         * Reversal: return tier0AlbumTitles() unchanged.
+         */
+        List<String> tier0MultiTrackAlbumTitles();
         List<ArtistBrowsePolicy.Track> policyTracks();
         List<DeezerPlaylist> deezerPlaylists();
         List<OpenRssClient.Podcast> podcastShows();
@@ -97,6 +127,20 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         void hideFlowLoading();
         int libraryScanGeneration();
         boolean flowMultiTrackAlbumsOnly();
+        /**
+         * 2026-07-20 — True while dial/keys are busy (InputPriorityGate).
+         * Layman: Flow precook should wait until you stop spinning.
+         * Reversal: always return false.
+         */
+        boolean shouldDeferLibraryChore();
+        /** 2026-07-20 — Ms until {@link #shouldDeferLibraryChore()} clears. */
+        long msUntilLibraryChoreAllowed();
+        /**
+         * 2026-07-20 — SEGMENTED + empty Flow SongRows: skip post-scan precook (build on Flow open).
+         * Layman: don’t bake the whole album rack right after a big scan when songs aren’t resident.
+         * Reversal: always false (precook always attempts libraryRows).
+         */
+        boolean shouldSkipSegmentedFlowPrecook();
         /** True when this file is the active music queue track. */
         boolean isSamePlayingTrack(File track);
         /** True when local music is actively playing (not podcast). */
@@ -279,6 +323,34 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         FLOW_WORKER.execute(new Runnable() {
             @Override
             public void run() {
+                // 2026-07-20 — Yield to dial before building album catalog; skip under RAM pressure.
+                // Was: always build immediately after scan. Reversal: drop wait / always build.
+                while (actions.libraryScanGeneration() == libGen
+                        && actions.shouldDeferLibraryChore()) {
+                    long wait = Math.max(200L, actions.msUntilLibraryChoreAllowed());
+                    try {
+                        Thread.sleep(wait);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+                if (actions.libraryScanGeneration() != libGen) return;
+                if (com.solar.launcher.LowMemoryGate.shouldDeferHeavyWork(null)) {
+                    return; // keep LowMemoryGate — retry on next scan / Flow open
+                }
+                // 2026-07-20 — SEGMENTED: precook album shells from Tier-0 titles (no SongRow walk).
+                // Was: empty libraryRows → return (never precooked; open also empty until shells).
+                // Do not call libraryRows() first under SEGMENTED — avoid accidental full materialize.
+                // Reversal: require non-empty libraryRows before buildCatalog.
+                List<FlowCatalog.SongRow> rows = null;
+                if (!actions.shouldSkipSegmentedFlowPrecook()) {
+                    rows = actions.libraryRows();
+                }
+                if (rows == null || rows.isEmpty()) {
+                    List<String> titles = actions.tier0AlbumTitles();
+                    if (titles == null || titles.isEmpty()) return;
+                }
                 final long t0 = System.currentTimeMillis();
                 final List<FlowItem> built = buildCatalog(FlowMode.ALBUM, libGen, optionsKey);
                 catalogSessionCache.put(FlowMode.ALBUM, libGen, optionsKey, built);
@@ -935,6 +1007,50 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         if (flowView != null) flowView.postInvalidateOnAnimation();
     }
 
+    /**
+     * 2026-07-20 — MemoryRelease bake step (Host must not be a no-op).
+     * Layman: free Flow’s pre-drawn album tiles first when RAM is tight.
+     * Technical: bake-before-cover ladder; {@link FlowView#releaseBakeCacheForMemory}.
+     * Reversal: empty body; leave bake LRU until viewport clear.
+     */
+    public void releaseBakeCachesForMemory() {
+        if (flowView != null) flowView.releaseBakeCacheForMemory();
+    }
+
+    /**
+     * 2026-07-20 — MemoryRelease cover step: clear LRU but keep NP / handoff pin.
+     * Layman: empty carousel covers except the playing album so Now Playing stays painted.
+     * Technical: never evict NP first — clear then re-put. Reversal: invalidateCoverCaches().
+     */
+    public void releaseCoverCachesKeepNowPlaying() {
+        // Cancel in-flight decodes so pressure trim is not undone by late puts.
+        coverGovernor.cancelAll();
+        Bitmap keep = null;
+        String keepKey = null;
+        if (handoffPinnedCover != null && !handoffPinnedCover.isRecycled()) {
+            keep = handoffPinnedCover;
+            keepKey = handoffPinnedCoverKey;
+        }
+        if (keep == null) {
+            try {
+                keep = actions.playerHandoffCoverBitmap();
+                keepKey = actions.nowPlayingCarouselMatchKey(catalog);
+            } catch (Throwable ignored) {}
+        }
+        coverCache.releaseKeeping(keepKey, keep);
+        if (flowView != null) flowView.postInvalidateOnAnimation();
+    }
+
+    /**
+     * 2026-07-20 — Severe MemoryRelease: drop rebuildable session catalog duplicates.
+     * Layman: forget the cached Flow album list; it rebuilds next open.
+     * Technical: catalogSessionCache.clear only — not covers (cover step already ran).
+     * Reversal: no-op; keep session peek for reverse handoff.
+     */
+    public void releaseSessionDuplicatesForMemory() {
+        catalogSessionCache.clear();
+    }
+
     /** Session-precooked carousel — hot path for NP→Flow reverse handoff. */
     public List<FlowItem> peekSessionCatalog(FlowMode mode) {
         if (mode == null || mode == FlowMode.UNSPECIFIED) mode = FlowMode.ALBUM;
@@ -1188,10 +1304,17 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         if (mode == FlowMode.ALBUM) {
             built = FlowCatalog.buildAlbums(actions.libraryRows(), actions.libraryBrowsePrefs(),
                     actions.policyTracks(), multiTrack);
+            // 2026-07-20 — SEGMENTED return: shells when SongRows empty (honor multi-track pref).
+            if (built == null || built.isEmpty()) {
+                built = albumShellsForSegmented(multiTrack);
+            }
         } else {
             built = FlowCatalog.build(mode, actions.libraryRows(), actions.libraryBrowsePrefs(),
                     actions.policyTracks(), actions.musicRoot(), actions.deezerPlaylists(),
                     actions.podcastShows());
+            if ((built == null || built.isEmpty()) && mode == FlowMode.ARTIST) {
+                built = FlowCatalog.buildArtistsFromNames(actions.tier0ArtistNames());
+            }
         }
         catalogSessionCache.put(mode, libGen, optionsKey, built);
         return built;
@@ -1777,11 +1900,23 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         try {
             boolean multiTrack = actions.flowMultiTrackAlbumsOnly();
             List<FlowItem> built;
+            List<FlowCatalog.SongRow> rows = actions.libraryRows();
             if (mode == FlowMode.ALBUM) {
-                built = FlowCatalog.buildAlbums(actions.libraryRows(), actions.libraryBrowsePrefs(),
-                        actions.policyTracks(), multiTrack);
+                // 2026-07-20 — SEGMENTED: shells from Tier-0 albums when SongRows absent.
+                // Was: buildAlbums(empty) → blank carousel. Reversal: that path only.
+                // multiTrackOnly: SQL HAVING COUNT(*)>1 (was ignored on shells).
+                if (rows == null || rows.isEmpty()) {
+                    built = albumShellsForSegmented(multiTrack);
+                } else {
+                    built = FlowCatalog.buildAlbums(rows, actions.libraryBrowsePrefs(),
+                            actions.policyTracks(), multiTrack);
+                }
+            } else if (mode == FlowMode.ARTIST
+                    && (rows == null || rows.isEmpty())
+                    && (actions.policyTracks() == null || actions.policyTracks().isEmpty())) {
+                built = FlowCatalog.buildArtistsFromNames(actions.tier0ArtistNames());
             } else {
-                built = FlowCatalog.build(mode, actions.libraryRows(), actions.libraryBrowsePrefs(),
+                built = FlowCatalog.build(mode, rows, actions.libraryBrowsePrefs(),
                         actions.policyTracks(), actions.musicRoot(), actions.deezerPlaylists(),
                         actions.podcastShows());
             }
@@ -2014,6 +2149,18 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         actions.hideFlowLoading();
     }
 
+    /**
+     * 2026-07-20 — SEGMENTED album carousel shells; honor multi-track-only setting via SQL.
+     * Layman: build the cover strip from album names, skipping one-track “albums” when asked.
+     * Reversal: always LibraryAlbumRack.buildShellsFromTitles(tier0AlbumTitles()).
+     */
+    private List<FlowItem> albumShellsForSegmented(boolean multiTrackOnly) {
+        List<String> titles = multiTrackOnly
+                ? actions.tier0MultiTrackAlbumTitles()
+                : actions.tier0AlbumTitles();
+        return LibraryAlbumRack.buildShellsFromTitles(titles);
+    }
+
     private void flipItem(FlowItem item) {
         focusedItem = item;
         flipGen++;
@@ -2027,15 +2174,34 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         List<FlowCatalog.SongRow> lib = actions.libraryRows();
         List<ArtistBrowsePolicy.Track> policy = actions.policyTracks();
         if (item.kind == FlowItem.Kind.ALBUM) {
-            List<File> tracks = item.tracks.isEmpty()
-                    ? FlowCatalog.tracksForAlbum(item, lib, prefs) : item.tracks;
+            // 2026-07-20 — SEGMENTED shells: empty tracks + empty libraryRows → SQL resolve.
+            // Was: tracksForAlbum(lib) only → flip showed “empty” on every shell album.
+            // Reversal: tracksForAlbum(lib) only.
+            List<File> tracks = item.tracks;
+            if (tracks == null || tracks.isEmpty()) {
+                tracks = actions.resolveFlowItemTracks(item);
+            }
+            if (tracks == null || tracks.isEmpty()) {
+                tracks = FlowCatalog.tracksForAlbum(item, lib, prefs);
+            }
             addTrackRows(rows, tracks, lib);
         } else if (item.kind == FlowItem.Kind.ARTIST) {
             if (ArtistBrowsePolicy.shouldSkipAlbumPicker(item.title, prefs, policy)) {
-                addTrackRows(rows, FlowCatalog.tracksForArtist(item.title, lib, prefs, policy), lib);
+                List<File> tracks = FlowCatalog.tracksForArtist(item.title, lib, prefs, policy);
+                if (tracks == null || tracks.isEmpty()) {
+                    tracks = actions.resolveFlowItemTracks(item);
+                }
+                addTrackRows(rows, tracks, lib);
             } else {
-                for (FlowItem album : FlowCatalog.albumsForArtist(item.title, lib, prefs, policy)) {
-                    rows.add(new FlowBackRow(album.title, album.subtitle, null, null, album, null));
+                List<FlowItem> albums = FlowCatalog.albumsForArtist(item.title, lib, prefs, policy);
+                if (albums == null || albums.isEmpty()) {
+                    // SEGMENTED: no SongRows — flip still needs something; resolve tracks as flat list.
+                    List<File> tracks = actions.resolveFlowItemTracks(item);
+                    addTrackRows(rows, tracks, lib);
+                } else {
+                    for (FlowItem album : albums) {
+                        rows.add(new FlowBackRow(album.title, album.subtitle, null, null, album, null));
+                    }
                 }
             }
         } else if (item.kind == FlowItem.Kind.PLAYLIST) {
@@ -2122,7 +2288,11 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         if (album == null) return;
         LibraryBrowsePrefs prefs = actions.libraryBrowsePrefs();
         List<File> tracks = album.tracks.isEmpty()
-                ? FlowCatalog.tracksForAlbum(album, actions.libraryRows(), prefs) : album.tracks;
+                ? actions.resolveFlowItemTracks(album) : album.tracks;
+        if (tracks == null || tracks.isEmpty()) {
+            // Fallback: in-RAM SongRows when FULL_RESIDENT.
+            tracks = FlowCatalog.tracksForAlbum(album, actions.libraryRows(), prefs);
+        }
         List<FlowBackRow> rows = new ArrayList<FlowBackRow>();
         addTrackRows(rows, tracks, actions.libraryRows());
         if (rows.isEmpty()) return;
@@ -2366,9 +2536,17 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         });
     }
 
-    /** Disk-resident cover warm — worker thread only. */
+    /** Disk-resident cover warm — worker thread only. Never warm-all-albums (center ± radius only). */
     private void warmCatalogCoversSync(List<FlowItem> items, int center, int radius) {
         if (items == null || items.isEmpty()) return;
+        // 2026-07-20 — Under pressure warm focus only (no neighbor decode storm).
+        // Reversal: use caller radius unchanged.
+        int warmR = radius;
+        try {
+            if (com.solar.launcher.LowMemoryGate.shouldDeferHeavyWork(null)) {
+                warmR = 0;
+            }
+        } catch (Throwable ignored) {}
         // #region agent log
         final long warmStartMs = DebugSessionLog.ENABLED ? System.currentTimeMillis() : 0L;
         // #endregion
@@ -2376,8 +2554,8 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         int n = items.size();
         int warmed = 0;
         // Center slot first — focused cover should land before side neighbors.
-        for (int ring = 0; ring <= radius; ring++) {
-            if (Math.abs(center - lastWarmCenter) > radius + 1) return;
+        for (int ring = 0; ring <= warmR; ring++) {
+            if (Math.abs(center - lastWarmCenter) > warmR + 1) return;
             if (ring == 0) {
                 warmed += warmCatalogCoverAt(items, center, center, thumb, n);
             } else {
@@ -2392,7 +2570,7 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
                 try {
                     org.json.JSONObject d = new org.json.JSONObject();
                     d.put("center", center);
-                    d.put("radius", radius);
+                    d.put("radius", warmR);
                     d.put("warmMs", warmMs);
                     d.put("warmed", warmed);
                     DebugSessionLog.log("FlowScreenHost.warmCatalogCoversSync", "disk warm", "H3-H4", d);
@@ -2465,7 +2643,15 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
     /** 2026-07-06: Rack albums store tracks lazily — resolve from library rows for art reads. */
     @Override
     public List<File> tracksForCover(FlowItem item) {
-        return FlowCatalog.tracksForCover(item, actions.libraryRows(), actions.libraryBrowsePrefs());
+        // 2026-07-20 — SEGMENTED shells: peek one file for art (not full album collect).
+        // Was: resolveFlowItemTracks → every track page → dial jank under warm.
+        // Reversal: resolveFlowItemTracks(item) again.
+        List<FlowCatalog.SongRow> rows = actions.libraryRows();
+        if (rows == null || rows.isEmpty()) {
+            List<File> sample = actions.resolveFlowItemCoverSample(item);
+            if (sample != null && !sample.isEmpty()) return sample;
+        }
+        return FlowCatalog.tracksForCover(item, rows, actions.libraryBrowsePrefs());
     }
 
     @Override

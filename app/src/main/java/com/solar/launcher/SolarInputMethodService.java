@@ -139,6 +139,16 @@ public class SolarInputMethodService extends InputMethodService implements Solar
             }
 
             @Override
+            public void onA5EdgeContextHoldArm() {
+                // IME: no Options spinner.
+            }
+
+            @Override
+            public void onA5EdgeContextHoldCancel() {
+                // IME: no Options spinner.
+            }
+
+            @Override
             public int viewportWidth() {
                 return getResources().getDisplayMetrics().widthPixels;
             }
@@ -311,12 +321,13 @@ public class SolarInputMethodService extends InputMethodService implements Solar
     /** Paint A5 soft-input shell from controller + session title. */
     private void refreshA5InputUi() {
         if (a5ShellHost == null) return;
+        // 2026-07-20 — Status clock; no session subtitle; type hint only in the input row.
         a5ShellHost.applyShellTheme(sessionTitle);
         String buffer = wheelKeyboard.getBuffer();
         String placeholder = getString(R.string.solar_ime_type_hint);
         String display = buffer.length() == 0 ? placeholder : buffer;
         a5ShellHost.getKeyboardUi().setHintText(getString(R.string.keyboard_hint_a5));
-        a5ShellHost.getKeyboardUi().refresh(wheelKeyboard, sessionTitle, display, buffer.length() == 0);
+        a5ShellHost.getKeyboardUi().refresh(wheelKeyboard, null, display, buffer.length() == 0);
     }
 
     @Override

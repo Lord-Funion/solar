@@ -169,11 +169,11 @@ public final class ScrobbleSettingsHost {
         }
         if (RowKeys.LASTFM_USER.equals(rowKey)) {
             String u = prefs.getString(ScrobbleManager.PREF_LASTFM_USERNAME, "");
-            return u != null && !u.isEmpty() ? u : "—";
+            return u != null && !u.isEmpty() ? u : "-";
         }
         if (RowKeys.LASTFM_PASS.equals(rowKey)) {
             String p = prefs.getString(ScrobbleManager.PREF_LASTFM_PASSWORD, "");
-            return p != null && !p.isEmpty() ? "••••" : "—";
+            return p != null && !p.isEmpty() ? "••••" : "-";
         }
         if (RowKeys.LASTFM_AUTH.equals(rowKey)) {
             String sk = prefs.getString(ScrobbleManager.PREF_LASTFM_SK, "");
@@ -184,7 +184,7 @@ public final class ScrobbleSettingsHost {
         }
         if (RowKeys.LISTENBRAINZ_TOKEN.equals(rowKey)) {
             String t = prefs.getString(ScrobbleManager.PREF_LISTENBRAINZ_TOKEN, "");
-            return t != null && !t.isEmpty() ? "••••" + (t.length() > 4 ? t.substring(t.length() - 4) : "") : "—";
+            return t != null && !t.isEmpty() ? "••••" + (t.length() > 4 ? t.substring(t.length() - 4) : "") : "-";
         }
         return "";
     }

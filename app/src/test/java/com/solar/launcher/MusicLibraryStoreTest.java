@@ -17,6 +17,40 @@ public class MusicLibraryStoreTest {
         }
     }
 
+    /** 2026-07-20 — Length sort comparator + mm:ss formatting for song rows. */
+    @Test
+    public void formatDurationMmSsAndCompareAscending() {
+        if (!"3:00".equals(MusicLibraryStore.formatDurationMmSs("180000"))) {
+            throw new AssertionError("3:00 got " + MusicLibraryStore.formatDurationMmSs("180000"));
+        }
+        if (!"1:01:01".equals(MusicLibraryStore.formatDurationMmSs("3661000"))) {
+            throw new AssertionError("hour format");
+        }
+        if (!"".equals(MusicLibraryStore.formatDurationMmSs(""))) {
+            throw new AssertionError("empty format");
+        }
+        if (!"".equals(MusicLibraryStore.formatDurationMmSs(null))) {
+            throw new AssertionError("null format");
+        }
+        // Short before long.
+        if (MusicLibraryStore.compareDurationAscending("60000", "120000") >= 0) {
+            throw new AssertionError("short should precede long");
+        }
+        // Unknown after known.
+        if (MusicLibraryStore.compareDurationAscending("", "60000") <= 0) {
+            throw new AssertionError("unknown should follow known");
+        }
+        if (MusicLibraryStore.compareDurationAscending("60000", "") >= 0) {
+            throw new AssertionError("known should precede unknown");
+        }
+        if (MusicLibraryStore.compareDurationAscending("", "") != 0) {
+            throw new AssertionError("both unknown equal");
+        }
+        if (MusicLibraryStore.parseDurationMs("90500") != 90500) {
+            throw new AssertionError("parseDurationMs");
+        }
+    }
+
     @Test
     public void durationSecFromMs() {
         MusicLibraryStore.Track t = new MusicLibraryStore.Track(

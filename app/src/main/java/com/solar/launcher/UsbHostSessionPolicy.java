@@ -365,9 +365,11 @@ public final class UsbHostSessionPolicy {
         return allow;
     }
 
-    /** Poll/HOME/recovery agent must stay off after dismiss or when Xposed owns USB (2026-07-06). */
+    /** Poll/HOME/recovery agent must stay off after dismiss, stock UI, or when Xposed owns USB. */
     public static boolean isAggressiveUsbWorkSuppressed(Context context) {
         if (context == null) return false;
+        // 2026-07-19 — Android owns USB: never BACK/HOME reclaim against SystemUI.
+        if (UsbStorageSessionFlags.preferStockUsbUi(context)) return true;
         if (hasUserDismissedThisSession(context)) return true;
         return UsbStorageConcierge.isXposedConciergeActive();
     }

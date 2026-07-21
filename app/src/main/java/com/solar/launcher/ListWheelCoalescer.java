@@ -18,7 +18,14 @@ import android.widget.ListView;
  * does not wait for the old direction to finish draining.
  *
  * <p>Technical: signed step accumulator + paced flush ({@link #MIN_FLUSH_MS}); pending capped;
- * idle gap clears pending; opposite-sign offer zeros then replaces. Reversal: apply every KEY.
+ * opposite-sign offer zeros then replaces. Reversal: apply every KEY.
+ *
+ * <p>2026-07-20 — Agent NDJSON/SD/HTTP metering removed from flush path (poisoned Y1 scroll).
+ *
+ * <p>2026-07-20 — Dial integrity: do <b>not</b> idle-clear pending on {@link #offerSteps}.
+ * Was: gap ≥ {@link #IDLE_CLEAR_MS} wiped unflushed notches while minFlush (64) still pending
+ * → “four turns for four rows”. Now: clear only via {@link #dropPending} (KEY_UP/hardStop)
+ * or reverse. Reversal: restore idle-clear block in offerSteps.
  */
 final class ListWheelCoalescer {
 
@@ -30,9 +37,9 @@ final class ListWheelCoalescer {
     static final int MAX_STEPS_PER_FLUSH = 5;
 
     /**
-     * Gap since last offer that means the finger stopped — drop pending before accepting more.
-     * 2026-07-17 — 50 ms (was 75): after a long track-list spin, backlog must die before the
-     * next vsync so the highlight freezes the instant the dial pauses (Rockbox/JJ feel).
+     * 2026-07-20 — Advisory pause gap only (docs / tests). Not applied inside {@link #offerSteps}.
+     * Was: offerSteps zeroed pending when gap ≥ this while minFlush still waiting → lost notches.
+     * Clear pending via {@link #dropPending} on KEY_UP/hardStop instead. Reversal: idle-clear on offer.
      */
     static final long IDLE_CLEAR_MS = 50L;
 
@@ -45,11 +52,43 @@ final class ListWheelCoalescer {
     static final long MIN_FLUSH_MS = 80L;
 
     /**
+     * 2026-07-20 — Y1/A5 song-list paint floor — match short menus (was 100 ms → felt sluggish).
+     * Layman: scrolling songs should keep up with home/settings like the keyboard strip.
+     * Reversal: raise above {@link #MENU_MIN_FLUSH_MS_Y1} again.
+     */
+    static final long MIN_FLUSH_MS_Y1 = 64L;
+
+    /** 2026-07-19 — Home/settings menu paint floor (Y2 / default). */
+    static final long MENU_MIN_FLUSH_MS = 48L;
+
+    /**
+     * 2026-07-19 — Y1/A5 menu paint floor — still snappier than song lists, calmer than 48 ms.
+     * Reversal: {@link #MENU_MIN_FLUSH_MS}.
+     */
+    static final long MENU_MIN_FLUSH_MS_Y1 = 64L;
+
+    /**
      * 2026-07-19 — Per-instance floor (menus use a lower value for snappier short lists).
      * Layman: home/settings can paint a bit faster than huge song lists.
-     * Technical: defaults to {@link #MIN_FLUSH_MS}; menu coalescer sets 48. Reversal: always MIN_FLUSH_MS.
+     * Technical: defaults to {@link #MIN_FLUSH_MS}; menu coalescer sets menu floor. Reversal: always MIN_FLUSH_MS.
      */
     private long minFlushMs = MIN_FLUSH_MS;
+
+    /**
+     * 2026-07-19 — Song-list flush floor for this device family.
+     * Layman: Y1 waits a hair longer between highlight jumps so the UI stays ahead of the dial.
+     */
+    static long listMinFlushMsForDevice() {
+        return (DeviceFeatures.isY1() || DeviceFeatures.isA5()) ? MIN_FLUSH_MS_Y1 : MIN_FLUSH_MS;
+    }
+
+    /**
+     * 2026-07-19 — Short-menu flush floor for this device family.
+     */
+    static long menuMinFlushMsForDevice() {
+        return (DeviceFeatures.isY1() || DeviceFeatures.isA5())
+                ? MENU_MIN_FLUSH_MS_Y1 : MENU_MIN_FLUSH_MS;
+    }
 
     private int pendingSteps;
     private boolean flushPosted;
@@ -81,9 +120,6 @@ final class ListWheelCoalescer {
             public void run() {
                 flushPosted = false;
                 long now = SystemClock.uptimeMillis();
-                // #region agent log
-                long sinceFlush = lastFlushUptimeMs < 0L ? -1L : (now - lastFlushUptimeMs);
-                // #endregion
                 LiveGate gate = liveGate;
                 if (gate != null && !gate.allowFlush()) {
                     // Mic/quiet: finger gone — discard backlog, do not walk the list.
@@ -96,17 +132,6 @@ final class ListWheelCoalescer {
                 if (a == null || steps == 0) return;
                 int signed = clampSteps(steps);
                 lastFlushUptimeMs = now;
-                // #region agent log
-                if (sinceFlush < 0L || sinceFlush < 80L || sinceFlush > 200L) {
-                    try {
-                        org.json.JSONObject d = new org.json.JSONObject();
-                        d.put("sinceFlushMs", sinceFlush);
-                        d.put("signed", signed);
-                        d.put("minFlushMs", minFlushMs);
-                        Debug0f5debLog.probe("ListWheelCoalescer.flush", "list flush", "H-A", d);
-                    } catch (Exception ignored) {}
-                }
-                // #endregion
                 a.applySteps(signed);
                 // Only continue if new notches arrived during apply (live spin).
                 if (pendingSteps != 0) {
@@ -208,28 +233,13 @@ final class ListWheelCoalescer {
             }
             flushPosted = false;
         }
-        if (lastOfferUptimeMs >= 0L && (nowMs - lastOfferUptimeMs) >= IDLE_CLEAR_MS) {
-            pendingSteps = 0;
-            if (host != null) {
-                host.removeCallbacks(flushRunnable);
-            }
-            flushPosted = false;
-        }
+        // 2026-07-20 — No idle-clear here (was wipe pending when gap ≥ IDLE_CLEAR_MS).
+        // Layman: slow turns must still count every click; pause-clear is KEY_UP/hardStop only.
+        // Technical: keep lastOffer for diagnostics; reverse + dropPending clear. Reversal: idle wipe.
         // 2026-07-18 — Opposite dial direction kills old backlog (CW↔CCW interrupt).
-        // Was: pending += signed (e.g. +5 then −1 → +4 still down). Now: zero then replace.
         boolean reversed = pendingSteps != 0
                 && ((pendingSteps > 0) != (signedSteps > 0));
         if (reversed) {
-            // #region agent log
-            try {
-                org.json.JSONObject d = new org.json.JSONObject();
-                d.put("wasPending", pendingSteps);
-                d.put("incoming", signedSteps);
-                Debug0f5debLog.probe("ListWheelCoalescer.offerSteps", "reverse interrupt",
-                        "H-rev", d);
-            } catch (Exception ignored) {}
-            // #endregion
-            pendingSteps = 0;
             if (host != null) {
                 host.removeCallbacks(flushRunnable);
             }
@@ -237,10 +247,23 @@ final class ListWheelCoalescer {
             forceImmediateFlush = true;
         }
         lastOfferUptimeMs = nowMs;
-        pendingSteps += signedSteps;
-        pendingSteps = clampSteps(pendingSteps);
+        pendingSteps = mergeOfferPending(pendingSteps, signedSteps);
         scheduleFlush();
         return true;
+    }
+
+    /**
+     * 2026-07-20 — Pure pending merge for dial integrity (tests + {@link #offerSteps}).
+     * Layman: each click adds to the pile; spinning the other way dumps the old pile first.
+     * Technical: reverse zeros then add; clamp to {@link #MAX_STEPS_PER_FLUSH}; no idle wipe.
+     * Reversal: idle-clear before merge in offerSteps.
+     */
+    static int mergeOfferPending(int pending, int signedSteps) {
+        if (signedSteps == 0) return pending;
+        boolean reversed = pending != 0 && ((pending > 0) != (signedSteps > 0));
+        if (reversed) pending = 0;
+        pending += signedSteps;
+        return clampSteps(pending);
     }
 
     int pendingStepsForTest() {

@@ -132,6 +132,43 @@ public final class SolarOverlayClient {
     public static final String ACTION_OPEN_CONTEXT_MENU =
             "com.solar.launcher.action.OPEN_CONTEXT_MENU";
     public static final String EXTRA_CONTEXT_POWER_HOLD = "context_power_hold";
+    /** 2026-07-20 — Mirror OverlayTriggers: Power DOWN → MainActivity arm Options spinner. */
+    public static final String ACTION_CONTEXT_HOLD_ARM =
+            "com.solar.launcher.action.CONTEXT_HOLD_ARM";
+    /** 2026-07-20 — Mirror OverlayTriggers: Power UP before menu → clear Options spinner. */
+    public static final String ACTION_CONTEXT_HOLD_CANCEL =
+            "com.solar.launcher.action.CONTEXT_HOLD_CANCEL";
+
+    /**
+     * 2026-07-20 — Tell Solar Home to show status spinner during Power-hold wait.
+     * Layman: same little spinner as hold-Back, right when you press Power for Options.
+     * Was: spinner only after hold fired (OPEN_CONTEXT_MENU). Reversal: delete callers.
+     */
+    public static void armInAppContextHoldThrobber(Context ctx) {
+        sendContextHoldThrobberBroadcast(ctx, ACTION_CONTEXT_HOLD_ARM);
+    }
+
+    /**
+     * 2026-07-20 — Clear Options hold spinner when Power was released before the menu opened.
+     * Layman: let go early → spinner stops, like cancelling a Back-hold.
+     */
+    public static void cancelInAppContextHoldThrobber(Context ctx) {
+        sendContextHoldThrobberBroadcast(ctx, ACTION_CONTEXT_HOLD_CANCEL);
+    }
+
+    /** Package-scoped broadcast so only Solar MainActivity refreshes the status spinner. */
+    private static void sendContextHoldThrobberBroadcast(Context ctx, String action) {
+        if (ctx == null || action == null) return;
+        try {
+            Intent i = new Intent(action);
+            i.setPackage(SOLAR_PKG);
+            ctx.sendBroadcast(i);
+            SolarContextBridge.log("contextHoldThrobber " + action);
+        } catch (Throwable t) {
+            SolarContextBridge.log("contextHoldThrobber failed: "
+                    + t.getClass().getSimpleName());
+        }
+    }
 
     /**
      * 2026-07-14 — HOLD BACK outside Solar jumps to Solar MainActivity (no global quick menu).
@@ -482,49 +519,12 @@ public final class SolarOverlayClient {
     }
 
     /**
-     * SystemUI UsbStorageActivity concierge: enable prompt vs lock.
-     * 2026-07-10 — Restored July-2 monlith: Solar MainActivity owns all USB UI.
+     * 2026-07-19 — No-op: stock SystemUI owns USB UI; never wake Solar from this path.
+     * Was: finish UsbStorageActivity + Solar handoff. Reversal: restore body from git.
      */
     public static void routeUsbConcierge(Context ctx, boolean umsExported) {
         if (ctx == null) return;
-        // Stock Android USB UI — never wake Solar from SystemUI hook (2026-07-19).
-        if (SolarUsbSessionPrefs.preferStockUsbUi()) {
-            SolarContextBridge.log("usbConcierge skip — stock USB UI");
-            return;
-        }
-        if (!SolarUsbSessionPrefs.isUmsFeatureEnabled() && !umsExported) {
-            SolarContextBridge.log("usbConcierge skip — UMS feature off");
-            return;
-        }
-        markUsbConciergeHandled();
-        String fg = SystemServerHooks.foregroundPackage(ctx);
-        SolarContextBridge.log("usbConcierge ums=" + umsExported + " fg=" + fg);
-        // #region agent log
-        try {
-            org.json.JSONObject d = new org.json.JSONObject();
-            d.put("umsExported", umsExported);
-            d.put("fg", fg != null ? fg : "");
-            d.put("autoConnect", SolarUsbSessionPrefs.isAutoConnectEnabled());
-            BridgeAf054eDebugLog.log("SolarOverlayClient.routeUsbConcierge", "concierge route", "USB-X1", d);
-        } catch (Throwable ignored) {}
-        // #endregion
-        if (umsExported) {
-            launchSolarUsbHandoff(ctx, false, true);
-            return;
-        }
-        if (!SolarUsbSessionPrefs.shouldShowUsbStoragePrompt()) {
-            return;
-        }
-        if (SolarUsbSessionPrefs.isAutoConnectEnabled()) {
-            launchSolarUsbHandoff(ctx, true, true);
-            return;
-        }
-        if (shouldDeferUsbForNativeErrorTier()) {
-            queuePendingUsbPromptEarly();
-            SolarContextBridge.log("usbConcierge deferred — native_error tier");
-            return;
-        }
-        showUsbStoragePrompt(ctx);
+        SolarContextBridge.log("usbConcierge skip — stock USB UI (hooks off)");
     }
 
     /**

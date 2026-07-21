@@ -67,13 +67,21 @@ public final class MediaSuiteHostAdapter implements MediaSuiteHost.Host {
     @Override public void exitYouTubeAudioToMusic() { act.mediaExitYouTubeAudioToMusic(); }
 
     @Override public void openYouTubeSearchKeyboard(String prefill) { act.mediaOpenYouTubeSearchKeyboard(prefill); }
+    @Override public void openVideoFileSearchKeyboard() { act.mediaOpenVideoFileSearchKeyboard(); }
+    @Override public void openRadioNetSearchKeyboard(String prefill) {
+        act.mediaOpenRadioNetSearchKeyboard(prefill);
+    }
 
     @Override public void requestYouTubeSave(YouTubeVideo video, boolean audioOnly) {
         act.mediaRequestYouTubeSave(video, audioOnly);
     }
 
     @Override public void playAudioFileInNowPlaying(java.io.File file) {
-        act.mediaPlayAudioFileInNowPlaying(file);
+        act.mediaPlayAudioFileInNowPlaying(file, null, null);
+    }
+
+    @Override public void playAudioFileInNowPlaying(java.io.File file, String title, String artist) {
+        act.mediaPlayAudioFileInNowPlaying(file, title, artist);
     }
 
     @Override public View createTwoLineBrowseRow(String title, String subtitle) {

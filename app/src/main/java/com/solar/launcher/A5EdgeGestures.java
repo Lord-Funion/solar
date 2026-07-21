@@ -22,8 +22,8 @@ public final class A5EdgeGestures {
     public static final int SWIPE_MIN_PX = 40;
     /**
      * Hold-still → context on empty chrome (not on list rows).
-     * 2026-07-15 — At least system long-press (~500ms); 420ms felt like “tap opens options”.
-     * Was: SOLAR_BACK_CONTEXT_HOLD_MS only (420). Reversal: return that constant alone.
+     * 2026-07-20 — At least system long-press (~500ms); policy alone (~280) felt like tap→options.
+     * Was: SOLAR_BACK_CONTEXT_HOLD_MS only. Reversal: return that constant alone.
      */
     public static final long HOLD_CONTEXT_MS = resolveHoldContextMs();
     /** Max jitter while “still” before hold cancels. */
@@ -59,6 +59,16 @@ public final class A5EdgeGestures {
         void onA5EdgeBack();
         void onA5EdgeHome();
         void onA5EdgeOpenContext();
+        /**
+         * 2026-07-20 — Hold-still timer armed — show Options status spinner (parity with Back hold).
+         * Layman: start spinning while you keep your finger still for the menu.
+         */
+        void onA5EdgeContextHoldArm();
+        /**
+         * 2026-07-20 — Hold cancelled (move / lift) before OPEN_CONTEXT — clear spinner.
+         * Layman: finger moved or lifted early → spinner stops.
+         */
+        void onA5EdgeContextHoldCancel();
         int viewportWidth();
         int viewportHeight();
         /**
@@ -111,6 +121,7 @@ public final class A5EdgeGestures {
             // Hold-still anywhere (including edges) opens context — user asked for one-spot hold.
             holdFired = true;
             consumeNextUp = true;
+            // 2026-07-20 — Keep spinner through open (arm already on DOWN); Host opens menu.
             host.onA5EdgeOpenContext();
         }
     };
@@ -169,6 +180,11 @@ public final class A5EdgeGestures {
             handler.removeCallbacks(holdContext);
             // Edge L/R is Back, not hold-context (hold still works from interior).
             if (!capturingLeftRightEdge && shouldArmHoldContext(deferHoldToChild)) {
+                // 2026-07-20 — Spinner during hold-still wait (same as Back KEY_DOWN).
+                // Reversal: drop onA5EdgeContextHoldArm; spinner only at OPEN_CONTEXT fire.
+                if (!host.a5ContextMenuBlockingHold()) {
+                    host.onA5EdgeContextHoldArm();
+                }
                 handler.postDelayed(holdContext, HOLD_CONTEXT_MS);
             }
             // #region agent log
@@ -201,6 +217,10 @@ public final class A5EdgeGestures {
             float dy = event.getY() - downY;
             if (Math.abs(dx) > HOLD_SLOP_PX || Math.abs(dy) > HOLD_SLOP_PX) {
                 handler.removeCallbacks(holdContext);
+                // 2026-07-20 — Finger moved: cancel Options hold spinner if menu not opened yet.
+                if (!holdFired) {
+                    host.onA5EdgeContextHoldCancel();
+                }
             }
             // #region agent log
             if (reorderSession && capturingLeftRightEdge) {
@@ -229,6 +249,10 @@ public final class A5EdgeGestures {
             float dy = event.getY() - downY;
             boolean cancel = action == MotionEvent.ACTION_CANCEL;
             boolean captured = capturingLeftRightEdge;
+            // 2026-07-20 — Early lift: clear spinner unless hold already opened Options.
+            if (ContextHoldThrobberGate.shouldClearOnHoldCancel(holdFired)) {
+                host.onA5EdgeContextHoldCancel();
+            }
             tracking = false;
             deferHoldToChild = false;
             capturingLeftRightEdge = false;

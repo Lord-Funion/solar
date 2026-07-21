@@ -147,15 +147,19 @@ public final class UsbHostWakeReceiver extends BroadcastReceiver {
             // #endregion
             return;
         }
+        // Auto-Connect only — Solar silent UMS; no plug-in prompt path (2026-07-19).
+        if (!UsbStorageSessionFlags.isAutoConnectEnabled(context)) {
+            return;
+        }
+        if (!UsbStorageSessionFlags.isAutoConnectAllowedAfterBootSettle(context)) {
+            return;
+        }
         try {
             if (!context.getPackageManager()
                     .getApplicationInfo(context.getPackageName(), 0).enabled) {
                 return;
             }
         } catch (Exception e) {
-            return;
-        }
-        if (!UsbStorageSessionFlags.shouldOfferUsbConnectPromptAfterBootSettle(context)) {
             return;
         }
         // July-2: bring MainActivity once per host session; USB prompt/lock is in-process.
@@ -169,12 +173,13 @@ public final class UsbHostWakeReceiver extends BroadcastReceiver {
         try {
             org.json.JSONObject d = new org.json.JSONObject();
             d.put("startActivity", true);
+            d.put("autoConnect", true);
             d.put("evaluatedBeforeStart", evaluated);
             d.put("wasActive", wasActive);
             Debug02fc83Log.log(context, "UsbHostWakeReceiver.onReceive",
-                    "start MainActivity evaluate", "H3", d);
+                    "start MainActivity auto-connect", "H3", d);
             Debug543e15Log.log("UsbHostWakeReceiver.onReceive",
-                    "start MainActivity evaluate", "H2", d);
+                    "start MainActivity auto-connect", "H2", d);
         } catch (Exception ignored) {}
         // #endregion
         try {
@@ -187,14 +192,14 @@ public final class UsbHostWakeReceiver extends BroadcastReceiver {
 
     /**
      * True when USB host connect should wake MainActivity.
-     * Always true for monlith Solar USB UX (except dismissed session / experiment off).
+     * 2026-07-19 — Auto-Connect only; stock path never wakes Solar.
      */
     static boolean shouldLaunchMainActivityForUsbHost(Context context) {
         if (context == null) return false;
-        // Stock dialog preferred — no MainActivity wake (2026-07-19).
         if (UsbStorageSessionFlags.preferStockUsbUi(context)) return false;
+        if (!UsbStorageSessionFlags.isAutoConnectEnabled(context)) return false;
         if (UsbHostSessionPolicy.hasUserDismissedThisSession(context)) return false;
-        if (!UsbStorageSessionFlags.shouldOfferUsbConnectPromptAfterBootSettle(context)) return false;
+        if (!UsbStorageSessionFlags.isAutoConnectAllowedAfterBootSettle(context)) return false;
         return UsbMassStorageExperiment.isEnabled(context);
     }
 }

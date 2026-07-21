@@ -85,7 +85,7 @@ public class StemFaceView extends View {
     /**
      * Push mixer + UI mode into the face.
      * Layman: update which lights are on and which arm is selected.
-     * 2026-07-19 — songDigits 1..3; stuttering pulses active arm.
+     * 2026-07-19 — songDigits 1..3; stuttering pulses active arm when beat roll active.
      */
     public void setState(float[] g, int zone, boolean isArmed, boolean isLooping,
             float bars, boolean isLoading) {
@@ -177,7 +177,7 @@ public class StemFaceView extends View {
         }
     }
 
-    /** One recessed trough + LEDs + optional song digit. 2026-07-19 */
+    /** One recessed trough + LEDs + optional song digit. Silent pads dim calmly. 2026-07-19 / 2026-07-21 */
     private void drawArm(Canvas canvas, float cx, float cy, int arm,
             float inner, float outer, float recessW, float radius) {
         float dx = 0f;
@@ -191,6 +191,14 @@ public class StemFaceView extends View {
         float y0 = cy + dy * inner;
         float x1 = cx + dx * outer;
         float y1 = cy + dy * outer;
+        // Mute dim — darker trough when pad gain ~0 (visual only). 2026-07-21
+        // Was: recess always full RECESS. Reversal: recessPaint.setAlpha(255) only.
+        float silentMul = StemControls.padSilentVisualMul(gains[arm]);
+        int recessA = Math.round(0x28 * silentMul);
+        if (StemControls.padFaceShouldDim(gains[arm])) {
+            recessA = Math.max(recessA, 0x48);
+        }
+        recessPaint.setColor((RECESS & 0x00FFFFFF) | (recessA << 24));
         canvas.drawLine(x0, y0, x1, y1, recessPaint);
 
         int lit;
@@ -211,6 +219,7 @@ public class StemFaceView extends View {
         boolean focus = activeZone >= 0 && arm == activeZone;
         float dotR = recessW * 0.28f;
         int accent = STEM_COLORS[arm];
+        int ledAlphaScale = Math.round(255 * silentMul);
 
         for (int i = 0; i < DOTS_PER_ARM; i++) {
             float t = (i + 0.55f) / (DOTS_PER_ARM + 0.2f);
@@ -221,23 +230,36 @@ public class StemFaceView extends View {
             float bloom = focus && armed ? dotR * 2.4f : (focus ? dotR * 2.0f : dotR * 1.7f);
             if (focus) {
                 glowPaint.setColor(accent);
-                glowPaint.setAlpha(focus && armed ? 90 : 55);
+                glowPaint.setAlpha(Math.round((focus && armed ? 90 : 55) * silentMul));
             } else {
                 glowPaint.setColor(LED_GLOW);
-                glowPaint.setAlpha(70);
+                glowPaint.setAlpha(Math.round(70 * silentMul));
             }
             canvas.drawCircle(px, py, bloom, glowPaint);
 
             dotPaint.setColor(LED_WHITE);
-            dotPaint.setAlpha(focus ? 255 : 220);
+            dotPaint.setAlpha(Math.min(ledAlphaScale, focus ? 255 : 220));
             canvas.drawCircle(px, py, focus && armed ? dotR * 1.15f : dotR, dotPaint);
+        }
+
+        // Soft dark wash when muted so empty trough still reads as “off”. 2026-07-21
+        int wash = StemControls.padSilentDimOverlayAlpha(gains[arm]);
+        if (wash > 0) {
+            glowPaint.setColor(0xFF000000);
+            glowPaint.setAlpha(wash);
+            float midX = (x0 + x1) * 0.5f;
+            float midY = (y0 + y1) * 0.5f;
+            canvas.drawCircle(midX, midY, recessW * 0.85f, glowPaint);
         }
 
         // Song 1/2/3 beside outer end of arm when multi-track.
         int dig = songDigits[arm];
         if (dig >= 1 && dig <= 3) {
             digitPaint.setTextSize(Math.max(12f, radius * 0.11f));
-            digitPaint.setColor(focus ? accent : 0xFF5A5048);
+            int digColor = focus ? accent : 0xFF5A5048;
+            int a = Math.round(((digColor >>> 24) & 0xFF) * silentMul);
+            if (a < 1) a = Math.round(255 * silentMul);
+            digitPaint.setColor((digColor & 0x00FFFFFF) | (a << 24));
             float tx = x1 + dx * recessW * 0.55f;
             float ty = y1 + dy * recessW * 0.55f + digitPaint.getTextSize() * 0.35f;
             canvas.drawText(String.valueOf(dig), tx, ty, digitPaint);

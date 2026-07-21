@@ -76,8 +76,10 @@ public final class YtApiLegacyBackend implements YoutubeBackend {
             List<YouTubeVideo> out = new ArrayList<YouTubeVideo>();
             for (int i = 0; i < json.length(); i++) {
                 JSONObject j = json.getJSONObject(i);
+                String id = j.optString("video_id", "");
+                if (id.length() == 0) continue;
                 out.add(new YouTubeVideo(
-                        j.optString("video_id", ""),
+                        id,
                         j.optString("title", ""),
                         j.optString("author", ""),
                         j.optString("duration", "")));
@@ -123,7 +125,8 @@ public final class YtApiLegacyBackend implements YoutubeBackend {
         return null;
     }
 
+    /** 2026-07-19 — Quick timeouts so search failover stays under YouTubeClient budget. */
     private static String httpGet(String url) throws IOException {
-        return new String(SolarHttp.getBytes(url, "application/json", UA), "UTF-8");
+        return new String(SolarHttp.getBytesQuick(url, "application/json", UA, 3, 6), "UTF-8");
     }
 }

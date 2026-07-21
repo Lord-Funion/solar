@@ -59,12 +59,18 @@ public final class InstancesUpdater {
                 SolarLog.w(TAG, "remote instance JSON empty — keep seeds");
                 return false;
             }
+            // 2026-07-19 — Keep HTTP seeds after remote refresh.
+            // Layman: if new HTTPS mirrors fail TLS on Y2/A5, old cleartext seeds still work.
+            // Was: replace lists wholesale → HTTPS-only remote stranded API-19 devices.
+            // Reversal: save parsed lists without mergeWithSeeds.
             List<String> inv = parsed.invidious.isEmpty()
-                    ? cfg.getInvidious() : parsed.invidious;
+                    ? cfg.getInvidious()
+                    : mergeWithSeeds(parsed.invidious, InstancesConfig.seedInvidious());
             List<String> piped = parsed.piped.isEmpty()
                     ? cfg.getPiped() : parsed.piped;
             List<String> yt = parsed.ytapi.isEmpty()
-                    ? cfg.getYtApiLegacy() : parsed.ytapi;
+                    ? cfg.getYtApiLegacy()
+                    : mergeWithSeeds(parsed.ytapi, InstancesConfig.seedYtApi());
             cfg.saveLists(inv, piped, yt);
             SolarLog.i(TAG, "updated instances inv=" + inv.size()
                     + " piped=" + piped.size() + " ytapi=" + yt.size());
@@ -82,6 +88,28 @@ public final class InstancesUpdater {
         for (int i = 0; i < arr.length(); i++) {
             String s = arr.optString(i, "");
             if (s.length() > 0) out.add(s);
+        }
+        return out;
+    }
+
+    /**
+     * 2026-07-19 — Append missing seed hosts onto a remote list (no duplicates).
+     * Layman: keep the known-good backup frontends after a list refresh.
+     * Package-visible for unit tests.
+     */
+    static List<String> mergeWithSeeds(List<String> remote, List<String> seeds) {
+        List<String> out = new ArrayList<String>();
+        if (remote != null) {
+            for (int i = 0; i < remote.size(); i++) {
+                String s = remote.get(i);
+                if (s != null && s.length() > 0 && !out.contains(s)) out.add(s);
+            }
+        }
+        if (seeds != null) {
+            for (int i = 0; i < seeds.size(); i++) {
+                String s = seeds.get(i);
+                if (s != null && s.length() > 0 && !out.contains(s)) out.add(s);
+            }
         }
         return out;
     }

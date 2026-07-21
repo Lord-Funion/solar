@@ -6,7 +6,7 @@
 com.solar.launcher.apk
 SolarHomeHelper.apk
 com.solar.updater.apk
-org.rockbox.apk
+# 2026-07-19 — org.rockbox.apk removed from allowlist (Solar-only strip). Reversal: restore line.
 XposedInstaller.apk
 SolarContextBridgeY1.apk
 SolarContextBridgeY2.apk
