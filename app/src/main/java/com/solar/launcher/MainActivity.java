@@ -2152,6 +2152,18 @@ public class MainActivity extends Activity {
     private java.io.FileInputStream currentFileInputStream = null;
     private TextView tvMenuPreviewTitle, tvMenuPreviewArtist;
     private SharedPreferences prefs;
+    
+    private SharedPreferences.OnSharedPreferenceChangeListener solarConfigWritebackListener = new SharedPreferences.OnSharedPreferenceChangeListener() {
+        @Override
+        public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+            if (com.solar.launcher.theme.SettingLookup.labelForPrefKey(key) != null) {
+                Object value = sharedPreferences.getAll().get(key);
+                if (value != null) {
+                    com.solar.launcher.theme.ThemeManager.writeSolarConfigOverride(MainActivity.this, key, value);
+                }
+            }
+        }
+    };
     private static final String PREFS = "SOLAR_SETTINGS";
     private static final String BG_MODE_ALBUM = "album_art_blur";
     private static final String BG_MODE_THEME = "theme_wallpaper";
@@ -4067,6 +4079,7 @@ public class MainActivity extends Activity {
 
         migrateLegacyPrefs();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        prefs.registerOnSharedPreferenceChangeListener(solarConfigWritebackListener);
         applyMediaRootPreference();
         playbackSpeed = prefs.getFloat("playback_speed", 1.0f);
         mediaSuite = new MediaSuiteHost(new MediaSuiteHostAdapter(this));
@@ -12898,6 +12911,7 @@ public class MainActivity extends Activity {
                 // 2026-07-20 — Button glyphs (status-bar ink) instead of PREV/NEXT/PLAY words.
                 // Was: getString(stem_pick_status / mix_assign_status / mix_reassign_pick).
                 if (stemPickMode) {
+                    if (backgroundStemPrepStatus != null) return backgroundStemPrepStatus;
                     return HardwareButtonGlyph.stemPickStatus(this, com.solar.launcher.stem.StemPickSlots.filled(stemMashupQueue));
                 }
                 if (mixAssignMode) {
@@ -63988,6 +64002,11 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (playing == null || com.solar.launcher.audio.SolarTransport.get().isLayerMode()) return;
         File origin = resolveSoloOriginatingTrack(playing);
         if (origin == null || !origin.isFile()) return;
+        
+        if (com.solar.launcher.stem.LalalClient.isOriginalForced(origin)) {
+            return;
+        }
+        
         File cache = getCacheDir();
         boolean globalOn = com.solar.launcher.stem.StemFeatures.isStemsGlobalEnabled(prefs);
         boolean stemsReady = com.solar.launcher.stem.LalalClient.trackStemsReady(this, origin, true, cache)
@@ -64910,48 +64929,105 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                         this, origin, false, cacheDir);
         boolean canStems = stemsReady || com.solar.launcher.stem.StemFeatures.isOptedIn(prefs);
 
-        if (playingHere && canStems) {
-            final com.solar.launcher.stem.NpStemSession session = ensureNpStemSession();
-            boolean globalOn = com.solar.launcher.stem.StemFeatures.isStemsGlobalEnabled(prefs);
-            if (globalOn && stemsReady && (!session.isStemsMasterOn() || session.originFile() == null
-                    || !filesEqualPath(session.originFile(), origin))) {
-                session.setStemsMaster(origin, true);
-            }
-            final boolean masterOn = globalOn && session.isStemsMasterOn()
-                    && (session.originFile() == null
-                    || filesEqualPath(session.originFile(), origin));
-            addContextAction(getString(R.string.context_action_stems), null,
-                    stateCheckCross(masterOn), new Runnable() {
+        if (!stemsReady) {
+            addContextAction("Get Stems", new Runnable() {
+                @Override
+                public void run() {
+                    com.solar.launcher.audio.SolarTransport transport = com.solar.launcher.audio.SolarTransport.get();
+                    if (transport != null && transport.ownsPlayback()) {
+                        transport.pause();
+                    }
+                    closeContextMenu();
+
+                    final View prepUi = findViewById(R.id.stem_prep_root);
+                    if (prepUi != null) prepUi.setVisibility(View.VISIBLE);
+
+                    java.util.List<File> tracks = new java.util.ArrayList<>();
+                    tracks.add(origin);
+
+                    com.solar.launcher.stem.StemPrepHost host = new com.solar.launcher.stem.StemPrepHost(
+                            MainActivity.this, prepUi != null ? prepUi : findViewById(android.R.id.content), tracks,
+                            new com.solar.launcher.stem.StemPrepHost.Callbacks() {
+                                @Override
+                                public void onBatchFinished() {
+                                    if (prepUi != null) prepUi.setVisibility(View.GONE);
+                                }
+                                @Override
+                                public void onBatchError(String error) {
+                                    if (prepUi != null) prepUi.setVisibility(View.GONE);
+                                    Toast.makeText(MainActivity.this, error, Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                    );
+                    host.start();
+                }
+            });
+            return;
+        }
+
+        final File userStemsDir = com.solar.launcher.stem.LalalClient.userStemsDir(origin);
+        final File useOriginalFile = new File(userStemsDir, ".useoriginal");
+        final boolean stemsEnabled = !useOriginalFile.exists();
+
+        addContextAction(getString(R.string.context_action_stems), null,
+                stateCheckCross(stemsEnabled), new Runnable() {
+                    @Override
+                    public void run() {
+                        if (stemsEnabled) {
+                            try {
+                                if (!userStemsDir.exists()) userStemsDir.mkdirs();
+                                useOriginalFile.createNewFile();
+                            } catch (Exception ignored) {}
+                        } else {
+                            useOriginalFile.delete();
+                        }
+                        refreshContextMenuKeepOpenAfterSoloToggle();
+                        // 2026-07-24 - If we just toggled Stems during playback, reload the track to apply the change immediately
+                        if (isPlayingSoloOrigin(origin) && com.solar.launcher.audio.SolarTransport.get() != null) {
+                            com.solar.launcher.audio.SolarTransport.get().playFile(origin, com.solar.launcher.audio.SolarTransport.get().getPositionMs(), false, true);
+                        }
+                    }
+                }, true);
+
+        if (stemsEnabled) {
+            final File muteVocalsFile = new File(userStemsDir, ".mutevocals");
+            final File muteInstrFile = new File(userStemsDir, ".muteinstr");
+            final boolean vocalsOn = !muteVocalsFile.exists();
+            final boolean instrOn = !muteInstrFile.exists();
+
+            addContextAction(getString(R.string.context_action_instrumentals), null,
+                    stateCheckCross(instrOn), new Runnable() {
                         @Override
                         public void run() {
-                            soloOriginatingFile = origin;
-                            boolean nextState = !masterOn;
-                            try {
-                                prefs.edit().putBoolean(com.solar.launcher.stem.StemFeatures.PREF_STEMS_GLOBAL_ENABLED, nextState).commit();
-                            } catch (Exception ignored) {}
-                            ensureNpStemSession().setStemsMaster(origin, nextState);
+                            if (instrOn) {
+                                try {
+                                    if (!userStemsDir.exists()) userStemsDir.mkdirs();
+                                    muteInstrFile.createNewFile();
+                                } catch (Exception ignored) {}
+                            } else {
+                                muteInstrFile.delete();
+                            }
                             refreshContextMenuKeepOpenAfterSoloToggle();
+                            if (isPlayingSoloOrigin(origin)) com.solar.launcher.audio.SolarTransport.get().playFile(origin, 0, false, false);
                         }
                     }, true);
-            if (com.solar.launcher.stem.NpStemMasterPolicy.showLayerToggles(masterOn)) {
-                final boolean vocalsOn = session.isWantVocals();
-                final boolean instrOn = session.isWantInstr();
-                addContextAction(getString(R.string.context_action_instrumentals), null,
-                        stateCheckCross(instrOn), new Runnable() {
-                            @Override
-                            public void run() {
-                                applySoloLayerToggle(origin, vocalsOn, !instrOn);
+
+            addContextAction(getString(R.string.context_action_vocals), null,
+                    stateCheckCross(vocalsOn), new Runnable() {
+                        @Override
+                        public void run() {
+                            if (vocalsOn) {
+                                try {
+                                    if (!userStemsDir.exists()) userStemsDir.mkdirs();
+                                    muteVocalsFile.createNewFile();
+                                } catch (Exception ignored) {}
+                            } else {
+                                muteVocalsFile.delete();
                             }
-                        }, true);
-                addContextAction(getString(R.string.context_action_vocals), null,
-                        stateCheckCross(vocalsOn), new Runnable() {
-                            @Override
-                            public void run() {
-                                applySoloLayerToggle(origin, !vocalsOn, instrOn);
-                            }
-                        }, true);
-            }
-            return;
+                            refreshContextMenuKeepOpenAfterSoloToggle();
+                            if (isPlayingSoloOrigin(origin)) com.solar.launcher.audio.SolarTransport.get().playFile(origin, 0, false, false);
+                        }
+                    }, true);
         }
 
         // Not the playing track — Play Instrumental / Play Acapella starts that variant. 2026-07-20
@@ -65312,6 +65388,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 n > 0 ? getString(R.string.stem_pick_marked, n)
                         : getString(R.string.stem_pick_cleared),
                 Toast.LENGTH_SHORT).show();
+        if (n > 0) enqueueBackgroundStemPrep(track);
         refreshStemPickListChrome();
         updateStatusBarTitle();
         return true;
@@ -65335,9 +65412,82 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 n > 0 ? getString(R.string.stem_pick_marked, n)
                         : getString(R.string.stem_pick_cleared),
                 Toast.LENGTH_SHORT).show();
+        if (n > 0) enqueueBackgroundStemPrep(track);
         refreshStemPickListChrome();
         updateStatusBarTitle();
         return true;
+    }
+
+    private final java.util.ArrayList<File> backgroundStemPrepQueue = new java.util.ArrayList<>();
+    private boolean isBackgroundStemPrepRunning = false;
+    private String backgroundStemPrepStatus = null;
+    private java.util.concurrent.ExecutorService backgroundStemPrepExecutor = null;
+    private boolean cancelBackgroundStemPrep = false;
+
+    private void enqueueBackgroundStemPrep(File track) {
+        if (track == null || !track.isFile()) return;
+        boolean premix = com.solar.launcher.stem.LalalAccount.isPremixExperimental(prefs);
+        boolean ready = com.solar.launcher.stem.LalalClient.trackStemsReady(
+                this, track, premix, getCacheDir());
+        if (!ready) {
+            if (!backgroundStemPrepQueue.contains(track)) {
+                backgroundStemPrepQueue.add(track);
+            }
+            startBackgroundStemPrepWorker();
+        }
+    }
+
+    private void startBackgroundStemPrepWorker() {
+        if (isBackgroundStemPrepRunning) return;
+        if (backgroundStemPrepQueue.isEmpty()) return;
+        isBackgroundStemPrepRunning = true;
+        cancelBackgroundStemPrep = false;
+        
+        if (backgroundStemPrepExecutor == null) {
+            backgroundStemPrepExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        }
+        
+        backgroundStemPrepExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    SharedPreferences p = getSharedPreferences(com.solar.launcher.stem.LalalAccount.PREFS_NAME, Context.MODE_PRIVATE);
+                    String key = com.solar.launcher.stem.LalalAccount.effectiveKey(p);
+                    if (key == null || key.length() < 8) return;
+                    com.solar.launcher.stem.LalalClient client = new com.solar.launcher.stem.LalalClient(key);
+                    
+                    while (!backgroundStemPrepQueue.isEmpty() && !cancelBackgroundStemPrep) {
+                        final File t = backgroundStemPrepQueue.get(0);
+                        File stemsDir = com.solar.launcher.stem.LalalClient.userStemsDir(t);
+                        if (stemsDir != null) {
+                            try {
+                                File workDir = new File(getCacheDir(), "stem_prep_work");
+                                workDir.mkdirs();
+                                client.separateToMp3(t, workDir, stemsDir, new com.solar.launcher.stem.LalalClient.Progress() {
+                                    @Override
+                                    public void onProgress(final String phase, final int percent, final String detail) {
+                                        if (cancelBackgroundStemPrep) return;
+                                        backgroundStemPrepStatus = "Prep: " + t.getName() + " " + Math.max(0, percent) + "%";
+                                        runOnUiThreadSafe(new Runnable() {
+                                            public void run() { updateStatusBarTitle(); }
+                                        });
+                                    }
+                                });
+                                if (!cancelBackgroundStemPrep) com.solar.launcher.stem.LalalClient.writeTrackMarkerIfOwned(stemsDir, t);
+                            } catch (Exception ignored) {}
+                        }
+                        if (!cancelBackgroundStemPrep) backgroundStemPrepQueue.remove(t);
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    isBackgroundStemPrepRunning = false;
+                    backgroundStemPrepStatus = null;
+                    runOnUiThreadSafe(new Runnable() {
+                        public void run() { updateStatusBarTitle(); }
+                    });
+                }
+            }
+        });
     }
 
     /** Refresh song-list rows so (N) badges update. 2026-07-19 / 2026-07-20 / 2026-07-21 */
@@ -65536,11 +65686,40 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             stemPickMode = true;
             return;
         }
+
         final java.util.ArrayList<File> okFinal = ok;
         final int needLalFinal = needLal;
         final boolean onlineFinal = online;
         final boolean[] readyFinal = readyFlags;
         final int stemmedFinal = stemmedCount;
+
+        if (needLal > 0) {
+            cancelBackgroundStemPrep = true;
+            final java.util.ArrayList<File> unready = new java.util.ArrayList<>();
+            for (int i = 0; i < ok.size(); i++) {
+                if (!readyFlags[i]) unready.add(ok.get(i));
+            }
+            final View prepUi = findViewById(R.id.stem_prep_root);
+            if (prepUi != null) prepUi.setVisibility(View.VISIBLE);
+            
+            com.solar.launcher.stem.StemPrepHost host = new com.solar.launcher.stem.StemPrepHost(
+                    this, prepUi != null ? prepUi : findViewById(android.R.id.content), unready,
+                    new com.solar.launcher.stem.StemPrepHost.Callbacks() {
+                        @Override
+                        public void onBatchFinished() {
+                            if (prepUi != null) prepUi.setVisibility(View.GONE);
+                            openStemPlayerAfterGates(okFinal, 0, onlineFinal, null);
+                        }
+                        @Override
+                        public void onBatchError(String error) {
+                            if (prepUi != null) prepUi.setVisibility(View.GONE);
+                            Toast.makeText(MainActivity.this, error, Toast.LENGTH_SHORT).show();
+                        }
+                    }
+            );
+            host.start();
+            return;
+        }
         File[] okArr = ok.toArray(new File[ok.size()]);
         if (com.solar.launcher.stem.StemMixLossless.shouldWarnLosslessBatch(okArr, readyFlags)) {
             showThemedConfirm(

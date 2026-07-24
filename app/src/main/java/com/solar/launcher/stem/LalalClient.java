@@ -62,7 +62,7 @@ public final class LalalClient {
      * 2026-07-19
      */
     public static final String[] MULTISTEM_IDS = {
-            "vocals", "drum", "bass", "piano", "electric_guitar", "acoustic_guitar"
+            "vocals", "drum", "bass"
     };
 
     /**
@@ -1216,6 +1216,21 @@ public final class LalalClient {
         return out;
     }
 
+    public static class LalalQuotaException extends IOException {
+        public LalalQuotaException(String msg) {
+            super(msg);
+        }
+    }
+
+    private void checkLalalError(okhttp3.Response resp, String text, String contextMsg) throws IOException {
+        if (resp.isSuccessful()) return;
+        int code = resp.code();
+        if (code == 402 || code == 429 || (text != null && (text.contains("insufficient") || text.contains("quota") || text.contains("Not enough processing time") || text.contains("limit")))) {
+            throw new LalalQuotaException(contextMsg + " API Limit Reached (" + code + "): " + text);
+        }
+        throw new IOException(contextMsg + " HTTP " + code + ": " + text);
+    }
+
     /** Binary upload — Content-Disposition filename; returns source id. */
     String upload(File file) throws Exception {
         RequestBody body = RequestBody.create(MediaType.parse("application/octet-stream"), file);
@@ -1230,9 +1245,7 @@ public final class LalalClient {
         Response resp = client.newCall(req).execute();
         try {
             String text = bodyString(resp);
-            if (!resp.isSuccessful()) {
-                throw new IOException("Upload HTTP " + resp.code() + ": " + text);
-            }
+            checkLalalError(resp, text, "Upload");
             JSONObject json = new JSONObject(text);
             String id = json.optString("id", "");
             if (id.isEmpty()) throw new IOException("Upload missing id: " + text);
@@ -1309,9 +1322,7 @@ public final class LalalClient {
                         d);
             } catch (Exception ignored) {}
             // #endregion
-            if (!resp.isSuccessful()) {
-                throw new IOException("Multistem HTTP " + resp.code() + ": " + text);
-            }
+            checkLalalError(resp, text, "Multistem");
             JSONObject json = new JSONObject(text);
             String taskId = json.optString("task_id", "");
             if (taskId.isEmpty()) throw new IOException("No task_id: " + text);
@@ -1358,9 +1369,7 @@ public final class LalalClient {
             String text;
             try {
                 text = bodyString(resp);
-                if (!resp.isSuccessful()) {
-                    throw new IOException("Check HTTP " + resp.code() + ": " + text);
-                }
+                checkLalalError(resp, text, "Check");
             } finally {
                 resp.close();
             }
@@ -1508,6 +1517,121 @@ public final class LalalClient {
             if (f != null) paths.add(f.getAbsolutePath());
         }
         return paths.size();
+    }
+
+    /**
+     * Stage stem files from MicroSD / external storage into internal flash storage for stutter-free playback.
+     * Keeps most recently played stems in internal storage and clears oldest stem folders when space is needed.
+     * ponytail: user requested internal storage cache for stem mixing sessions to eliminate MicroSD read bottlenecks.
+     */
+    public static File ensureInternalPlaybackCache(android.content.Context ctx, File track,
+            boolean premix, File readyDir) {
+        if (ctx == null || readyDir == null || !readyDir.isDirectory() || track == null) return readyDir;
+        try {
+            File appCache = ctx.getCacheDir();
+            if (appCache == null) return readyDir;
+            String path = readyDir.getAbsolutePath();
+            if (path.startsWith(appCache.getAbsolutePath())) {
+                touchStemDirLru(readyDir);
+                return readyDir;
+            }
+            File internalRoot = com.solar.launcher.DeviceFeatures.getInternalStorageRoot();
+            if (internalRoot != null && path.startsWith(internalRoot.getAbsolutePath())) {
+                touchStemDirLru(readyDir);
+                return readyDir;
+            }
+            File internalVault = new File(appCache, "lalal_stems");
+            if (!internalVault.exists()) internalVault.mkdirs();
+            String leaf = cacheLeaf(track, premix);
+            File internalTarget = new File(internalVault, leaf);
+            if (cacheReadyFlexible(internalTarget) || cacheReady(internalTarget)) {
+                touchStemDirLru(internalTarget);
+                return internalTarget;
+            }
+            long needBytes = StemDurableRoots.needBytes(premix);
+            clearInternalStemGarbage(internalVault, needBytes, internalTarget);
+            if (!com.solar.launcher.StreamCacheRoot.hasSpace(internalVault, needBytes)) {
+                return readyDir;
+            }
+            if (!internalTarget.exists()) internalTarget.mkdirs();
+            File[] files = readyDir.listFiles();
+            if (files != null) {
+                for (int i = 0; i < files.length; i++) {
+                    File f = files[i];
+                    if (f != null && f.isFile()) {
+                        copyFile(f, new File(internalTarget, f.getName()));
+                    }
+                }
+            }
+            writeTrackMarker(internalTarget, track);
+            touchStemDirLru(internalTarget);
+            if (cacheReadyFlexible(internalTarget) || cacheReady(internalTarget)) {
+                return internalTarget;
+            }
+        } catch (Exception ignored) {}
+        return readyDir;
+    }
+
+    private static void touchStemDirLru(File dir) {
+        if (dir == null || !dir.exists()) return;
+        try {
+            long now = System.currentTimeMillis();
+            dir.setLastModified(now);
+            File marker = new File(dir, TRACK_MARKER);
+            if (marker.exists()) marker.setLastModified(now);
+        } catch (Exception ignored) {}
+    }
+
+    public static void clearInternalStemGarbage(File internalVault, long needBytes, File skipDir) {
+        if (internalVault == null || !internalVault.isDirectory()) return;
+        while (!com.solar.launcher.StreamCacheRoot.hasSpace(internalVault, needBytes)) {
+            File[] kids = internalVault.listFiles();
+            if (kids == null || kids.length == 0) break;
+            File oldest = null;
+            long oldestTime = Long.MAX_VALUE;
+            int validCount = 0;
+            for (int i = 0; i < kids.length; i++) {
+                File d = kids[i];
+                if (d == null || !d.isDirectory() || sameDir(d, skipDir)) continue;
+                validCount++;
+                long mod = d.lastModified();
+                File m = new File(d, TRACK_MARKER);
+                if (m.exists()) mod = Math.max(mod, m.lastModified());
+                if (mod < oldestTime) {
+                    oldestTime = mod;
+                    oldest = d;
+                }
+            }
+            if (oldest == null || validCount <= 0) break;
+            clearDirQuiet(oldest);
+        }
+    }
+
+    /**
+     * Load stem files for playback, staging from MicroSD to internal flash storage (`lalal_stems`) if needed
+     * to eliminate MicroSD controller contention and audio stutter during stem mixing sessions.
+     */
+    public static List<StemFile> resolveStemsFromReadyDir(android.content.Context ctx, File track,
+            boolean premix, File readyDir) {
+        if (readyDir == null) return null;
+        File stagedDir = ensureInternalPlaybackCache(ctx, track, premix, readyDir);
+        List<StemFile> cached = null;
+        if (stagedDir != null && (cacheReadyFlexible(stagedDir) || cacheReady(stagedDir))) {
+            cached = loadCached(stagedDir, premix);
+            if (cached == null || cached.isEmpty()) {
+                cached = loadStemDirFlexible(stagedDir);
+            }
+        }
+        if (cached != null && !cached.isEmpty()) return cached;
+        if (userStemsReady(track) && readyDir.equals(userStemsDir(track))) {
+            cached = loadUserStems(track, premix);
+        } else {
+            cached = loadCached(readyDir, premix);
+            if (cached == null || cached.isEmpty()) {
+                cached = loadStemDirFlexible(readyDir);
+            }
+        }
+        return cached;
     }
 
     /**
@@ -1857,6 +1981,73 @@ public final class LalalClient {
      * Reversal: check single durableStemDir(ctx,track,premix) only.
      * 2026-07-19
      */
+    /**
+     * Check if original track playback is forced, disabling Stems fallback. 
+     * Controlled via the .useoriginal marker file.
+     */
+    public static boolean isOriginalForced(File track) {
+        File stemsDir = userStemsDir(track);
+        if (stemsDir != null) {
+            return new File(stemsDir, ".useoriginal").exists();
+        }
+        return false;
+    }
+
+    public static void setOriginalForced(File track, boolean forced) {
+        File stemsDir = userStemsDir(track);
+        if (stemsDir != null) {
+            stemsDir.mkdirs();
+            File marker = new File(stemsDir, ".useoriginal");
+            if (forced) {
+                try { marker.createNewFile(); } catch (IOException ignored) {}
+            } else {
+                marker.delete();
+            }
+        }
+    }
+
+    public static boolean isVocalsMuted(File track) {
+        File stemsDir = userStemsDir(track);
+        if (stemsDir != null) {
+            return new File(stemsDir, ".mutevocals").exists();
+        }
+        return false;
+    }
+
+    public static void setVocalsMuted(File track, boolean muted) {
+        File stemsDir = userStemsDir(track);
+        if (stemsDir != null) {
+            stemsDir.mkdirs();
+            File marker = new File(stemsDir, ".mutevocals");
+            if (muted) {
+                try { marker.createNewFile(); } catch (IOException ignored) {}
+            } else {
+                marker.delete();
+            }
+        }
+    }
+
+    public static boolean isInstrumentsMuted(File track) {
+        File stemsDir = userStemsDir(track);
+        if (stemsDir != null) {
+            return new File(stemsDir, ".muteinstr").exists();
+        }
+        return false;
+    }
+
+    public static void setInstrumentsMuted(File track, boolean muted) {
+        File stemsDir = userStemsDir(track);
+        if (stemsDir != null) {
+            stemsDir.mkdirs();
+            File marker = new File(stemsDir, ".muteinstr");
+            if (muted) {
+                try { marker.createNewFile(); } catch (IOException ignored) {}
+            } else {
+                marker.delete();
+            }
+        }
+    }
+
     public static boolean trackStemsReady(android.content.Context ctx, File track,
             boolean premix, File appCache) {
         return findReadyStemDir(ctx, track, premix, appCache) != null;
@@ -2198,41 +2389,59 @@ public final class LalalClient {
      */
     public static boolean cacheReadyFlexible(File dir) {
         if (dir == null || !dir.isDirectory()) return false;
-        if (resolveStemFile(dir, "vocals") == null) return false;
-        if (resolveStemFile(dir, "drum") == null && resolveStemFile(dir, "drums") == null) {
-            return false;
+        File[] files = dir.listFiles();
+        if (files == null) return false;
+        
+        boolean hasVocals = false;
+        boolean hasDrums = false;
+        boolean hasBass = false;
+        boolean hasMelody = false;
+        
+        for (File f : files) {
+            if (!f.isFile() || f.length() < 100) continue;
+            String name = f.getName().toLowerCase();
+            if (!name.endsWith(".mp3") && !name.endsWith(".wav") && !name.endsWith(".flac") 
+                    && !name.endsWith(".m4a") && !name.endsWith(".aac") && !name.endsWith(".ogg")) {
+                continue;
+            }
+            if (name.contains("vocals") || name.contains("vocal")) {
+                hasVocals = true;
+            } else if (name.contains("drums") || name.contains("drum")) {
+                hasDrums = true;
+            } else if (name.contains("bass")) {
+                hasBass = true;
+            } else {
+                hasMelody = true;
+            }
         }
-        if (resolveStemFile(dir, "bass") == null) return false;
-        if (resolveMelodyFile(dir) != null) return true;
-        for (String id : ALL_OTHER_IDS) {
-            if (resolveStemFile(dir, id) != null) return true;
-        }
-        File mel = new File(dir, StemOtherPremix.MELODY_WAV);
-        return mel.isFile() && mel.length() >= 100;
+        return hasVocals && hasDrums && hasBass && hasMelody;
     }
 
-    /** Load every recognised stem MP3 in a folder (core + other + melody aliases). 2026-07-19 */
+    /** Load every recognised stem file in a folder (core + other + melody aliases). 2026-07-19 */
     public static List<StemFile> loadStemDirFlexible(File dir) {
-        List<StemFile> out = new ArrayList<StemFile>();
+        List<StemFile> out = new java.util.ArrayList<StemFile>();
         if (dir == null || !dir.isDirectory()) return out;
-        addIfPresent(out, dir, "vocals", 0);
-        if (!addIfPresent(out, dir, "drum", 1)) {
-            addIfPresent(out, dir, "drums", 1);
-        }
-        addIfPresent(out, dir, "bass", 2);
-        File melodyWav = new File(dir, StemOtherPremix.MELODY_WAV);
-        if (melodyWav.isFile() && melodyWav.length() >= 100) {
-            out.add(new StemFile("melody", "Melody", melodyWav, 3));
-            return out;
-        }
-        File melody = resolveMelodyFile(dir);
-        if (melody != null) {
-            String id = stripMp3(melody.getName());
-            out.add(new StemFile(id, "Melody", melody, 3));
-        }
-        for (String id : ALL_OTHER_IDS) {
-            if (melody != null && melody.equals(resolveStemFile(dir, id))) continue;
-            addIfPresent(out, dir, id, 3);
+        
+        File[] files = dir.listFiles();
+        if (files == null) return out;
+        
+        for (File f : files) {
+            if (!f.isFile() || f.length() < 100) continue;
+            String name = f.getName().toLowerCase();
+            if (!name.endsWith(".mp3") && !name.endsWith(".wav") && !name.endsWith(".flac") 
+                    && !name.endsWith(".m4a") && !name.endsWith(".aac") && !name.endsWith(".ogg")) {
+                continue;
+            }
+            String id = stripMp3(f.getName());
+            if (name.contains("vocals") || name.contains("vocal")) {
+                out.add(new StemFile(id, "Vocals", f, 0));
+            } else if (name.contains("drums") || name.contains("drum")) {
+                out.add(new StemFile(id, "Drums", f, 1));
+            } else if (name.contains("bass")) {
+                out.add(new StemFile(id, "Bass", f, 2));
+            } else {
+                out.add(new StemFile(id, "Melody", f, 3));
+            }
         }
         return out;
     }

@@ -1335,9 +1335,11 @@ public class ThemeDownloader {
                 ok.add(enrichVariantLabel(v, entry.name, config));
             } catch (Exception e) {
                 dlLog("variant unreachable " + catalogFolder + ": " + e.getMessage());
+                // ponytail: Even if config.json is unreachable, show the variant for download.
+                ok.add(v);
             }
         }
-        return ok.isEmpty() ? choices : ok;
+        return ok;
     }
 
     static void downloadMissingAssets(CatalogEntry entry, Set<String> missing, Set<String> skipped404, ProgressListener listener)

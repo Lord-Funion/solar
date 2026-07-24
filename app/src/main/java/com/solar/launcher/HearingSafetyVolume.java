@@ -465,11 +465,11 @@ public final class HearingSafetyVolume {
             disableOsSafeMediaVolume(ctx);
         }
         if (!RootShell.canRun()) return;
-        RootShell.run("setprop " + PROP_ENABLED + " " + (safetyOn ? "1" : "0"));
-        RootShell.run("setprop " + PROP_SAFE_MEDIA_BYPASS + " " + (safetyOn ? "false" : "true"));
+        RootShell.runAsync("setprop " + PROP_ENABLED + " " + (safetyOn ? "1" : "0"));
+        RootShell.runAsync("setprop " + PROP_SAFE_MEDIA_BYPASS + " " + (safetyOn ? "false" : "true"));
         int abs = getAbsoluteMaxIndex(ctx, AudioManager.STREAM_MUSIC);
         if (abs > 0) {
-            RootShell.run("setprop " + PROP_ABSOLUTE_MAX + " " + abs);
+            RootShell.runAsync("setprop " + PROP_ABSOLUTE_MAX + " " + abs);
         }
         if (!safetyOn) {
             // Belt-and-suspenders: force DISABLED — ACTIVE (3) was the old bug that capped ~80%.
@@ -564,7 +564,7 @@ public final class HearingSafetyVolume {
             }
         }
         if (!wrote && RootShell.canRun()) {
-            RootShell.run("settings put global audio_safe_volume_state " + state);
+            RootShell.runAsync("settings put global audio_safe_volume_state " + state);
         }
     }
 

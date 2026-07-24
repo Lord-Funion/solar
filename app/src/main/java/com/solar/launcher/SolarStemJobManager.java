@@ -119,6 +119,24 @@ public final class SolarStemJobManager {
         return root.toString();
     }
 
+    public String getActiveJobsStatusString() {
+        List<JobInfo> list = getAllJobs();
+        int stemsActive = 0;
+        int deezerActive = 0;
+        int ytActive = 0;
+        for (JobInfo job : list) {
+            if ("separating".equals(job.phase) || "downloading".equals(job.phase) || "starting".equals(job.phase)) {
+                if ("library".equals(job.source)) stemsActive++;
+                else if ("deezer".equals(job.source)) deezerActive++;
+                else if ("youtube".equals(job.source)) ytActive++;
+            }
+        }
+        if (stemsActive > 0) return "Downloading Stems (" + stemsActive + " left)";
+        if (deezerActive > 0) return "Downloading Deezer (" + deezerActive + " left)";
+        if (ytActive > 0) return "Downloading YouTube (" + ytActive + " left)";
+        return null;
+    }
+
     private JobInfo registerJob(String title, String artist, String source) {
         String id = "job_" + System.currentTimeMillis() + "_" + (int)(Math.random() * 1000);
         JobInfo job = new JobInfo(id, title, artist, source);

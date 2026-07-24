@@ -53,9 +53,11 @@ public final class StemControls {
     public static final int TRANSITION_PRESET_LONG = 0;
     public static final int TRANSITION_PRESET_OVERLAP = 1; // ∞
     public static final int TRANSITION_PRESET_WAVE = 2;
+    public static final int TRANSITION_PRESET_INSTANT = 3;
     public static final long TRANSITION_LONG_MS = 4000L;
     public static final long TRANSITION_OVERLAP_MS = 8000L;
     public static final long TRANSITION_WAVE_MS = 400L;
+    public static final long TRANSITION_INSTANT_MS = 0L;
     /** Default mashup song-replace blend (LONG). Pad repress uses WAVE. 2026-07-20 / 2026-07-21 */
     public static final long TRANSITION_DEFAULT_MS = TRANSITION_LONG_MS;
     /**
@@ -183,13 +185,11 @@ public final class StemControls {
     }
 
     /**
-     * Center OK while no pad focused: wake size only — never shuffle / replace.
-     * Layman: bumping OK after idle doesn’t remix until a pad is lit again.
-     * Was: mashup OK always shuffled. Reversal: return false.
-     * 2026-07-21
+     * Center OK while no pad focused directly triggers shuffle without requiring a pad focus first.
+     * ponytail: User requested that center tap triggers shuffle without needing to focus a pad.
      */
     public static boolean centerTapWhilePadIdleIsWakeOnly(boolean padsIdle, int activeZone) {
-        return padsIdle || activeZone < 0;
+        return false;
     }
 
     /**
@@ -436,7 +436,10 @@ public final class StemControls {
         if (songCount < 1) return -1;
         int focus = clampSongIndex(focusedSong, songCount);
         if (okConfirm) return focus;
-        // Prev/next assignment of tracks deprecated in favour of using OK to select replacement. 2026-07-21
+        if (prevOrNextShortcut) {
+            if (songCount <= 1) return focus;
+            return (focus + 1) % songCount;
+        }
         return -1;
     }
 
@@ -593,10 +596,16 @@ public final class StemControls {
      */
     public static long bestPhysicalHoldMs(long localDownUptimeMs, long nowUptimeMs,
             long eventDownTimeMs, long eventTimeMs) {
+        // 2026-07-21 — Trust kernel interrupt timestamps first when valid (MTK dual/quad-core safe).
+        // If UI thread lagged between DOWN and UP, nowUptimeMs - localDownUptimeMs is artificially inflated.
+        long physical = physicalKeyHoldMs(eventDownTimeMs, eventTimeMs);
+        if (physical > 0L) {
+            return physical;
+        }
         if (localDownUptimeMs > 0L && nowUptimeMs >= localDownUptimeMs) {
             return nowUptimeMs - localDownUptimeMs;
         }
-        return physicalKeyHoldMs(eventDownTimeMs, eventTimeMs);
+        return 0L;
     }
 
     /**
@@ -767,10 +776,10 @@ public final class StemControls {
     }
 
     /**
-     * Pad level after a track-switch (repress) — bump silent/1% pads to ~10%.
+     * Pad level after a track-switch or shuffle — bump silent/1% pads to ~10%.
      * Layman: quiet pad gets a gentle lift so you hear the new stem; loud pads stay put.
      * Technical: ≤ {@link #PAD_SWITCH_FLOOR} → {@link #PAD_SWITCH_AUDIBLE_GAIN}; else unchanged.
-     * Does not apply to centre shuffle (levels stay on the pad as-is).
+     * Applies to track switches (`startZoneCrossfade`) and centre shuffle (`shuffleMashupPads`).
      * 2026-07-21
      */
     public static float padGainAfterTrackSwitch(float currentPadGain) {
@@ -813,6 +822,7 @@ public final class StemControls {
      * 2026-07-20
      */
     public static long transitionMsForPreset(int preset) {
+        if (preset == TRANSITION_PRESET_INSTANT) return TRANSITION_INSTANT_MS;
         if (preset == TRANSITION_PRESET_OVERLAP) return TRANSITION_OVERLAP_MS;
         if (preset == TRANSITION_PRESET_WAVE) return TRANSITION_WAVE_MS;
         return TRANSITION_LONG_MS;

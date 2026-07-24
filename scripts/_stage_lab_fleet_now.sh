@@ -49,7 +49,11 @@ discover_targets() {
         if ($i ~ /^transport_id:/) { split($i,a,":"); tid=a[2] }
         if ($i ~ /^model:/) { split($i,a,":"); model=a[2] }
       }
-      if (tid != "") print tid "|" model
+      if (tid != "") {
+        if ((ENVIRON["TARGET_TID"] == "" || tid == ENVIRON["TARGET_TID"]) && (ENVIRON["TARGET_MODEL"] == "" || toupper(model) ~ toupper(ENVIRON["TARGET_MODEL"]))) {
+          print tid "|" model
+        }
+      }
     }'
 }
 

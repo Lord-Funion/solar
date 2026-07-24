@@ -5171,6 +5171,15 @@ public final class MediaSuiteHost {
                         if (videoPendingSeekMs >= 0L) {
                             maybeCompletePendingVideoSeek();
                         } else {
+                            String key = getVideoResumeKey();
+                            if (key != null) {
+                                long savedPos = host.prefs().getLong(key, 0L);
+                                if (savedPos > 0) {
+                                    seekVideoToTarget(savedPos);
+                                    host.prefs().edit().remove(key).apply();
+                                    return;
+                                }
+                            }
                             clearVideoStatusText();
                         }
                     }
@@ -5598,7 +5607,28 @@ public final class MediaSuiteHost {
         }
     }
 
+    private String getVideoResumeKey() {
+        if (videoPlaybackYoutube && youtubeNowPlayingId != null && !youtubeNowPlayingId.isEmpty()) {
+            return "resume_yt_" + youtubeNowPlayingId;
+        } else if (!videoPlaybackYoutube && videoFiles != null && videoIndex >= 0 && videoIndex < videoFiles.size()) {
+            return "resume_file_" + videoFiles.get(videoIndex).getAbsolutePath().hashCode();
+        }
+        return null;
+    }
+
     private void releaseVideoPlayer() {
+        if (videoController != null && videoController.isPrepared()) {
+            String key = getVideoResumeKey();
+            if (key != null) {
+                long pos = videoController.getCurrentPosition();
+                long dur = videoController.getDuration();
+                if (dur > 0 && pos > dur - 5000) {
+                    host.prefs().edit().remove(key).apply();
+                } else if (pos > 5000) {
+                    host.prefs().edit().putLong(key, pos).apply();
+                }
+            }
+        }
         // 2026-07-19 — Abort progressive download when leaving so we do not open a stale file.
         youtubeProgCancel.set(true);
         stopVideoProgressUpdates();

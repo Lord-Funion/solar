@@ -94,6 +94,7 @@ public class StemMashupFaceView extends View {
      */
     private boolean padScrubbing;
     private float padScrubFrac;
+    private int padScrubMs;
     private final Paint scrubCursorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final float[] scrubXy = new float[2];
     /**
@@ -148,9 +149,10 @@ public class StemMashupFaceView extends View {
      * Audio: host owns seek; this is face-only. Reversal: ignore calls.
      * 2026-07-21
      */
-    public void setPadScrub(boolean armed, float frac) {
+    public void setPadScrub(boolean armed, float frac, int scrubMs) {
         padScrubbing = armed;
         padScrubFrac = StemMixSoftScrub.clampFrac(frac);
+        padScrubMs = scrubMs;
         invalidate();
     }
 
@@ -158,6 +160,7 @@ public class StemMashupFaceView extends View {
     public void clearPadScrub() {
         padScrubbing = false;
         padScrubFrac = 0f;
+        padScrubMs = 0;
         invalidate();
     }
 
@@ -618,16 +621,32 @@ public class StemMashupFaceView extends View {
         else labelY = cy - r - ringW * 1.6f;
         if (zone == 1) {
             labelPaint.setTextAlign(Paint.Align.RIGHT);
-            canvas.drawText(ZONE_LABELS[zone], cx - r - ringW, cy + labelPaint.getTextSize() * 0.35f,
-                    labelPaint);
+            if (scrubHere) {
+                labelPaint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                canvas.drawText(StemMixSoftScrub.formatMmSs(padScrubMs), cx - r - ringW, cy + labelPaint.getTextSize() * 0.35f, labelPaint);
+                labelPaint.setTypeface(android.graphics.Typeface.DEFAULT);
+            } else {
+                canvas.drawText(ZONE_LABELS[zone], cx - r - ringW, cy + labelPaint.getTextSize() * 0.35f, labelPaint);
+            }
             labelPaint.setTextAlign(Paint.Align.CENTER);
         } else if (zone == 2) {
             labelPaint.setTextAlign(Paint.Align.LEFT);
-            canvas.drawText(ZONE_LABELS[zone], cx + r + ringW, cy + labelPaint.getTextSize() * 0.35f,
-                    labelPaint);
+            if (scrubHere) {
+                labelPaint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                canvas.drawText(StemMixSoftScrub.formatMmSs(padScrubMs), cx + r + ringW, cy + labelPaint.getTextSize() * 0.35f, labelPaint);
+                labelPaint.setTypeface(android.graphics.Typeface.DEFAULT);
+            } else {
+                canvas.drawText(ZONE_LABELS[zone], cx + r + ringW, cy + labelPaint.getTextSize() * 0.35f, labelPaint);
+            }
             labelPaint.setTextAlign(Paint.Align.CENTER);
         } else {
-            canvas.drawText(ZONE_LABELS[zone], cx, labelY, labelPaint);
+            if (scrubHere) {
+                labelPaint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                canvas.drawText(StemMixSoftScrub.formatMmSs(padScrubMs), cx, labelY, labelPaint);
+                labelPaint.setTypeface(android.graphics.Typeface.DEFAULT);
+            } else {
+                canvas.drawText(ZONE_LABELS[zone], cx, labelY, labelPaint);
+            }
         }
         labelPaint.setAlpha(0xCC);
     }

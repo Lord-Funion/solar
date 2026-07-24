@@ -203,6 +203,12 @@ public final class HardwareButtonGlyph {
     public static void appendGlyph(SpannableStringBuilder out, Context ctx, Button button,
             int color, int sizePx) {
         if (out == null || ctx == null || button == null) return;
+        
+        if (button == Button.WHEEL) {
+            out.append("🗘");
+            return;
+        }
+        
         Drawable d = tintedDrawable(ctx, button, color, sizePx);
         if (d == null) return;
         int start = out.length();
@@ -409,7 +415,7 @@ public final class HardwareButtonGlyph {
         int size = resolveTipSize(ctx, sizePx);
         SpannableStringBuilder sb = new SpannableStringBuilder();
         if (y2PowerAlso) {
-            appendHoldGlyphLabel(sb, ctx, Button.BACK, color, size, "/ Power Options");
+            appendHoldGlyphLabel(sb, ctx, Button.BACK, color, size, "/ ⏻ Options");
         } else {
             appendHoldGlyphLabel(sb, ctx, Button.BACK, color, size, "Options");
         }
@@ -435,9 +441,9 @@ public final class HardwareButtonGlyph {
         sb.append('\u202F');
         if (y2PowerAlso) {
             appendGlyph(sb, ctx, Button.BACK, color, size);
-            sb.append("\u202F/ Power for more Options");
+            sb.append("\u202F/ ⏻ for Options");
         } else {
-            appendGlyphLabel(sb, ctx, Button.BACK, color, size, "for more Options");
+            appendGlyphLabel(sb, ctx, Button.BACK, color, size, "for Options");
         }
         return sb;
     }
@@ -454,8 +460,7 @@ public final class HardwareButtonGlyph {
 
     /** 2026-07-20 — Same volume arrow tip (size ignored — text-only). */
     public static CharSequence volumeUpDownHint(Context ctx, int sizePx) {
-        // ↻ Volume Up   ↺ Volume Down
-        return "\u21BB Volume Up   \u21BA Volume Down";
+        return "🗘 Volume";
     }
 
     /**
@@ -684,7 +689,7 @@ public final class HardwareButtonGlyph {
         sb.append("hold");
         sb.append('\u202F');
         appendGlyph(sb, ctx, Button.BACK, color, size);
-        sb.append("\u202F/ Power\u202F");
+        sb.append("\u202F/ ⏻\u202F");
         CharSequence rest = stripLeadingHoldWord(action);
         if (rest != null && rest.length() > 0) {
             sb.append(rest);

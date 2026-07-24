@@ -47,6 +47,9 @@ public final class PodcastResumeStore {
     }
 
     public static String keyForEpisode(String showTitle, String episodeTitle, String audioUrl, File savedFile) {
+        if (audioUrl != null && (audioUrl.startsWith("http://") || audioUrl.startsWith("https://"))) {
+            return keyForUrl(audioUrl);
+        }
         if (savedFile != null && savedFile.isFile()) return keyForFile(savedFile);
         if (audioUrl != null && audioUrl.startsWith("file://")) {
             return keyForFile(new File(audioUrl.substring(7)));

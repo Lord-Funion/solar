@@ -953,4 +953,5 @@
         android:clickable="true"
         android:background="#FF0A0A0C" />
 
+    <include layout="@layout/layout_stem_prep" android:visibility="gone" />
 </FrameLayout>

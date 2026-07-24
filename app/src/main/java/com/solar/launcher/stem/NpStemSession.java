@@ -46,7 +46,6 @@ public final class NpStemSession {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final AtomicInteger jobGen = new AtomicInteger(0);
-    private StemMixer mixer;
     private boolean stemsMasterOn;
     private boolean wantVocals = true;
     private boolean wantInstr = true;
@@ -83,7 +82,7 @@ public final class NpStemSession {
     }
 
     public boolean isPadModeActive() {
-        return mixer != null && mixer.isPadMode() && !mixer.isSwapBusy();
+        return mixer() != null && mixer().isPadMode() && !mixer().isSwapBusy();
     }
 
     /**
@@ -91,11 +90,12 @@ public final class NpStemSession {
      * 2026-07-21
      */
     public boolean isMixerOwningAudio() {
-        return stemsMasterOn && mixer != null && mixer.isPadMode();
+        return stemsMasterOn && mixer() != null && mixer().isPadMode();
     }
 
     public StemMixer mixer() {
-        return mixer;
+        if (com.solar.launcher.audio.SolarTransport.get() == null || com.solar.launcher.audio.SolarTransport.get().getActiveDeck() == null) return null;
+        return com.solar.launcher.audio.SolarTransport.get().getActiveDeck().getMixer();
     }
 
     public File originFile() {
@@ -117,31 +117,30 @@ public final class NpStemSession {
         pendingLayerApply = false;
         pendingVocals = true;
         pendingInstr = true;
-        releaseMixer();
     }
 
     public int getPositionMs() {
-        return mixer != null ? mixer.getPositionMs() : 0;
+        return mixer() != null ? mixer().getPositionMs() : 0;
     }
 
     public int getDurationMs() {
-        return mixer != null ? mixer.getDurationMs() : 0;
+        return mixer() != null ? mixer().getDurationMs() : 0;
     }
 
     public void pause() {
-        if (mixer != null) mixer.pause();
+        if (mixer() != null) mixer().pause();
     }
 
     public void resume() {
-        if (mixer != null) mixer.resume();
+        if (mixer() != null) mixer().resume();
     }
 
     public void seekTo(int ms) {
-        if (mixer != null) mixer.seekTo(ms);
+        if (mixer() != null) mixer().seekTo(ms);
     }
 
     public boolean isPlaying() {
-        return mixer != null && mixer.isPlaying();
+        return mixer() != null && mixer().isPlaying();
     }
 
     /**
@@ -158,8 +157,9 @@ public final class NpStemSession {
             return;
         }
         stemsMasterOn = true;
-        wantVocals = true;
-        wantInstr = true;
+        File userStemsDir = LalalClient.userStemsDir(origin);
+        wantVocals = userStemsDir == null || !new File(userStemsDir, ".mutevocals").exists();
+        wantInstr = userStemsDir == null || !new File(userStemsDir, ".muteinstr").exists();
         final File cache = host.appCache();
         final boolean premix = NpStemMelodyCatchAll.forcePremixForNp();
         List<LalalClient.StemFile> ready = resolveReadyPads(origin, premix, cache);
@@ -204,7 +204,7 @@ public final class NpStemSession {
         pendingLayerApply = true;
         pendingVocals = vocals;
         pendingInstr = instr;
-        if (stemsMasterOn && mixer != null && mixer.isPadMode()) {
+        if (stemsMasterOn && mixer() != null && mixer().isPadMode()) {
             setLayerToggles(vocals, instr);
             pendingLayerApply = false;
         }
@@ -222,8 +222,8 @@ public final class NpStemSession {
                 stemsMasterOn, vocals, instr, wantVocals, wantInstr);
         wantVocals = clamped[0];
         wantInstr = clamped[1];
-        if (mixer != null && mixer.isPadMode()) {
-            mixer.applyIsolationGains(wantVocals, wantInstr);
+        if (mixer() != null && mixer().isPadMode()) {
+            mixer().applyIsolationGains(wantVocals, wantInstr);
         }
     }
 
@@ -237,54 +237,50 @@ public final class NpStemSession {
     }
 
     private void turnStemsOff(final File origin) {
-        if (mixer == null || !mixer.isPadMode()) {
-            releaseMixer();
+        if (mixer() == null || !mixer().isPadMode()) {
             int pos = host.currentPositionMs();
             host.resumeTransportOrigin(origin, pos, host.isPlayingNow());
             return;
         }
-        final int pos = mixer.getPositionMs();
-        final boolean playing = mixer.isPlaying();
-        mixer.setSwapListener(new StemMixer.SwapListener() {
+        final int pos = mixer().getPositionMs();
+        final boolean playing = mixer().isPlaying();
+        mixer().setSwapListener(new StemMixer.SwapListener() {
             @Override
             public void onSwapComplete(StemMixer.SourceMode mode) {
-                int p = mixer != null ? mixer.getPositionMs() : pos;
-                releaseMixer();
-                host.resumeTransportOrigin(origin, p, playing);
+                int p = mixer() != null ? mixer().getPositionMs() : pos;
+                    host.resumeTransportOrigin(origin, p, playing);
             }
         });
-        mixer.setListener(new StemMixer.Listener() {
+        mixer().setListener(new StemMixer.Listener() {
             @Override
             public void onReady() {}
             @Override
             public void onError(String message) {
-                releaseMixer();
-                host.resumeTransportOrigin(origin, pos, playing);
+                    host.resumeTransportOrigin(origin, pos, playing);
             }
             @Override
             public void onComplete() {
                 host.resumeTransportOrigin(origin, 0, false);
             }
         });
-        mixer.crossfadeToOrigin(origin, pos, playing);
+        mixer().crossfadeToOrigin(origin, pos, playing);
     }
 
     private void magicalSwapToPads(final File origin, List<LalalClient.StemFile> pads) {
         File dir = pads.get(0).file != null ? pads.get(0).file.getParentFile() : null;
         final List<LalalClient.StemFile> catchAll =
                 NpStemMelodyCatchAll.padsForPlayback(pads, dir);
-        ensureMixer();
         final int pos = host.currentPositionMs();
         final boolean playing = host.isPlayingNow();
         host.releaseTransportForMixer();
-        mixer.setListener(new StemMixer.Listener() {
+        mixer().setListener(new StemMixer.Listener() {
             @Override
             public void onReady() {
                 try {
-                    mixer.seekTo(StemMixerSwapPolicy.matchedPositionMs(pos, mixer.getDurationMs()));
-                    mixer.applyIsolationGains(wantVocals, wantInstr);
+                    mixer().seekTo(StemMixerSwapPolicy.matchedPositionMs(pos, mixer().getDurationMs()));
+                    mixer().applyIsolationGains(wantVocals, wantInstr);
                     if (playing) {
-                        mixer.resume();
+                        mixer().resume();
                     }
                     if (pendingLayerApply) {
                         setLayerToggles(pendingVocals, pendingInstr);
@@ -299,21 +295,18 @@ public final class NpStemSession {
             public void onError(String message) {
                 host.onStemsCookFailed(message != null ? message : "Stem load error");
                 stemsMasterOn = false;
-                releaseMixer();
-                host.resumeTransportOrigin(origin, pos, playing);
+                    host.resumeTransportOrigin(origin, pos, playing);
             }
             @Override
             public void onComplete() {
-                releaseMixer();
-                stemsMasterOn = false;
+                    stemsMasterOn = false;
             }
         });
         try {
-            mixer.loadPads(catchAll, null);
+            mixer().loadPads(catchAll, null);
         } catch (Exception e) {
             host.onStemsCookFailed(e.getMessage());
             stemsMasterOn = false;
-            releaseMixer();
             host.resumeTransportOrigin(origin, pos, playing);
         }
     }
@@ -418,17 +411,4 @@ public final class NpStemSession {
             return two;
         }
         return null;
-    }
-
-    private void ensureMixer() {
-        if (mixer != null) return;
-        mixer = new StemMixer(host.appContext());
-    }
-
-    private void releaseMixer() {
-        if (mixer != null) {
-            try { mixer.release(); } catch (Exception ignored) {}
-            mixer = null;
-        }
-    }
-}
+}}

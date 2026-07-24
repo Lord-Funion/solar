@@ -28,7 +28,7 @@ public final class StemMixSoftScrub {
      */
     public static int wheelDeltaMs(int durationMs, int wheelSteps) {
         if (wheelSteps == 0 || durationMs <= 0) return 0;
-        int step = durationMs / 100;
+        int step = durationMs / 40;
         if (step < 500) step = 500;
         if (step > 10_000) step = 10_000;
         return -step * wheelSteps;

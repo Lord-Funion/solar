@@ -169,6 +169,7 @@
     <string name="mix_fader_onboarding">Mix · PREV/NEXT/PLAY highlight a deck · wheel moves the lit fader</string>
     <string name="mix_assign_onboarding">Mix assign · PREV/NEXT/PLAY bind tracks · hold PLAY start Mix</string>
     <string name="stem_pick_status">Stem · %1$d marked · Play to jam</string>
+    <string name="stem_batch_status">Stem · %1$d marked · Play to get stems</string>
     <string name="stem_pick_slot">(%1$d)</string>
     <string name="stem_pick_marked">Queued (%1$d)</string>
     <string name="stem_pick_cleared">Removed from stem queue</string>
@@ -437,6 +438,8 @@
     <string name="settings_reset_themes">Stored Y1 themes</string>
     <string name="settings_reset_microsd">MicroSD contents</string>
     <string name="settings_reset_caches">Caches</string>
+    <string name="settings_reset_flow">Flow Cache</string>
+    <string name="settings_reset_stems">Stems</string>
     <string name="settings_reset_everything">Everything</string>
     <string name="settings_reset_continue">Continue</string>
     <string name="settings_preview_reset_rockbox">Deletes the .rockbox folder from Internal Storage (/storage/sdcard0). Rockbox settings, themes, and playlists stored there will be removed.</string>
@@ -444,6 +447,8 @@
     <string name="settings_preview_reset_themes">Deletes downloaded and custom theme folders on Internal Storage (Themes/ and JJ_Themes/) and Solar\u2019s internal theme cache.</string>
     <string name="settings_preview_reset_microsd">Removes every file and folder on MicroSD. Files are overwritten once before deletion so standard recovery tools may still find them, this is not a secure wipe.</string>
     <string name="settings_preview_reset_caches">Clears album-art caches, Flow thumbnails, stream/download temp files, and other Solar cache data.</string>
+    <string name="settings_preview_reset_flow">Rebuilds the Flow cache and warms Flow.</string>
+    <string name="settings_preview_reset_stems">Deletes all separated stem files generated for your songs.</string>
     <string name="settings_preview_reset_everything">Selects all reset options below. Review each item before continuing.</string>
     <string name="settings_preview_reset_continue">Runs the selected reset steps. You will be asked to confirm before anything is deleted.</string>
     <string name="dialog_reset_title">Reset selected data?</string>

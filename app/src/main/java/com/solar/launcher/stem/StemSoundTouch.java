@@ -18,6 +18,12 @@ public final class StemSoundTouch {
         player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "soundtouch", 1);
         player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "vn", 1);
         player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 0);
+        // 2026-07-21 — OpenSL ES hardware audio track bypasses Java JNI / AudioTrack buffering on MTK.
+        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 1);
+        // 2026-07-21 — Low latency packet buffering for responsive stem real-time mixing.
+        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "packet-buffering", 0);
+        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "max-buffer-size", 131072);
+        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "infbuf", 1);
     }
 
     /** True when option list matches stem SoundTouch contract (unit-test hook). */

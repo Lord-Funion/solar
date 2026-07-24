@@ -170,6 +170,12 @@ final class MoveRibbonRows {
         confirm.setVisibility(View.GONE);
         rightSlot.addView(confirm, new FrameLayout.LayoutParams(ppSz, ppSz, Gravity.CENTER));
 
+        android.widget.ProgressBar spin = com.solar.launcher.ui.RowBusyChrome.newSmallSpinner(activity);
+        spin.setVisibility(View.GONE);
+        int spinSz = (int) (rowHeightPx * 0.48f);
+        if (spinSz <= 0) spinSz = FrameLayout.LayoutParams.WRAP_CONTENT;
+        rightSlot.addView(spin, new FrameLayout.LayoutParams(spinSz, spinSz, Gravity.CENTER));
+
         row.addView(rightSlot);
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, rowHeightPx + 2);
@@ -294,6 +300,8 @@ final class MoveRibbonRows {
         if (pp != null) pp.setVisibility(View.GONE);
         ImageView confirm = (ImageView) row.findViewWithTag(TAG_CONFIRM);
         if (confirm != null) confirm.setVisibility(View.GONE);
+        android.widget.ProgressBar spin = (android.widget.ProgressBar) row.findViewWithTag(com.solar.launcher.ui.RowBusyChrome.TAG_SPIN);
+        if (spin != null) spin.setVisibility(View.GONE);
         View drop = row.findViewWithTag(TAG_DROP);
         if (drop != null) drop.setVisibility(View.GONE);
     }

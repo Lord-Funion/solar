@@ -72,14 +72,15 @@ public final class InvidiousBackend implements YoutubeBackend {
     public List<YouTubeVideo> search(String query) throws IOException {
         String region = YoutubeApiUtil.regionCode();
         String url = baseUrl + "/api/v1/search?q=" + YoutubeApiUtil.urlEncode(query)
-                + "&type=video&region=" + YoutubeApiUtil.urlEncode(region);
+                + "&type=all&region=" + YoutubeApiUtil.urlEncode(region);
         String body = httpGet(url);
         try {
             JSONArray json = new JSONArray(body);
             List<YouTubeVideo> out = new ArrayList<YouTubeVideo>();
             for (int i = 0; i < json.length(); i++) {
                 JSONObject j = json.getJSONObject(i);
-                if (!"video".equals(j.optString("type", ""))) continue;
+                String type = j.optString("type", "video");
+                if ("channel".equals(type) || "playlist".equals(type)) continue;
                 String id = j.optString("videoId", "");
                 if (id.length() == 0) continue;
                 out.add(new YouTubeVideo(

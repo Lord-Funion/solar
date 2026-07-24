@@ -67,6 +67,67 @@ public class SettingLookup {
         return LABEL_TO_PREF_KEY.get(normalize(label));
     }
 
+    /** Returns the original label for a given prefKey, or null if not found. */
+    public static String labelForPrefKey(String prefKey) {
+        if (prefKey == null) return null;
+        for (Map.Entry<String, String> e : LABEL_TO_PREF_KEY.entrySet()) {
+            if (e.getValue().equals(prefKey)) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    /** Returns a correctly formatted solarConfig key (e.g. enableFull_Width_Menus) for a given preference. */
+    public static String getSolarConfigKeyForPref(String prefKey, Object value) {
+        String label = labelForPrefKey(prefKey);
+        if (label == null) return null;
+        
+        String formattedLabel = formatLabelForConfig(label);
+        
+        if (value instanceof Boolean) {
+            return ((Boolean) value) ? "enable" + formattedLabel : "disable" + formattedLabel;
+        } else {
+            return "set" + formattedLabel;
+        }
+    }
+    
+    /** Returns a list of all possible prefixes for a given prefKey to allow removal of contradictory keys. */
+    public static java.util.List<String> getAllSolarConfigKeysForPref(String prefKey) {
+        String label = labelForPrefKey(prefKey);
+        if (label == null) return java.util.Collections.emptyList();
+        
+        String formattedLabel = formatLabelForConfig(label);
+        
+        java.util.List<String> keys = new java.util.ArrayList<>();
+        keys.add("enable" + formattedLabel);
+        keys.add("disable" + formattedLabel);
+        keys.add("set" + formattedLabel);
+        return keys;
+    }
+    
+    private static String formatLabelForConfig(String label) {
+        String[] words = label.split(" ");
+        StringBuilder formattedLabel = new StringBuilder();
+        for (String word : words) {
+            if (word.isEmpty()) continue;
+            // Handle special case for 3D to match typical casing, though parser is case-insensitive
+            if (word.equals("3d")) {
+                formattedLabel.append("3D");
+            } else {
+                formattedLabel.append(Character.toUpperCase(word.charAt(0)));
+                if (word.length() > 1) {
+                    formattedLabel.append(word.substring(1));
+                }
+            }
+            formattedLabel.append("_");
+        }
+        if (formattedLabel.length() > 0) {
+            formattedLabel.setLength(formattedLabel.length() - 1);
+        }
+        return formattedLabel.toString();
+    }
+
     /**
      * Apply overrides defined in a theme's "solarConfig" JSON object.
      *

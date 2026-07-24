@@ -64,6 +64,8 @@ public final class RowKeys {
     public static final String RESET_THEMES = "settings.reset.themes";
     public static final String RESET_MICROSD = "settings.reset.microsd";
     public static final String RESET_CACHES = "settings.reset.caches";
+    public static final String RESET_FLOW = "settings.reset.flow";
+    public static final String RESET_STEMS = "settings.reset.stems";
     public static final String RESET_EVERYTHING = "settings.reset.everything";
     public static final String RESET_CONTINUE = "settings.reset.continue";
     public static final String WEB_SERVER = "settings.web_server";
@@ -335,6 +337,8 @@ public final class RowKeys {
         if (RESET_THEMES.equals(rowKey)) return R.string.settings_reset_themes;
         if (RESET_MICROSD.equals(rowKey)) return R.string.settings_reset_microsd;
         if (RESET_CACHES.equals(rowKey)) return R.string.settings_reset_caches;
+        if (RESET_FLOW.equals(rowKey)) return R.string.settings_reset_flow;
+        if (RESET_STEMS.equals(rowKey)) return R.string.settings_reset_stems;
         if (RESET_EVERYTHING.equals(rowKey)) return R.string.settings_reset_everything;
         if (RESET_CONTINUE.equals(rowKey)) return R.string.settings_reset_continue;
         if (WEB_SERVER.equals(rowKey)) return R.string.settings_web_server;

@@ -76,7 +76,7 @@
       "required": true,
       "device": "both",
       "versionCode": 1,
-      "sha256": "5927dbb36f7f5e1f8bc8aea5539bc39f281240c03af2263f5f891c9206874ce9"
+      "sha256": "7f6454a0ca9a5fa38e90577d9ed5e2504b17da2dff4d67639143de94f810829a"
     },
     {
       "pkg": "com.solar.launcher.homehelper",

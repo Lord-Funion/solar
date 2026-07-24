@@ -159,6 +159,7 @@ public final class StemPlayerHost {
     /** Soft-scrub dual timeline (same song, new seek). 2026-07-21 */
     private int scrubSong = -1;
     private int scrubCursorMs;
+    public int getScrubCursorMs() { return scrubCursorMs; }
     private int scrubDurationMs;
     private TextView scrubStatusView;
     private View scrubBarView;
@@ -300,6 +301,11 @@ public final class StemPlayerHost {
     private boolean nextDown;
     /** Local uptime when pad Options key went down (MTK KeyEvent times lie). 2026-07-21 */
     private long padOptionsDownUptimeMs;
+    /** Active zone right before ACTION_DOWN so raced hold timers can be cleanly restored. 2026-07-21 */
+    private int prePressActiveZone = -1;
+    /** Hardware debounce check against switch contact bounce on Y1/Y2 buttons (~35ms). 2026-07-21 */
+    private long lastHardwareKeyUpTimeMs;
+    private int lastHardwareKeyUpCode = -1;
     private boolean exitHoldFired;
     /** Stem key hold → chop/screw (zone while held). 2026-07-19 */
     private int stemHoldZone = -1;
@@ -347,24 +353,9 @@ public final class StemPlayerHost {
     private final Runnable exitHoldRunnable = new Runnable() {
         @Override
         public void run() {
-            // Single-track: dual side-key exit. Mashup dual → session context. 2026-07-21
-            // Was: mashup dual no-op here. Reversal: if (session.isMulti()) return;
-            if (session.isMulti()) {
-                if (!StemControls.stemSessionContextBothSidesHeld(prevDown, nextDown)) return;
-                exitHoldFired = true;
-                transitionHoldFired = true;
-                stopStemStutter();
-                // Dual-hold → jam context (Home chip exits). Was: openSessionContextMenu panel.
-                // 2026-07-21
-                try {
-                    host.openStemMixContextMenu(-1);
-                } catch (Exception e) {
-                    openSessionContextMenu();
-                }
-                return;
-            }
-            if (!StemControls.stemExitBothSidesHeld(prevDown, nextDown)) return;
+            if (!StemControls.stemExitBothSidesHeld(prevDown, nextDown) && !StemControls.stemSessionContextBothSidesHeld(prevDown, nextDown)) return;
             exitHoldFired = true;
+            transitionHoldFired = true;
             stopStemStutter();
             requestExit();
         }
@@ -534,6 +525,9 @@ public final class StemPlayerHost {
         } catch (Exception ignored) {}
         // #endregion
         if (StemControls.isIntentionalPadOptionsHold(holdFired, held)) {
+            if (prePressActiveZone >= 0) {
+                session.setActiveZone(prePressActiveZone);
+            }
             return true;
         }
         if (holdFired) {
@@ -542,6 +536,10 @@ public final class StemPlayerHost {
                 host.dismissStemMixContextMenu();
             } catch (Exception ignored) {}
             closeTransitionMenu();
+            if (prePressActiveZone >= 0 && prePressActiveZone < StemMixer.STEM_COUNT) {
+                session.setActiveZone(prePressActiveZone);
+                activeZone = prePressActiveZone;
+            }
         }
         return false;
     }
@@ -914,12 +912,20 @@ public final class StemPlayerHost {
     private void releaseMixers() {
         main.removeCallbacks(mashDriftRunnable);
         if (mixers == null) return;
-        for (int i = 0; i < mixers.length; i++) {
-            StemMixer m = mixers[i];
-            mixers[i] = null;
-            releaseMixerAsync(m);
-        }
+        final StemMixer[] toRelease = mixers;
         mixers = null;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                for (int i = 0; i < toRelease.length; i++) {
+                    StemMixer m = toRelease[i];
+                    toRelease[i] = null;
+                    if (m != null) {
+                        try { m.release(); } catch (Exception ignored) {}
+                    }
+                }
+            }
+        }, "StemHost-Release").start();
     }
 
     private void releaseMixerAsync(final StemMixer m) {
@@ -1019,6 +1025,12 @@ public final class StemPlayerHost {
         // #region agent log
         final long keyT0 = android.os.SystemClock.uptimeMillis();
         if (action == KeyEvent.ACTION_UP && event.getRepeatCount() == 0) {
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - lastHardwareKeyUpTimeMs < 35L && lastHardwareKeyUpCode == keyCode) {
+                return true;
+            }
+            lastHardwareKeyUpTimeMs = now;
+            lastHardwareKeyUpCode = keyCode;
             try {
                 org.json.JSONObject d = new org.json.JSONObject();
                 d.put("keyCode", keyCode);
@@ -1047,6 +1059,7 @@ public final class StemPlayerHost {
             if (action == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                 prevDown = true;
                 padOptionsDownUptimeMs = android.os.SystemClock.uptimeMillis();
+                prePressActiveZone = activeZone;
                 exitHoldFired = false;
                 transitionHoldFired = false;
                 main.removeCallbacks(exitHoldRunnable);
@@ -1114,6 +1127,7 @@ public final class StemPlayerHost {
             if (action == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                 nextDown = true;
                 padOptionsDownUptimeMs = android.os.SystemClock.uptimeMillis();
+                prePressActiveZone = activeZone;
                 exitHoldFired = false;
                 transitionHoldFired = false;
                 main.removeCallbacks(exitHoldRunnable);
@@ -1267,11 +1281,16 @@ public final class StemPlayerHost {
             if (action == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                 backDown = true;
                 padOptionsDownUptimeMs = android.os.SystemClock.uptimeMillis();
+                prePressActiveZone = activeZone;
                 backContextHoldFired = false;
                 main.removeCallbacks(backContextHoldRunnable);
                 // Options only after intentional hold — short Back focuses Vocals. 2026-07-21
+                if (face != null) face.setActiveZone(0);
+                if (mashupFace != null) mashupFace.setActiveZone(0);
                 if (StemControls.mashupPadHoldOpensSlotContext(session.isMulti())) {
                     main.postDelayed(backContextHoldRunnable, StemControls.mashupOptionsHoldMs());
+                } else {
+                    beginStemHold(0);
                 }
                 return true;
             }
@@ -1279,7 +1298,8 @@ public final class StemPlayerHost {
                 main.removeCallbacks(backContextHoldRunnable);
                 boolean intentional = finishPadOptionsHoldIfSpurious(
                         backContextHoldFired, false, event);
-                if (!intentional) onStemKey(0);
+                boolean stuttered = endStemHold(0);
+                if (!intentional && !stuttered) onStemKey(0);
                 backDown = false;
                 backContextHoldFired = false;
                 return true;
@@ -1303,7 +1323,10 @@ public final class StemPlayerHost {
                 if (action == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                     playDown = true;
                     padOptionsDownUptimeMs = android.os.SystemClock.uptimeMillis();
+                    prePressActiveZone = activeZone;
                     playContextHoldFired = false;
+                    if (face != null) face.setActiveZone(3);
+                    if (mashupFace != null) mashupFace.setActiveZone(3);
                     main.removeCallbacks(playContextHoldRunnable);
                     main.postDelayed(playContextHoldRunnable,
                             StemControls.mashupOptionsHoldMs());
@@ -1321,6 +1344,7 @@ public final class StemPlayerHost {
                 return true;
             }
             if (action == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                prePressActiveZone = activeZone;
                 beginStemHold(3);
                 return true;
             }
@@ -1748,6 +1772,8 @@ public final class StemPlayerHost {
                             trackFile, premix, key, ctx, gen);
                     File stemDir = LalalClient.findReadyStemDir(
                             ctx, trackFile, premix, host.appCacheDir());
+                    stemDir = LalalClient.ensureInternalPlaybackCache(
+                            ctx, trackFile, premix, stemDir);
                     final File bassBody = StemBassBody.existingOrNull(stemDir);
                     main.post(new Runnable() {
                         @Override
@@ -1916,49 +1942,69 @@ public final class StemPlayerHost {
             return;
         }
         // Release ONLY this slot after fade-out — sibling StemMixer keeps playing. 2026-07-20
-        StemMixer old = mixers[songIndex];
-        releaseMixerAsync(old);
-        final StemMixer m = new StemMixer(root.getContext());
-        mixers[songIndex] = m;
-        m.setBpm(st.bpm > 30f ? st.bpm : StemBpm.DEFAULT_BPM);
-        m.setListener(new StemMixer.Listener() {
+        final StemMixer old = mixers[songIndex];
+        if (old != null) mixers[songIndex] = null;
+        final StemSession.SongState stFinal = st;
+        final Runnable doLoad = new Runnable() {
             @Override
-            public void onReady() {
-                if (gen != jobGen.get() || cancelled.get()) return;
-                replacingSongIndex = -1;
-                loading = false;
-                syncPrepBusyChrome();
-                try { m.play(); } catch (Exception ignored) {}
-                // Timed fade-in to prior pad levels (equal-power when LONG). 2026-07-20 / 2026-07-21
-                fadeSongGainsIn(songIndex, targetGains);
-                loadMashupMetaAndArt();
-                refreshFace();
-                updateStatusLine();
-                updateInteractedTrackTitle();
-            }
+            public void run() {
+                if (gen != jobGen.get() || cancelled.get() || !sessionActive) return;
+                final StemMixer m = new StemMixer(root.getContext());
+                if (mixers != null && songIndex >= 0 && songIndex < mixers.length) {
+                    mixers[songIndex] = m;
+                }
+                m.setBpm(stFinal.bpm > 30f ? stFinal.bpm : StemBpm.DEFAULT_BPM);
+                m.setListener(new StemMixer.Listener() {
+                    @Override
+                    public void onReady() {
+                        if (gen != jobGen.get() || cancelled.get()) return;
+                        replacingSongIndex = -1;
+                        loading = false;
+                        syncPrepBusyChrome();
+                        try { m.play(); } catch (Exception ignored) {}
+                        // Timed fade-in to prior pad levels (equal-power when LONG). 2026-07-20 / 2026-07-21
+                        fadeSongGainsIn(songIndex, targetGains);
+                        loadMashupMetaAndArt();
+                        refreshFace();
+                        updateStatusLine();
+                        updateInteractedTrackTitle();
+                    }
 
-            @Override
-            public void onError(String message) {
-                if (gen != jobGen.get()) return;
-                replacingSongIndex = -1;
-                loading = false;
-                syncPrepBusyChrome();
-                host.toast(message != null ? message : "Stem load failed");
-            }
+                    @Override
+                    public void onError(String message) {
+                        if (gen != jobGen.get()) return;
+                        replacingSongIndex = -1;
+                        loading = false;
+                        syncPrepBusyChrome();
+                        host.toast(message != null ? message : "Stem load failed");
+                    }
 
-            @Override
-            public void onComplete() {
-                // Mashup: hand off to the other song — never silence the jam. 2026-07-20
-                onSongPlaybackComplete(songIndex);
+                    @Override
+                    public void onComplete() {
+                        // Mashup: hand off to the other song — never silence the jam. 2026-07-20
+                        onSongPlaybackComplete(songIndex);
+                    }
+                });
+                try {
+                    m.load(stFinal.stems, stFinal.bassBody);
+                } catch (Exception e) {
+                    replacingSongIndex = -1;
+                    loading = false;
+                    syncPrepBusyChrome();
+                    host.toast("Stem load failed");
+                }
             }
-        });
-        try {
-            m.load(st.stems, st.bassBody);
-        } catch (Exception e) {
-            replacingSongIndex = -1;
-            loading = false;
-            syncPrepBusyChrome();
-            host.toast("Stem load failed");
+        };
+        if (old != null) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try { old.release(); } catch (Exception ignored) {}
+                    main.post(doLoad);
+                }
+            }, "StemHost-Reload").start();
+        } else {
+            doLoad.run();
         }
     }
 
@@ -2143,7 +2189,7 @@ public final class StemPlayerHost {
             mashupFace.clearPadScrub();
             return;
         }
-        mashupFace.setPadScrub(true, StemMixSoftScrub.thumbFrac(scrubCursorMs, scrubDurationMs));
+        mashupFace.setPadScrub(true, StemMixSoftScrub.thumbFrac(scrubCursorMs, scrubDurationMs), scrubCursorMs);
     }
 
     /**
@@ -2334,8 +2380,29 @@ public final class StemPlayerHost {
                         : StemBpm.estimateFromDurationMs(scrubDurationMs);
             }
         }
-        final int targetMs = StemMixSoftScrub.beatMatchSeekMs(
+        final int baseTargetMs = StemMixSoftScrub.beatMatchSeekMs(
                 scrubCursorMs, scrubDurationMs, bpm);
+                
+        int otherSong = session.isMulti() ? (song == 0 ? 1 : 0) : -1;
+        int phaseOffset = 0;
+        if (otherSong >= 0) {
+            StemMixer otherMixer = mixerAt(otherSong);
+            if (otherMixer != null && otherMixer.isPlaying()) {
+                float otherBpm = StemBpm.DEFAULT_BPM;
+                StemSession.SongState otherSt = session.song(otherSong);
+                if (otherSt != null && otherSt.bpm > 30f) otherBpm = otherSt.bpm;
+                else otherBpm = otherMixer.getBpm() > 30f ? otherMixer.getBpm() 
+                        : StemBpm.estimateFromDurationMs(otherMixer.getDurationMs());
+                int otherBeat = StemBpm.msPerBeat(otherBpm);
+                if (otherBeat > 0) {
+                    phaseOffset = otherMixer.getPositionMs() % otherBeat;
+                }
+            }
+        }
+        int beat = StemBpm.msPerBeat(bpm);
+        final int targetMs = (beat > 0 && phaseOffset > 0) ? ((baseTargetMs / beat) * beat + phaseOffset) : baseTargetMs;
+
+        
         scrubCursorMs = targetMs;
         faceScrubArmed = false;
         if (mashupFace != null) mashupFace.clearPadScrub();
@@ -2843,6 +2910,11 @@ public final class StemPlayerHost {
         for (int z = 0; z < StemMixer.STEM_COUNT; z++) {
             float level = levels[z];
             if (before[z] != after[z]) {
+                float bumped = StemControls.padGainAfterTrackSwitch(level);
+                if (bumped != level) {
+                    level = bumped;
+                    session.setPadGain(z, level);
+                }
                 applySongZoneGain(before[z], z, 0f);
                 applySongZoneGain(after[z], z, level);
             } else {
@@ -3209,15 +3281,7 @@ public final class StemPlayerHost {
         // #endregion
         List<LalalClient.StemFile> cached = null;
         if (readyDir != null) {
-            if (LalalClient.userStemsReady(src)
-                    && readyDir.equals(LalalClient.userStemsDir(src))) {
-                cached = LalalClient.loadUserStems(src, premix);
-            } else {
-                cached = LalalClient.loadCached(readyDir, premix);
-                if (cached == null || cached.isEmpty()) {
-                    cached = LalalClient.loadStemDirFlexible(readyDir);
-                }
-            }
+            cached = LalalClient.resolveStemsFromReadyDir(ctx, src, premix, readyDir);
             // #region agent log
             try {
                 org.json.JSONObject d = new org.json.JSONObject();

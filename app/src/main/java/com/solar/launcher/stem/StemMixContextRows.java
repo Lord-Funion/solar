@@ -13,7 +13,11 @@ public final class StemMixContextRows {
     public static final int SLOT_PLAY_QUEUE = 1;
     public static final int SLOT_START_NEXT = 2;
     public static final int SLOT_SCRUB = 3;
-    public static final int SLOT_ROW_COUNT = 4;
+    public static final int SLOT_TRANSITION_LONG = 4;
+    public static final int SLOT_TRANSITION_OVERLAP = 5;
+    public static final int SLOT_TRANSITION_WAVE = 6;
+    public static final int SLOT_TRANSITION_INSTANT = 7;
+    public static final int SLOT_ROW_COUNT = 8;
 
     /**
      * Session / Play context — queue, Pause, TRANSITION, Home exit.
@@ -26,7 +30,8 @@ public final class StemMixContextRows {
     public static final int SESSION_TRANSITION_OVERLAP = 3;
     public static final int SESSION_TRANSITION_WAVE = 4;
     public static final int SESSION_HOME = 5;
-    public static final int SESSION_ROW_COUNT = 6;
+    public static final int SESSION_TRANSITION_INSTANT = 6;
+    public static final int SESSION_ROW_COUNT = 7;
 
     private StemMixContextRows() {}
 
@@ -41,7 +46,11 @@ public final class StemMixContextRows {
                 "Replace focused track",
                 "Play queue",
                 "Start next track",
-                "Scrub"
+                "Scrub",
+                "TRANSITION · LONG (~4s)",
+                "TRANSITION · ∞ (~8s)",
+                "TRANSITION · waveform (~0.4s)",
+                "TRANSITION · INSTANT"
         };
     }
 
@@ -58,8 +67,17 @@ public final class StemMixContextRows {
                 "TRANSITION · LONG (~4s)",
                 "TRANSITION · ∞ (~8s)",
                 "TRANSITION · waveform (~0.4s)",
-                "Home"
+                "Home",
+                "TRANSITION · INSTANT"
         };
+    }
+
+    public static int transitionPresetForSlotRow(int row) {
+        if (row == SLOT_TRANSITION_LONG) return StemControls.TRANSITION_PRESET_LONG;
+        if (row == SLOT_TRANSITION_OVERLAP) return StemControls.TRANSITION_PRESET_OVERLAP;
+        if (row == SLOT_TRANSITION_WAVE) return StemControls.TRANSITION_PRESET_WAVE;
+        if (row == SLOT_TRANSITION_INSTANT) return StemControls.TRANSITION_PRESET_INSTANT;
+        return -1;
     }
 
     /** Map session row → transition preset (−1 = not a preset). 2026-07-21 */
@@ -67,6 +85,7 @@ public final class StemMixContextRows {
         if (row == SESSION_TRANSITION_LONG) return StemControls.TRANSITION_PRESET_LONG;
         if (row == SESSION_TRANSITION_OVERLAP) return StemControls.TRANSITION_PRESET_OVERLAP;
         if (row == SESSION_TRANSITION_WAVE) return StemControls.TRANSITION_PRESET_WAVE;
+        if (row == SESSION_TRANSITION_INSTANT) return StemControls.TRANSITION_PRESET_INSTANT;
         return -1;
     }
 

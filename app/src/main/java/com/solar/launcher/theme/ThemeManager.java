@@ -3839,4 +3839,82 @@ public class ThemeManager {
         fis.close();
         return data;
     }
+
+    /**
+     * Persists a user's overridden theme preference back to the active theme's config.json.
+     * Only modifies the theme if the prefKey maps to a valid solarConfig label.
+     */
+    public static void writeSolarConfigOverride(Context ctx, String prefKey, Object newValue) {
+        if (ctx == null || prefKey == null) return;
+        
+        String newKey = SettingLookup.getSolarConfigKeyForPref(prefKey, newValue);
+        if (newKey == null) return;
+        
+        ThemeEntry activeTheme = getCurrentTheme();
+        if (activeTheme == null || activeTheme.folderPath == null) return;
+        
+        // Target the config.json file
+        File configJsonFile = null;
+        if (activeTheme.folderPath.startsWith("asset://")) {
+            // Built-in theme: write to the internal cache copy instead
+            File cacheDir = new File(internalThemesDir(ctx), activeTheme.folderName);
+            configJsonFile = new File(cacheDir, "config.json");
+        } else {
+            configJsonFile = new File(activeTheme.folderPath, "config.json");
+        }
+        
+        if (configJsonFile == null || !configJsonFile.isFile()) return;
+        
+        try {
+            String jsonStr = new String(readAll(configJsonFile), "UTF-8");
+            JSONObject root = new JSONObject(jsonStr);
+            
+            JSONObject solarConfig = root.optJSONObject("solarConfig");
+            if (solarConfig == null) {
+                solarConfig = new JSONObject();
+                root.put("solarConfig", solarConfig);
+            }
+            
+            // Check if contradictory keys exist
+            java.util.List<String> allKeys = SettingLookup.getAllSolarConfigKeysForPref(prefKey);
+            boolean needsChange = false;
+            for (String k : allKeys) {
+                if (!k.equals(newKey) && solarConfig.has(k)) {
+                    solarConfig.remove(k);
+                    needsChange = true;
+                }
+            }
+            
+            // Check if the new key is already set correctly
+            if (newValue instanceof Boolean) {
+                if (!solarConfig.has(newKey)) {
+                    solarConfig.put(newKey, true);
+                    needsChange = true;
+                }
+            } else {
+                if (!solarConfig.has(newKey) || !newValue.equals(solarConfig.opt(newKey))) {
+                    solarConfig.put(newKey, newValue);
+                    needsChange = true;
+                }
+            }
+            
+            if (!needsChange) return;
+            
+            // Write back to disk
+            FileOutputStream fos = new FileOutputStream(configJsonFile);
+            fos.write(root.toString(2).getBytes("UTF-8"));
+            fos.close();
+            
+            // Update in-memory active theme
+            if (activeTheme.root != null) {
+                activeTheme.root = root;
+            }
+            
+            // Trigger sync to ensure changes mirror to SD card
+            scheduleThemeLibrarySync(ctx, true);
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 }

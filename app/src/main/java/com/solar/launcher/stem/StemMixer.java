@@ -48,15 +48,17 @@ public final class StemMixer {
 
     private final Context app;
     // Was: new Handler(Looper.getMainLooper()). Reversal: restore main-looper Handler. 2026-07-20
-    private final Handler main = SolarTransport.get().audioHandler();
+    private final Handler main = new Handler(Looper.getMainLooper());
     private MediaPlayer[] players = new MediaPlayer[0];
     private int[] playerZones = new int[0];
     private int playerCount;
     private MediaPlayer bassBodyPlayer;
     /** Single-file origin feed for NP Stems-off (or mid-swap). 2026-07-21 */
     private MediaPlayer originPlayer;
+    private tv.danmaku.ijk.media.player.IjkMediaPlayer originIjkPlayer;
     private String originPath;
     private float originGain = 1f;
+    private float masterGain = 1f;
     private SourceMode sourceMode = SourceMode.PADS;
     private boolean swapBusy;
     private SwapListener swapListener;
@@ -275,9 +277,9 @@ public final class StemMixer {
      * Reversal: remove; keep load(List) only.
      * 2026-07-21
      */
-    public void loadOrigin(File track) throws IOException {
-        if (track == null || !track.isFile()) {
-            throw new IOException("Need origin file");
+    public void loadOrigin(String pathOrUrl) throws IOException {
+        if (pathOrUrl == null || pathOrUrl.trim().isEmpty()) {
+            throw new IOException("Need origin file or url");
         }
         releasePlayersOnly();
         usingIjk = false;
@@ -292,21 +294,48 @@ public final class StemMixer {
             gains[i] = 0f;
             loopCtrl[i] = false;
         }
-        originPath = track.getAbsolutePath();
+        originPath = pathOrUrl;
         expectedPrepare = 1;
-        originPlayer = new MediaPlayer();
-        originPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
-        originPlayer.setDataSource(originPath);
-        originPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-            @Override
-            public void onPrepared(MediaPlayer mediaPlayer) {
-                preparedCount++;
-                applyOriginGain();
-                if (preparedCount >= expectedPrepare && listener != null) {
-                    listener.onReady();
+        
+        if (pathOrUrl.startsWith("http") || pathOrUrl.startsWith("https")) {
+            originIjkPlayer = com.solar.launcher.video.SolarIjkPlayerFactory.create();
+            StemSoundTouch.applyStemPlayerOptions(originIjkPlayer);
+            originIjkPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+            originIjkPlayer.setDataSource(originPath);
+            originIjkPlayer.setOnPreparedListener(new tv.danmaku.ijk.media.player.IMediaPlayer.OnPreparedListener() {
+                @Override
+                public void onPrepared(tv.danmaku.ijk.media.player.IMediaPlayer p) {
+                    preparedCount++;
+                    applyOriginGain();
+                    if (preparedCount >= expectedPrepare && listener != null) {
+                        listener.onReady();
+                    }
                 }
-            }
-        });
+            });
+            originIjkPlayer.setOnCompletionListener(new tv.danmaku.ijk.media.player.IMediaPlayer.OnCompletionListener() {
+                @Override
+                public void onCompletion(tv.danmaku.ijk.media.player.IMediaPlayer p) {
+                    if (released || sourceMode != SourceMode.ORIGIN) return;
+                    pause();
+                    if (listener != null) listener.onComplete();
+                }
+            });
+            originIjkPlayer.prepareAsync();
+        } else {
+            originPlayer = new MediaPlayer();
+            originPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+            originPlayer.setDataSource(originPath);
+            originPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                @Override
+                public void onPrepared(MediaPlayer mediaPlayer) {
+                    preparedCount++;
+                    applyOriginGain();
+                    if (preparedCount >= expectedPrepare && listener != null) {
+                        listener.onReady();
+                    }
+                }
+            });
+        }
         originPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
             @Override
             public void onCompletion(MediaPlayer mediaPlayer) {
@@ -357,9 +386,10 @@ public final class StemMixer {
      * 2026-07-21
      */
     public void seekTo(int ms) {
-        if (sourceMode == SourceMode.ORIGIN && originPlayer != null) {
+        if (sourceMode == SourceMode.ORIGIN && (originPlayer != null || originIjkPlayer != null)) {
             try {
-                originPlayer.seekTo(Math.max(0, ms));
+                if (originPlayer != null) originPlayer.seekTo(Math.max(0, ms));
+                if (originIjkPlayer != null) originIjkPlayer.seekTo(Math.max(0, ms));
             } catch (Exception ignored) {}
             return;
         }
@@ -383,14 +413,17 @@ public final class StemMixer {
         autoStartPending = wasPlaying;
         try {
             final MediaPlayer keepOrigin = originPlayer;
+            final tv.danmaku.ijk.media.player.IjkMediaPlayer keepIjk = originIjkPlayer;
             final String keepPath = originPath;
             originPlayer = null;
+            originIjkPlayer = null;
             originPath = null;
             // Wire swap listener before prepare so onReady cannot race. 2026-07-21
             setListener(wrapReadyForPadSwap(pos, wantVocals, wantInstr, wasPlaying));
             sourceMode = SourceMode.PADS;
             load(stems, bassBodyWav);
             originPlayer = keepOrigin;
+            originIjkPlayer = keepIjk;
             originPath = keepPath;
         } catch (Exception e) {
             swapBusy = false;
@@ -425,7 +458,7 @@ public final class StemMixer {
             playerPaths = new String[0];
             bassBodyPlayer = null;
             setListener(wrapReadyForOriginSwap(pos, startPad, wasPlaying));
-            loadOrigin(track);
+            loadOrigin(track.getAbsolutePath());
             players = keepPlayers;
             playerZones = keepZones;
             playerCount = keepCount;
@@ -457,6 +490,9 @@ public final class StemMixer {
                     if (originPlayer != null) {
                         try { originPlayer.seekTo(posMs); } catch (Exception ignored) {}
                     }
+                    if (originIjkPlayer != null) {
+                        try { originIjkPlayer.seekTo(posMs); } catch (Exception ignored) {}
+                    }
                     float[] end = StemMixerSwapPolicy.padGainsAtSwapEnd(true, wantVocals, wantInstr);
                     for (int z = 0; z < STEM_COUNT; z++) gains[z] = 0f;
                     applyAllGains();
@@ -473,6 +509,11 @@ public final class StemMixer {
                         if (originPlayer != null) {
                             try {
                                 if (!originPlayer.isPlaying()) originPlayer.start();
+                            } catch (Exception ignored) {}
+                        }
+                        if (originIjkPlayer != null) {
+                            try {
+                                if (!originIjkPlayer.isPlaying()) originIjkPlayer.start();
                             } catch (Exception ignored) {}
                         }
                     }
@@ -511,6 +552,9 @@ public final class StemMixer {
                     if (originPlayer != null) {
                         try { originPlayer.seekTo(posMs); } catch (Exception ignored) {}
                     }
+                    if (originIjkPlayer != null) {
+                        try { originIjkPlayer.seekTo(posMs); } catch (Exception ignored) {}
+                    }
                     seekAllPlaying(posMs);
                     for (int z = 0; z < STEM_COUNT; z++) {
                         gains[z] = startPad != null && z < startPad.length ? startPad[z] : 1f;
@@ -522,6 +566,9 @@ public final class StemMixer {
                         started = true;
                         try {
                             if (originPlayer != null) originPlayer.start();
+                        } catch (Exception ignored) {}
+                        try {
+                            if (originIjkPlayer != null) originIjkPlayer.start();
                         } catch (Exception ignored) {}
                         for (int i = 0; i < playerCount; i++) {
                             try {
@@ -605,10 +652,11 @@ public final class StemMixer {
 
     /** Volume for the origin MediaPlayer. 2026-07-21 */
     private void applyOriginGain() {
-        if (originPlayer == null) return;
+        if ((originPlayer == null && originIjkPlayer == null) || sourceMode != SourceMode.ORIGIN) return;
         float g = StemControls.clampGain(originGain);
         try {
-            originPlayer.setVolume(g, g);
+            if (originPlayer != null) originPlayer.setVolume(g * masterGain, g * masterGain);
+            if (originIjkPlayer != null) originIjkPlayer.setVolume(g * masterGain, g * masterGain);
         } catch (Exception ignored) {}
     }
 
@@ -618,6 +666,11 @@ public final class StemMixer {
             try { originPlayer.stop(); } catch (Exception ignored) {}
             try { originPlayer.release(); } catch (Exception ignored) {}
             originPlayer = null;
+        }
+        if (originIjkPlayer != null) {
+            try { originIjkPlayer.stop(); } catch (Exception ignored) {}
+            try { originIjkPlayer.release(); } catch (Exception ignored) {}
+            originIjkPlayer = null;
         }
         originPath = null;
         originGain = 1f;
@@ -910,7 +963,7 @@ public final class StemMixer {
     public void load(List<LalalClient.StemFile> stems, File bassBodyWav) throws IOException {
         releasePlayersOnly();
         // Pad mode unless a swap temporarily reattached origin. 2026-07-21
-        if (originPlayer == null) sourceMode = SourceMode.PADS;
+        if (originPlayer == null && originIjkPlayer == null) sourceMode = SourceMode.PADS;
         usingIjk = false;
         preparedCount = 0;
         started = false;
@@ -1116,11 +1169,17 @@ public final class StemMixer {
         clearSongCompleteLatch();
         try {
             // Origin-only feed (NP Stems off). 2026-07-21
-            if (sourceMode == SourceMode.ORIGIN && originPlayer != null && playerCount == 0) {
-                originPlayer.seekTo(0);
+            if (sourceMode == SourceMode.ORIGIN && (originPlayer != null || originIjkPlayer != null) && playerCount == 0) {
+                if (originPlayer != null) {
+                    originPlayer.seekTo(0);
+                    originPlayer.start();
+                }
+                if (originIjkPlayer != null) {
+                    originIjkPlayer.seekTo(0);
+                    originIjkPlayer.start();
+                }
                 originGain = 1f;
                 applyOriginGain();
-                originPlayer.start();
                 started = true;
                 return;
             }
@@ -1160,9 +1219,12 @@ public final class StemMixer {
 
     public void pause() {
         stopBeatRoll();
-        if (originPlayer != null) {
+        if (originPlayer != null || originIjkPlayer != null) {
             try {
-                if (originPlayer.isPlaying()) originPlayer.pause();
+                if (originPlayer != null && originPlayer.isPlaying()) originPlayer.pause();
+            } catch (Exception ignored) {}
+            try {
+                if (originIjkPlayer != null && originIjkPlayer.isPlaying()) originIjkPlayer.pause();
             } catch (Exception ignored) {}
         }
         if (usingIjk && ijkPlayers != null) {
@@ -1188,9 +1250,10 @@ public final class StemMixer {
     }
 
     public void resume() {
-        if (originPlayer != null && (sourceMode == SourceMode.ORIGIN || swapBusy)) {
+        if ((originPlayer != null || originIjkPlayer != null) && (sourceMode == SourceMode.ORIGIN || swapBusy)) {
             try {
-                originPlayer.start();
+                if (originPlayer != null) originPlayer.start();
+                if (originIjkPlayer != null) originIjkPlayer.start();
             } catch (Exception ignored) {}
             started = true;
             applyOriginGain();
@@ -1233,8 +1296,9 @@ public final class StemMixer {
 
     public boolean isPlaying() {
         try {
-            if (originPlayer != null && sourceMode == SourceMode.ORIGIN && playerCount == 0) {
-                return originPlayer.isPlaying();
+            if ((originPlayer != null || originIjkPlayer != null) && sourceMode == SourceMode.ORIGIN && playerCount == 0) {
+                if (originPlayer != null) return originPlayer.isPlaying();
+                if (originIjkPlayer != null) return originIjkPlayer.isPlaying();
             }
             if (usingIjk && ijkPlayers != null && ijkPlayers.length > 0 && ijkPlayers[0] != null) {
                 return ijkPlayers[0].isPlaying();
@@ -1248,8 +1312,9 @@ public final class StemMixer {
 
     public int getPositionMs() {
         try {
-            if (originPlayer != null && sourceMode == SourceMode.ORIGIN && playerCount == 0) {
-                return originPlayer.getCurrentPosition();
+            if ((originPlayer != null || originIjkPlayer != null) && sourceMode == SourceMode.ORIGIN && playerCount == 0) {
+                if (originPlayer != null) return originPlayer.getCurrentPosition();
+                if (originIjkPlayer != null) return (int) originIjkPlayer.getCurrentPosition();
             }
             if (usingIjk && ijkPlayers != null && ijkPlayers.length > 0 && ijkPlayers[0] != null) {
                 return (int) ijkPlayers[0].getCurrentPosition();
@@ -1263,8 +1328,9 @@ public final class StemMixer {
 
     public int getDurationMs() {
         try {
-            if (originPlayer != null && sourceMode == SourceMode.ORIGIN && playerCount == 0) {
-                return originPlayer.getDuration();
+            if ((originPlayer != null || originIjkPlayer != null) && sourceMode == SourceMode.ORIGIN && playerCount == 0) {
+                if (originPlayer != null) return originPlayer.getDuration();
+                if (originIjkPlayer != null) return (int) originIjkPlayer.getDuration();
             }
             if (usingIjk && ijkPlayers != null && ijkPlayers.length > 0 && ijkPlayers[0] != null) {
                 return (int) ijkPlayers[0].getDuration();
@@ -1527,6 +1593,12 @@ public final class StemMixer {
         }
     }
 
+    public void setMasterGain(float gain) {
+        this.masterGain = gain;
+        applyOriginGain();
+        applyAllGains();
+    }
+
     public void setGain(int zone, float gain) {
         if (zone < 0 || zone >= STEM_COUNT) return;
         gains[zone] = StemControls.clampGain(gain);
@@ -1557,7 +1629,7 @@ public final class StemMixer {
      * 2026-07-19 / 2026-07-21
      */
     private void applyGain(int zone) {
-        float g = gains[zone];
+        float g = gains[zone] * masterGain;
         boolean silent = StemControls.isGainSilent(g);
         // Volume-only mute — never seek/restart on zero↔audible. 2026-07-21
         boolean pauseSilent = StemPadMutePolicy.shouldPauseWhenSilent();

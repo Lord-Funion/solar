@@ -32,6 +32,8 @@ public final class SolarDataReset {
         public boolean storedThemes;
         public boolean microSdContents;
         public boolean caches;
+        public boolean flowCache;
+        public boolean stems;
     }
 
     public static final class Result {
@@ -40,6 +42,8 @@ public final class SolarDataReset {
         public boolean solarPrefsCleared;
         /** True when {@link #clearCaches} ran — album art must rebuild on disk. */
         public boolean cachesCleared;
+        public boolean flowCacheCleared;
+        public boolean stemsCleared;
     }
 
     private SolarDataReset() {}
@@ -63,6 +67,15 @@ public final class SolarDataReset {
                 clearCaches(app);
                 clearLibraryDatabase(app);
                 out.cachesCleared = true;
+            }
+            if (sel.flowCache) {
+                clearDirectoryContents(AlbumArtCache.cacheDir(app), false);
+                clearDirectoryContents(FlowThumbCache.cacheDir(app), false);
+                out.flowCacheCleared = true;
+            }
+            if (sel.stems) {
+                clearStems(app);
+                out.stemsCleared = true;
             }
             if (sel.microSdContents) {
                 wipeMicroSdRoot();
@@ -117,6 +130,22 @@ public final class SolarDataReset {
         clearDirectoryContents(app.getCacheDir(), false);
         File extCache = app.getExternalCacheDir();
         if (extCache != null) clearDirectoryContents(extCache, false);
+    }
+
+    static void clearStems(Context app) {
+        if (app == null) return;
+        File appCache = app.getCacheDir();
+        if (appCache != null) {
+            clearDirectoryContents(new File(appCache, "lalal_stems"), false);
+            clearDirectoryContents(new File(appCache, "lalal_work"), false);
+            clearDirectoryContents(new File(appCache, "lalal_solo_cache"), false);
+        }
+        File extCache = app.getExternalCacheDir();
+        if (extCache != null) {
+            clearDirectoryContents(new File(extCache, "lalal_stems"), false);
+            clearDirectoryContents(new File(extCache, "lalal_work"), false);
+            clearDirectoryContents(new File(extCache, "lalal_solo_cache"), false);
+        }
     }
 
     /** Remove every XML store under shared_prefs — all Solar preference namespaces. */
@@ -201,6 +230,8 @@ public final class SolarDataReset {
         if (sel.storedThemes) lines.add(ctx.getString(R.string.settings_reset_themes));
         if (sel.microSdContents) lines.add(ctx.getString(R.string.settings_reset_microsd));
         if (sel.caches) lines.add(ctx.getString(R.string.settings_reset_caches));
+        if (sel.flowCache) lines.add(ctx.getString(R.string.settings_reset_flow));
+        if (sel.stems) lines.add(ctx.getString(R.string.settings_reset_stems));
         return lines;
     }
 }

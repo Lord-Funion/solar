@@ -4,6 +4,8 @@
 /.idea/
 .DS_Store
 /.cursor/
+/.agents/
+/.grok/
 local.properties
 
 # Android / Native Build Outputs

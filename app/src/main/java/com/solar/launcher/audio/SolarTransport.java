@@ -74,6 +74,10 @@ public final class SolarTransport {
         return audio;
     }
 
+    public TransportDeck getActiveDeck() {
+        return active;
+    }
+
     public void setListener(Listener listener) {
         this.listener = listener;
     }
@@ -394,6 +398,16 @@ public final class SolarTransport {
         });
     }
 
+    public void setSpeed(final float speed) {
+        audio.post(new Runnable() {
+            @Override
+            public void run() {
+                if (active != null) active.setSpeed(speed);
+                if (preparedNext != null) preparedNext.setSpeed(speed);
+            }
+        });
+    }
+
     /** Promote prepared next slot to active (gapless handoff). 2026-07-20 */
     public void promotePreparedNext() {
         audio.post(new Runnable() {
@@ -671,6 +685,7 @@ public final class SolarTransport {
         active = next;
         if (prev != null) {
             try { prev.pause(); } catch (Exception ignored) {}
+            try { prev.detachNext(); } catch (Exception ignored) {}
         }
         // Claim speakers after promote so NP ladder follows this deck. 2026-07-20
         ownsPlayback = true;

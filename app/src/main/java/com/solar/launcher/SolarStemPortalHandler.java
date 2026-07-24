@@ -487,6 +487,11 @@ public final class SolarStemPortalHandler {
                 "    <h3>🎵 Music Files on Player</h3>" +
                 "    <button class='btn btn-sm' onclick='loadLibrary()'>🔄 Refresh Library</button>" +
                 "  </div>" +
+                "  <div style='background:rgba(255,255,255,0.05); padding:16px; border-radius:12px; margin-bottom:20px; font-size:13px; color:var(--sub); border-left:4px solid var(--purple);'>" +
+                "    <strong style='color:#fff;'>💡 Manual Stems Loading:</strong> You can load pre-split stems without using the Lalal.ai API. Create a folder next to your audio file named exactly the same but with <code>.stems</code> added (e.g. <code>My Song.mp3</code> and <code>My Song.mp3.stems/</code> or <code>My Song.stems/</code>).<br>" +
+                "    Inside the folder, any audio files containing <strong>\"vocals\"</strong>, <strong>\"drums\"</strong>, or <strong>\"bass\"</strong> in their names will map to those pads. All other audio files will be automatically mixed into the Melody pad.<br>" +
+                "    <span style='color:var(--accent);'>Note: If a Lalal job hits an API limit, the error will be shown in the Status tab.</span>" +
+                "  </div>" +
                 "  <div id='library-list' class='grid'>Loading library...</div>" +
                 "</div>" +
                 "<div id='tab-deezer' class='panel'>" +

@@ -1304,17 +1304,12 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
         if (mode == FlowMode.ALBUM) {
             built = FlowCatalog.buildAlbums(actions.libraryRows(), actions.libraryBrowsePrefs(),
                     actions.policyTracks(), multiTrack);
-            // 2026-07-20 — SEGMENTED return: shells when SongRows empty (honor multi-track pref).
-            if (built == null || built.isEmpty()) {
-                built = albumShellsForSegmented(multiTrack);
-            }
+            // ponytail: removed SEGMENTED fallback to ensure Flow has artist data
         } else {
             built = FlowCatalog.build(mode, actions.libraryRows(), actions.libraryBrowsePrefs(),
                     actions.policyTracks(), actions.musicRoot(), actions.deezerPlaylists(),
                     actions.podcastShows());
-            if ((built == null || built.isEmpty()) && mode == FlowMode.ARTIST) {
-                built = FlowCatalog.buildArtistsFromNames(actions.tier0ArtistNames());
-            }
+            // ponytail: removed ARTIST fallback for the same reason
         }
         catalogSessionCache.put(mode, libGen, optionsKey, built);
         return built;
@@ -1902,19 +1897,8 @@ public final class FlowScreenHost implements FlowView.Callback, FlowCoverResolve
             List<FlowItem> built;
             List<FlowCatalog.SongRow> rows = actions.libraryRows();
             if (mode == FlowMode.ALBUM) {
-                // 2026-07-20 — SEGMENTED: shells from Tier-0 albums when SongRows absent.
-                // Was: buildAlbums(empty) → blank carousel. Reversal: that path only.
-                // multiTrackOnly: SQL HAVING COUNT(*)>1 (was ignored on shells).
-                if (rows == null || rows.isEmpty()) {
-                    built = albumShellsForSegmented(multiTrack);
-                } else {
-                    built = FlowCatalog.buildAlbums(rows, actions.libraryBrowsePrefs(),
-                            actions.policyTracks(), multiTrack);
-                }
-            } else if (mode == FlowMode.ARTIST
-                    && (rows == null || rows.isEmpty())
-                    && (actions.policyTracks() == null || actions.policyTracks().isEmpty())) {
-                built = FlowCatalog.buildArtistsFromNames(actions.tier0ArtistNames());
+                built = FlowCatalog.buildAlbums(rows, actions.libraryBrowsePrefs(),
+                        actions.policyTracks(), multiTrack);
             } else {
                 built = FlowCatalog.build(mode, rows, actions.libraryBrowsePrefs(),
                         actions.policyTracks(), actions.musicRoot(), actions.deezerPlaylists(),

@@ -63,7 +63,7 @@ public final class HomeMenuConfig {
      * Was: pc_upload, podcasts, soulseek, themes, apps. Reversal: restore that list.
      */
     private static final List<String> SOLAR_HOME_EXTRAS = Arrays.asList(
-            ID_SOULSEEK, ID_PODCASTS, ID_PC_UPLOAD, ID_THEMES, ID_APPS);
+            ID_PC_UPLOAD, ID_PODCASTS, ID_SOULSEEK, ID_THEMES, ID_APPS);
 
     /**
      * Default enabled home shortcuts (coming-soon opt-in items omitted).
@@ -72,8 +72,8 @@ public final class HomeMenuConfig {
      * Was: np, music, radio, bt, settings, pc_upload, podcasts, soulseek.
      */
     private static final String DEFAULT_ORDER = String.join(",",
-            ID_NOW_PLAYING, ID_MUSIC, ID_SOULSEEK, ID_PODCASTS, ID_RADIO,
-            ID_BLUETOOTH, ID_SETTINGS, ID_PC_UPLOAD);
+            ID_NOW_PLAYING, ID_MUSIC, ID_RADIO, ID_BLUETOOTH, ID_SETTINGS,
+            ID_PC_UPLOAD, ID_PODCASTS, ID_SOULSEEK);
 
     /**
      * 2026-07-15 — Default catalog sequence + editor listing order.
@@ -95,10 +95,23 @@ public final class HomeMenuConfig {
     /** Editor catalog; hides Radio until its debug gate is on. */
     public static List<Entry> loadEditorCatalogEntries(SharedPreferences prefs) {
         List<Entry> out = new ArrayList<Entry>();
+        Set<String> seen = new HashSet<String>();
+        for (String id : loadHomeOrderIds(prefs)) {
+            if (ID_MORE.equals(id)) continue;
+            if (isHiddenByExperimentGate(id, prefs)) continue;
+            Entry e = find(id);
+            if (e != null) {
+                out.add(e);
+                seen.add(e.id);
+            }
+        }
         for (String id : FIXED_HOME_ORDER) {
             if (isHiddenByExperimentGate(id, prefs)) continue;
             Entry e = find(id);
-            if (e != null) out.add(e);
+            if (e != null && !seen.contains(e.id)) {
+                out.add(e);
+                seen.add(e.id);
+            }
         }
         return out;
     }
@@ -572,8 +585,6 @@ public final class HomeMenuConfig {
         List<String> ids = new ArrayList<String>(loadHomeOrderIds(prefs));
         if (from >= ids.size() || to >= ids.size()) return false;
         String fromId = ids.get(from);
-        String toId = ids.get(to);
-        if (ID_SETTINGS.equals(fromId) || ID_SETTINGS.equals(toId)) return false;
         ids.remove(from);
         ids.add(to, fromId);
         saveOrder(prefs, ids);

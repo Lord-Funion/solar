@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 2026-07-05 — Companion global context modal + input coordinator (fail-open SPOF relief). -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    android:sharedUserId="android.uid.system">
+<!-- 2026-07-21 — Companion global context modal + input coordinator (fail-open SPOF relief).
+     ponytail: removed android:sharedUserId="android.uid.system" because Y2/MT6582 PackageParser rejects non-MTK platform certs with INSTALL_FAILED_SHARED_USER_INCOMPATIBLE; system/app staging grants needed permissions without UID 1000. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

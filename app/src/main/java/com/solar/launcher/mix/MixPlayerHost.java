@@ -960,15 +960,7 @@ public final class MixPlayerHost {
                             ctx, track, premix, ctx.getCacheDir());
                     List<LalalClient.StemFile> stems = null;
                     if (readyDir != null) {
-                        if (LalalClient.userStemsReady(track)
-                                && readyDir.equals(LalalClient.userStemsDir(track))) {
-                            stems = LalalClient.loadUserStems(track, premix);
-                        } else {
-                            stems = LalalClient.loadCached(readyDir, premix);
-                            if (stems == null || stems.isEmpty()) {
-                                stems = LalalClient.loadStemDirFlexible(readyDir);
-                            }
-                        }
+                        stems = LalalClient.resolveStemsFromReadyDir(ctx, track, premix, readyDir);
                     }
                     if (stems == null || stems.isEmpty()) {
                         main.post(new Runnable() {

@@ -230,6 +230,7 @@ public final class ThemedContextMenu {
     private boolean outsideTapDismissAllowed = true;
     /** Scrim DOWN was outside the panel — UP dismisses if still outside. */
     private boolean outsideTapDownOutside = false;
+    private boolean forceAnimationsDisabled = false;
 
     public ThemedContextMenu(Context context) {
         this.context = context;
@@ -244,6 +245,10 @@ public final class ThemedContextMenu {
     /** {@link SolarOverlayService} — no enter/exit anim; keep dark scrim opaque immediately. */
     public void setSystemOverlayMode(boolean systemOverlayMode) {
         this.systemOverlayMode = systemOverlayMode;
+    }
+
+    public void setAnimationsDisabled(boolean disabled) {
+        this.forceAnimationsDisabled = disabled;
     }
 
     /**
@@ -376,7 +381,7 @@ public final class ThemedContextMenu {
     /** Present animation after overlay is on screen — rest state first, anim on next frame. */
     private void runModalPresentAnimation() {
         if (overlay == null || panel == null) return;
-        if (!ModalTransition.enabled(context)) {
+        if (!ModalTransition.enabled(context) || forceAnimationsDisabled) {
             overlay.setAlpha(1f);
             panel.setScaleX(1f);
             panel.setScaleY(1f);
@@ -3798,7 +3803,7 @@ public final class ThemedContextMenu {
         final FrameLayout scrim = overlay;
         final LinearLayout panelView = panel;
         if (!animated || scrim == null || scrim.getParent() == null
-                || !ModalTransition.enabled(context)) {
+                || !ModalTransition.enabled(context) || forceAnimationsDisabled) {
             removeOverlayFromParent(scrim);
             clearOverlayState();
             if (onComplete != null) onComplete.run();

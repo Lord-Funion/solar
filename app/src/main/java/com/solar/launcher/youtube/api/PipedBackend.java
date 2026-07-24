@@ -78,7 +78,7 @@ public final class PipedBackend implements YoutubeBackend {
     public List<YouTubeVideo> search(String query) throws IOException {
         String region = YoutubeApiUtil.regionCode();
         String url = baseUrl + "/search?q=" + YoutubeApiUtil.urlEncode(query)
-                + "&filter=videos&region=" + YoutubeApiUtil.urlEncode(region);
+                + "&filter=all&region=" + YoutubeApiUtil.urlEncode(region);
         String body = httpGet(url);
         try {
             JSONArray arr = new JSONObject(body).getJSONArray("items");

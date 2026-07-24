@@ -29,7 +29,7 @@ public final class Debug712c71Log {
             "/home/deck/Documents/Cursor Workspaces/TheSolarProject/solar/.cursor/debug-712c71.log";
 
     /** 2026-07-20 — On while hunting empty YouTube search; flip false after confirmed. */
-    public static volatile boolean ENABLED = true;
+    public static volatile boolean ENABLED = false;
 
     private Debug712c71Log() {}
 
