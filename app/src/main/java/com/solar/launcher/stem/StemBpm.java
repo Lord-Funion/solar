@@ -103,7 +103,11 @@ public final class StemBpm {
         long elapsed = elapsedWallMs > 0L ? elapsedWallMs : 0L;
         int catchUp = originPosMs + Math.round(elapsed * r);
         if (catchUp < 0) catchUp = 0;
-        if (durationMs > 0 && catchUp > durationMs) catchUp = durationMs;
+        if (durationMs > 0) {
+            int maxSeek = durationMs - 100;
+            if (maxSeek < 0) maxSeek = 0;
+            if (catchUp > maxSeek) catchUp = maxSeek;
+        }
         return catchUp;
     }
 

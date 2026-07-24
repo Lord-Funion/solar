@@ -48,7 +48,7 @@ public final class StemMixer {
 
     private final Context app;
     // Was: new Handler(Looper.getMainLooper()). Reversal: restore main-looper Handler. 2026-07-20
-    private final Handler main = new Handler(Looper.getMainLooper());
+    private final Handler main = new Handler(android.os.Looper.getMainLooper());
     private MediaPlayer[] players = new MediaPlayer[0];
     private int[] playerZones = new int[0];
     private int playerCount;

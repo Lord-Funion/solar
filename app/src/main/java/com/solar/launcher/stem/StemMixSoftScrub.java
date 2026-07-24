@@ -17,7 +17,10 @@ public final class StemMixSoftScrub {
     public static int clampSeekMs(int targetMs, int durationMs) {
         if (durationMs <= 0) return 0;
         if (targetMs < 0) return 0;
-        if (targetMs > durationMs) return durationMs;
+        // 2026-07-24 — Prevent EOF seek crash/hang on scrub to end by clamping slightly before duration
+        int maxSeek = durationMs - 100;
+        if (maxSeek < 0) maxSeek = 0;
+        if (targetMs > maxSeek) return maxSeek;
         return targetMs;
     }
 

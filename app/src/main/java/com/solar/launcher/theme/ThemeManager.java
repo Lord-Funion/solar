@@ -3906,9 +3906,8 @@ public class ThemeManager {
             fos.close();
             
             // Update in-memory active theme
-            if (activeTheme.root != null) {
-                activeTheme.root = root;
-            }
+            // In-memory active theme is final, so we rely on the sync/reload to update it or restart
+            // to apply the new config completely.
             
             // Trigger sync to ensure changes mirror to SD card
             scheduleThemeLibrarySync(ctx, true);
