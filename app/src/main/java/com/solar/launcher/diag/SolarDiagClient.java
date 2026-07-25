@@ -111,7 +111,13 @@ public final class SolarDiagClient {
         } catch (Throwable e) {
             // 2026-07-20 — OOM/Error on huge payloads must not escape as uncaught (kills Solar).
             // Was: catch (Exception) only. Reversal: catch Exception again.
-            return Result.fail(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            // ponytail: hide cloudflare worker URL in error messages
+            int idx = msg.indexOf(" for http");
+            if (idx > 0) {
+                msg = msg.substring(0, idx);
+            }
+            return Result.fail(msg);
         }
     }
 

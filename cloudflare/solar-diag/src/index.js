@@ -1,6 +1,6 @@
 /**
  * 2026-07-16 — Solar diagnostic ingest Worker (source in thesolarproject/solar).
- * Devices POST log bundles; issues are created on GITHUB_REPO (thesolarproject/solar-diag).
+ * Devices POST log bundles; issues are created on GITHUB_REPO (thesolarproject/solar).
  * Deploy this package from solar; do not put the GitHub PAT on the device.
  */
 
@@ -55,7 +55,7 @@ async function handleReport(request, env) {
   }
 
   const githubToken = env.GITHUB_TOKEN || "";
-  const repo = env.GITHUB_REPO || "thesolarproject/solar-diag";
+  const repo = env.GITHUB_REPO || "thesolarproject/solar";
   if (!githubToken) {
     return json({ ok: false, error: "github_token_missing" }, 500);
   }
