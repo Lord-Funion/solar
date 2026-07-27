@@ -2549,11 +2549,9 @@ public class MainActivity extends Activity {
             // #endregion
             if (npStemSession != null && npStemSession.isMixerOwningAudio()) {
                 npStemSession.pause();
-                return;
             }
             if (com.solar.launcher.audio.SolarTransport.get().ownsPlayback()) {
                 com.solar.launcher.audio.SolarTransport.get().pause();
-                return;
             }
             if (playback.isPodcastActive() && podcastIjkPlayer != null) {
                 podcastIjkPlayer.pause();
@@ -14345,6 +14343,9 @@ public class MainActivity extends Activity {
             // #endregion
             stemPickMode = false;
             com.solar.launcher.stem.StemPickSlots.clear(stemMashupQueue);
+        }
+        // Leaving library clears Stems hub mode (unless entering Stem Player).
+        if (stemsHubRootMode && state != STATE_BROWSER && state != STATE_STEM_PLAYER) {
             stemsHubRootMode = false;
         }
         // Leaving library clears Mix assign (unless entering Mix). 2026-07-19
@@ -18173,8 +18174,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         if (keyboardPurpose == KEYBOARD_SOULSEEK_PASS
                 || keyboardPurpose == NavidromeSettingsHost.KEYBOARD_PASS
-                || keyboardPurpose == com.solar.launcher.jellyfin.JellyfinSettingsHost.KEYBOARD_PASS
-                || keyboardPurpose == com.solar.launcher.scrobble.ScrobbleSettingsHost.KEYBOARD_LASTFM_PASS) {
+                || keyboardPurpose == com.solar.launcher.jellyfin.JellyfinSettingsHost.KEYBOARD_PASS) {
             return getString(R.string.keyboard_enter_password);
         }
         if (keyboardPurpose == KEYBOARD_BT_PAIRING_PIN) {
@@ -18342,9 +18342,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 jellyfinScreenHost.finishSearchKeyboard(typedPassword.trim());
             }
         }
-        else if (keyboardPurpose == com.solar.launcher.scrobble.ScrobbleSettingsHost.KEYBOARD_LASTFM_USER
-                || keyboardPurpose == com.solar.launcher.scrobble.ScrobbleSettingsHost.KEYBOARD_LASTFM_PASS
-                || keyboardPurpose == com.solar.launcher.scrobble.ScrobbleSettingsHost.KEYBOARD_LISTENBRAINZ_TOKEN) {
+        else if (keyboardPurpose == com.solar.launcher.scrobble.ScrobbleSettingsHost.KEYBOARD_LISTENBRAINZ_TOKEN) {
             if (scrobbleSettingsHost != null) scrobbleSettingsHost.finishKeyboard(keyboardPurpose, typedPassword.trim());
             changeScreen(STATE_SETTINGS);
             buildScrobblingSettingsUI();
@@ -64007,18 +64005,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             return;
         }
         
-        File cache = getCacheDir();
-        boolean globalOn = com.solar.launcher.stem.StemFeatures.isStemsGlobalEnabled(prefs);
-        boolean stemsReady = com.solar.launcher.stem.LalalClient.trackStemsReady(this, origin, true, cache)
-                || com.solar.launcher.stem.LalalClient.trackStemsReady(this, origin, false, cache)
-                || (com.solar.launcher.stem.LalalClient.findReadySoloFile(this, origin, com.solar.launcher.stem.SoloMode.ACAPELLA, cache) != null
-                && com.solar.launcher.stem.LalalClient.findReadySoloFile(this, origin, com.solar.launcher.stem.SoloMode.INSTRUMENTAL, cache) != null);
-        if (globalOn && stemsReady) {
-            com.solar.launcher.stem.NpStemSession session = ensureNpStemSession();
-            if (!session.isStemsMasterOn() || session.originFile() == null || !filesEqualPath(session.originFile(), origin)) {
-                session.setStemsMaster(origin, true);
-            }
-        }
+        // Removed auto-starting stems here to prevent dual playback.
+        // Picking a song plays the song; Instrumental / Vocals stays a menu choice.
     }
 
     /**
@@ -64922,7 +64910,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 com.solar.launcher.stem.SoloMode.INSTRUMENTAL, cacheDir);
         boolean canAcap = canOfferSoloModeFor(origin,
                 com.solar.launcher.stem.SoloMode.ACAPELLA, cacheDir);
-        boolean stemsReady = canInstr || canAcap
+        boolean stemsReady = (canInstr && canAcap)
                 || com.solar.launcher.stem.LalalClient.trackStemsReady(
                         this, origin, true, cacheDir)
                 || com.solar.launcher.stem.LalalClient.trackStemsReady(
@@ -65063,27 +65051,51 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             return;
         }
         dismissThemedContextMenu(true, false, null);
-        soloOriginatingFile = origin;
-        if (!isPlayingSoloOrigin(origin)) {
-            playTrackList(java.util.Collections.singletonList(origin), 0, null, null);
-        }
-        // Defer Stems on until transport has the origin so playhead matches. 2026-07-21
-        final android.view.View postTarget = browserListHost != null
-                ? browserListHost : findViewById(android.R.id.content);
-        if (postTarget == null) {
-            com.solar.launcher.stem.NpStemSession session = ensureNpStemSession();
-            session.setPendingLayers(wantVocals, wantInstr);
-            session.setStemsMaster(origin, true);
+        File cacheDir = getCacheDir();
+        boolean canInstr = canOfferSoloModeFor(origin,
+                com.solar.launcher.stem.SoloMode.INSTRUMENTAL, cacheDir);
+        boolean canAcap = canOfferSoloModeFor(origin,
+                com.solar.launcher.stem.SoloMode.ACAPELLA, cacheDir);
+        boolean stemsReady = (canInstr && canAcap)
+                || com.solar.launcher.stem.LalalClient.trackStemsReady(
+                        this, origin, true, cacheDir)
+                || com.solar.launcher.stem.LalalClient.trackStemsReady(
+                        this, origin, false, cacheDir);
+                        
+        if (!stemsReady) {
+            com.solar.launcher.audio.SolarTransport transport = com.solar.launcher.audio.SolarTransport.get();
+            if (transport != null && transport.ownsPlayback()) {
+                transport.pause();
+            }
+            
+            final android.view.View prepUi = findViewById(R.id.stem_prep_root);
+            if (prepUi != null) prepUi.setVisibility(android.view.View.VISIBLE);
+            
+            java.util.List<File> tracks = new java.util.ArrayList<>();
+            tracks.add(origin);
+            
+            com.solar.launcher.stem.StemPrepHost host = new com.solar.launcher.stem.StemPrepHost(
+                    MainActivity.this, prepUi != null ? prepUi : findViewById(android.R.id.content), tracks,
+                    new com.solar.launcher.stem.StemPrepHost.Callbacks() {
+                        @Override
+                        public void onBatchFinished() {
+                            if (prepUi != null) prepUi.setVisibility(android.view.View.GONE);
+                            playNpStemsIsolation(origin, wantVocals, wantInstr);
+                        }
+                        @Override
+                        public void onBatchError(String error) {
+                            if (prepUi != null) prepUi.setVisibility(android.view.View.GONE);
+                            android.widget.Toast.makeText(MainActivity.this, error, android.widget.Toast.LENGTH_SHORT).show();
+                        }
+                    }
+            );
+            host.start();
             return;
         }
-        postTarget.post(new Runnable() {
-            @Override
-            public void run() {
-                com.solar.launcher.stem.NpStemSession session = ensureNpStemSession();
-                session.setPendingLayers(wantVocals, wantInstr);
-                session.setStemsMaster(origin, true);
-            }
-        });
+
+        // Use the new SolarTransport layer engine instead of old StemMixer.
+        // This avoids playing twice via dual engines.
+        trySoloLayerMix(origin, wantVocals, wantInstr, false);
     }
 
     /**

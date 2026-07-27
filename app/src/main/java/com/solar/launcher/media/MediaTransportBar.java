@@ -152,7 +152,7 @@ public final class MediaTransportBar {
                     HardwareButtonGlyph.holdPlayPauseOpenFlow(ctx, sizePx));
         } else if (hintMode == HintMode.HOLD_BACK_OPTIONS) {
             HardwareButtonGlyph.bindGlyphText(hint,
-                    HardwareButtonGlyph.pressBackOptionsHint(ctx, DeviceFeatures.isY2(), sizePx));
+                    HardwareButtonGlyph.keepHoldingForOptions(ctx, DeviceFeatures.isY2(), sizePx));
         }
         // NONE: leave text; visibility stays gated by ensureVolumeHintVisible
     }

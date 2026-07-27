@@ -296,39 +296,17 @@ public final class ScrobbleManager {
         }
     }
 
-    public static void authenticateLastFm(final Context ctx, final String username, final String password,
-            final AuthCallback callback) {
-        new AsyncTask<Void, Void, String>() {
-            private boolean success = false;
-
-            @Override
-            protected String doInBackground(Void... voids) {
-                String result = authenticateLastFmSync(ctx, username, password);
-                if (result != null && result.startsWith("Connected to Last.fm")) {
-                    success = true;
-                }
-                return result;
-            }
-
-            @Override
-            protected void onPostExecute(String msg) {
-                if (callback != null) callback.onResult(success, msg != null ? msg : "Unknown error");
-            }
-        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-    }
-
-    public static String authenticateLastFmSync(Context ctx, String username, String password) {
-        if (ctx == null || username == null || username.trim().isEmpty() || password == null || password.trim().isEmpty()) {
-            return "Username and password required";
+    public static String getSessionLastFmSync(Context ctx, String token) {
+        if (ctx == null || token == null || token.trim().isEmpty()) {
+            return "Token required";
         }
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         String apiKey = prefs.getString(PREF_LASTFM_API_KEY, DEFAULT_LASTFM_API_KEY);
         String apiSecret = prefs.getString(PREF_LASTFM_API_SECRET, DEFAULT_LASTFM_API_SECRET);
 
         Map<String, String> params = new HashMap<String, String>();
-        params.put("method", "auth.getMobileSession");
-        params.put("username", username.trim());
-        params.put("password", password.trim());
+        params.put("method", "auth.getSession");
+        params.put("token", token.trim());
         params.put("api_key", apiKey);
 
         String sig = createLastFmSignature(params, apiSecret);
@@ -345,7 +323,7 @@ public final class ScrobbleManager {
             if (json.has("session")) {
                 JSONObject session = json.getJSONObject("session");
                 String sk = session.getString("key");
-                String name = session.optString("name", username.trim());
+                String name = session.optString("name", "");
                 prefs.edit()
                         .putString(PREF_LASTFM_SK, sk)
                         .putString(PREF_LASTFM_USERNAME, name)

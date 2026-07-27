@@ -131,10 +131,14 @@ public class SolarWebServer extends Thread {
                 String path = parts[1];
 
                 int contentLength = 0;
+                String host = "";
                 String line;
                 while (!(line = readHeaderLine(is)).isEmpty()) {
                     if (line.toLowerCase().startsWith("content-length:")) {
                         contentLength = Integer.parseInt(line.split(":")[1].trim());
+                    }
+                    if (line.toLowerCase().startsWith("host:")) {
+                        host = line.substring(5).trim();
                     }
                 }
 
@@ -464,30 +468,20 @@ public class SolarWebServer extends Thread {
                 }
                 else if (path.equals("/scrobbling") || path.startsWith("/scrobbling?")) {
                     if (method.equals("GET")) {
-                        writeScrobbleSetupPage(os, null);
+                        writeScrobbleSetupPage(os, null, host);
                     } else if (method.equals("POST")) {
                         byte[] body = readBody(is, contentLength);
                         String bodyStr = new String(body, "UTF-8");
                         SharedPreferences prefs = context.getSharedPreferences(
                                 "SOLAR_SETTINGS", Context.MODE_PRIVATE);
                         boolean lfmEnabled = "true".equalsIgnoreCase(formValue(bodyStr, "lastfm_enabled"));
-                        String lfmUser = formValue(bodyStr, "lastfm_user");
-                        String lfmPass = formValue(bodyStr, "lastfm_pass");
                         boolean lbEnabled = "true".equalsIgnoreCase(formValue(bodyStr, "listenbrainz_enabled"));
                         String lbToken = formValue(bodyStr, "listenbrainz_token");
 
-                        if (lfmUser != null) lfmUser = lfmUser.trim(); else lfmUser = "";
-                        if (lfmPass != null) lfmPass = lfmPass.trim(); else lfmPass = "";
                         if (lbToken != null) lbToken = lbToken.trim(); else lbToken = "";
 
                         SharedPreferences.Editor editor = prefs.edit();
                         editor.putBoolean(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_ENABLED, lfmEnabled);
-                        if (!lfmUser.isEmpty()) {
-                            editor.putString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_USERNAME, lfmUser);
-                        }
-                        if (!lfmPass.isEmpty()) {
-                            editor.putString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_PASSWORD, lfmPass);
-                        }
                         editor.putBoolean(com.solar.launcher.scrobble.ScrobbleManager.PREF_LISTENBRAINZ_ENABLED, lbEnabled);
                         if (!lbToken.isEmpty()) {
                             editor.putString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LISTENBRAINZ_TOKEN, lbToken);
@@ -495,16 +489,28 @@ public class SolarWebServer extends Thread {
                         editor.apply();
 
                         String msg = "✅ Scrobble settings saved.";
-                        if (!lfmUser.isEmpty() && !lfmPass.isEmpty()) {
-                            String authResult = com.solar.launcher.scrobble.ScrobbleManager.authenticateLastFmSync(context, lfmUser, lfmPass);
-                            if (authResult != null && authResult.startsWith("Connected")) {
-                                msg = "✅ Saved & " + authResult;
-                            } else {
-                                msg = "⚠️ Saved, but Last.fm auth failed: " + authResult;
-                            }
-                        }
-                        writeScrobbleSetupPage(os, msg);
+                        writeScrobbleSetupPage(os, msg, host);
                     }
+                }
+                else if (method.equals("GET") && path.startsWith("/lastfm_auth")) {
+                    String query = "";
+                    if (path.contains("?")) query = path.split("\\?")[1];
+                    String token = "";
+                    for (String p : query.split("&")) {
+                        if (p.startsWith("token=")) token = java.net.URLDecoder.decode(p.substring(6), "UTF-8");
+                    }
+                    String msg = "";
+                    if (token != null && !token.isEmpty()) {
+                        String authResult = com.solar.launcher.scrobble.ScrobbleManager.getSessionLastFmSync(context, token);
+                        if (authResult != null && authResult.startsWith("Connected")) {
+                            msg = "✅ Last.fm Authenticated: " + authResult;
+                        } else {
+                            msg = "⚠️ Last.fm Auth Failed: " + authResult;
+                        }
+                    } else {
+                        msg = "⚠️ No token provided by Last.fm.";
+                    }
+                    writeScrobbleSetupPage(os, msg, host);
                 }
                 else if (method.equals("GET") && path.equals("/api/scrobbling-settings")) {
                     SharedPreferences prefs = context.getSharedPreferences(
@@ -526,19 +532,13 @@ public class SolarWebServer extends Thread {
                     SharedPreferences prefs = context.getSharedPreferences(
                             "SOLAR_SETTINGS", Context.MODE_PRIVATE);
                     boolean lfmEnabled = "true".equalsIgnoreCase(formValue(bodyStr, "lastfm_enabled"));
-                    String lfmUser = formValue(bodyStr, "lastfm_user");
-                    String lfmPass = formValue(bodyStr, "lastfm_pass");
                     boolean lbEnabled = "true".equalsIgnoreCase(formValue(bodyStr, "listenbrainz_enabled"));
                     String lbToken = formValue(bodyStr, "listenbrainz_token");
 
-                    if (lfmUser != null) lfmUser = lfmUser.trim(); else lfmUser = "";
-                    if (lfmPass != null) lfmPass = lfmPass.trim(); else lfmPass = "";
                     if (lbToken != null) lbToken = lbToken.trim(); else lbToken = "";
 
                     SharedPreferences.Editor editor = prefs.edit();
                     editor.putBoolean(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_ENABLED, lfmEnabled);
-                    if (!lfmUser.isEmpty()) editor.putString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_USERNAME, lfmUser);
-                    if (!lfmPass.isEmpty()) editor.putString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_PASSWORD, lfmPass);
                     editor.putBoolean(com.solar.launcher.scrobble.ScrobbleManager.PREF_LISTENBRAINZ_ENABLED, lbEnabled);
                     if (!lbToken.isEmpty()) editor.putString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LISTENBRAINZ_TOKEN, lbToken);
                     editor.apply();
@@ -546,10 +546,6 @@ public class SolarWebServer extends Thread {
                     org.json.JSONObject resp = new org.json.JSONObject();
                     try {
                         resp.put("ok", true);
-                        if (!lfmUser.isEmpty() && !lfmPass.isEmpty()) {
-                            String authResult = com.solar.launcher.scrobble.ScrobbleManager.authenticateLastFmSync(context, lfmUser, lfmPass);
-                            resp.put("auth_result", authResult);
-                        }
                     } catch (Exception ignored) {}
                     String response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + resp.toString();
                     os.write(response.getBytes("UTF-8"));
@@ -988,36 +984,39 @@ public class SolarWebServer extends Thread {
         }
 
         /** 2026-07-16: PC companion form — Scrobbling (Last.fm & ListenBrainz). */
-        private void writeScrobbleSetupPage(OutputStream os, String message) throws java.io.IOException {
+        private void writeScrobbleSetupPage(OutputStream os, String message, String host) throws java.io.IOException {
             SharedPreferences prefs = context.getSharedPreferences(
                     "SOLAR_SETTINGS", Context.MODE_PRIVATE);
             boolean lastfmEnabled = prefs.getBoolean(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_ENABLED, false);
             String lastfmUser = prefs.getString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_USERNAME, "");
-            String lastfmPass = prefs.getString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_PASSWORD, "");
             String lastfmSk = prefs.getString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_SK, "");
             boolean listenbrainzEnabled = prefs.getBoolean(com.solar.launcher.scrobble.ScrobbleManager.PREF_LISTENBRAINZ_ENABLED, false);
             String listenbrainzToken = prefs.getString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LISTENBRAINZ_TOKEN, "");
+            String apiKey = prefs.getString(com.solar.launcher.scrobble.ScrobbleManager.PREF_LASTFM_API_KEY, com.solar.launcher.scrobble.ScrobbleManager.DEFAULT_LASTFM_API_KEY);
+
+            String authUrl = "https://www.last.fm/api/auth/?api_key=" + apiKey + "&cb=http://" + host + "/lastfm_auth";
 
             String msgHtml = message != null
                     ? "<p style='color:" + (message.startsWith("✅") ? "#0f0" : "#f66") + "'>"
                     + htmlEscape(message) + "</p>" : "";
             String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>" +
                     "<title>Scrobbling Setup</title><style>body{font-family:sans-serif;background:#111;color:#fff;padding:20px;text-align:center;}" +
-                    "input,button,label{font-size:16px;padding:10px;margin:5px 0;width:100%;max-width:400px;box-sizing:border-box;display:inline-block;}" +
+                    "input,button,label,.btn-auth{font-size:16px;padding:10px;margin:5px 0;width:100%;max-width:400px;box-sizing:border-box;display:inline-block;}" +
                     "button{background:#00ffff;color:#000;border:none;font-weight:bold;cursor:pointer;}" +
+                    ".btn-auth{background:#f66;color:#fff;text-decoration:none;font-weight:bold;border-radius:5px;}" +
                     ".box{background:#222;padding:20px;border-radius:10px;margin:15px auto;max-width:400px;text-align:left;}" +
                     "h3{margin-top:0;color:#0ff;text-align:center;}</style></head><body>" +
                     "<h2>🎧 Scrobbling Setup</h2>" + msgHtml +
                     "<form method='POST' action='/scrobbling'>" +
                     "<div class='box'><h3>Last.fm</h3>" +
                     "<label><input type='checkbox' name='lastfm_enabled' value='true' style='width:auto;' " + (lastfmEnabled ? "checked" : "") + "> Enable Last.fm</label>" +
-                    "<input name='lastfm_user' placeholder='Last.fm Username' value='" + htmlEscape(lastfmUser) + "'>" +
-                    "<input name='lastfm_pass' type='password' placeholder='Last.fm Password (to acquire session key)' value='" + htmlEscape(lastfmPass) + "'>" +
-                    "<p style='color:#aaa;font-size:12px;margin:5px 0;'>Session Key: " + (lastfmSk.isEmpty() ? "Not Authenticated" : "Authenticated ✅") + "</p></div>" +
+                    "<p style='color:#aaa;font-size:14px;margin:5px 0;'>Current User: " + (lastfmUser.isEmpty() ? "Not logged in" : htmlEscape(lastfmUser)) + "</p>" +
+                    "<p style='color:#aaa;font-size:14px;margin:5px 0;'>Session Key: " + (lastfmSk.isEmpty() ? "Not Authenticated" : "Authenticated ✅") + "</p>" +
+                    "<a class='btn-auth' href='" + htmlEscape(authUrl) + "'>Connect to Last.fm</a></div>" +
                     "<div class='box'><h3>ListenBrainz</h3>" +
                     "<label><input type='checkbox' name='listenbrainz_enabled' value='true' style='width:auto;' " + (listenbrainzEnabled ? "checked" : "") + "> Enable ListenBrainz</label>" +
                     "<input name='listenbrainz_token' placeholder='ListenBrainz User Token' value='" + htmlEscape(listenbrainzToken) + "'></div>" +
-                    "<button type='submit'>Save &amp; Authenticate</button></form>" +
+                    "<button type='submit'>Save Settings</button></form>" +
                     "<p><a href='/'>← Back to upload</a></p></body></html>";
             String response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n" + html;
             os.write(response.getBytes("UTF-8"));

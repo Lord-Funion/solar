@@ -733,7 +733,7 @@
     <string name="context_quick_brightness">밝기</string>
     <string name="context_hold_back_hint">뒤로 버튼 길게 눌러 옵션</string>
     <!-- 2026-07-11 — Y2: Back or Power opens Options; matches EN context_hold_back_or_power_hint. -->
-    <string name="context_hold_back_or_power_hint">뒤로 또는 전원 길게 눌러 옵션</string>
+    <string name="context_hold_back_or_power_hint">뒤로 또는 ⏻ 길게 눌러 옵션</string>
     <!-- 2026-07-18 — NP Flow tip prose after Options dismissed. -->
     <string name="flow_hold_play_pause_hint">Flow 열기</string>
     <!-- 2026-07-18 — NP live keep-holding tips (glyphs show the button). -->

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Solar Portal</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <header class="header">
+    <h1>Solar Portal</h1>
+    <nav class="nav">
+      <button id="tab-library" class="tab active">Library</button>
+      <button id="tab-stream" class="tab">Streaming</button>
+      <button id="tab-stems" class="tab">Stem Separation</button>
+      <button id="tab-manual-stems" class="tab">Manual Stems</button>
+      <button id="tab-settings" class="tab">Settings</button>
+    </nav>
+  </header>
+
+  <main id="content" class="content">
+    <!-- Dynamic sections will be injected by app.js -->
+  </main>
+
+  <footer class="footer">© Solar Project</footer>
+
+  <script src="app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.0/lame.min.js"></script>
+<script src="mp3encoder.js"></script>
+</body>
+</html>

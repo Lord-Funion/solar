@@ -1391,7 +1391,7 @@ https://github.com/thesolarproject/solar</string>
     <string name="context_quick_brightness">Brightness</string>
     <string name="context_hold_back_hint">Hold back button for Options</string>
     <!-- 2026-07-11 — Y2 only: power hold also opens Options; Y1 keeps context_hold_back_hint (no power key). -->
-    <string name="context_hold_back_or_power_hint">Hold Back or Power for Options</string>
+    <string name="context_hold_back_or_power_hint">Hold Back or ⏻ for Options</string>
     <!-- 2026-07-18 — NP transport tip after Options dismissed; glyph = Play/Pause. -->
     <string name="flow_hold_play_pause_hint">open Flow</string>
     <!-- 2026-07-18 — Live NP tip while holding Back / Play-Pause (glyphs supply the button). -->

@@ -111,9 +111,6 @@ public final class RowKeys {
     public static final String JELLYFIN_PASS = "settings.jellyfin.pass";
     public static final String SCROBBLING_MENU = "settings.scrobbling";
     public static final String LASTFM_ENABLE = "settings.scrobbling.lastfm.enable";
-    public static final String LASTFM_USER = "settings.scrobbling.lastfm.user";
-    public static final String LASTFM_PASS = "settings.scrobbling.lastfm.pass";
-    public static final String LASTFM_AUTH = "settings.scrobbling.lastfm.auth";
     public static final String LISTENBRAINZ_ENABLE = "settings.scrobbling.listenbrainz.enable";
     public static final String LISTENBRAINZ_TOKEN = "settings.scrobbling.listenbrainz.token";
     public static final String JELLYFIN_TEST = "settings.jellyfin.test";

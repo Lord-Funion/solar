@@ -14,9 +14,13 @@ case "$MODEL" in
     ;;
 esac
 
-for vol in $VOLS; do
-  vdc volume unshare "$vol" ums 2>/dev/null
-done
+# ponytail: Y2 is MTP-only, do not unshare (breaks MTK vold MTP visibility).
+if [ "$USB_AFTER" != "mtp,adb" ]; then
+  for vol in $VOLS; do
+    vdc volume unshare "$vol" ums 2>/dev/null
+  done
+fi
+
 # 2026-07-17 — Was sleep 0.5; shorter settle so unplug after disk mode feels snappy.
 # LUN clear + setprop below are enough for host drop; long sleep stacked with dual teardown jank.
 sleep 0.12
@@ -38,5 +42,14 @@ if [ -d /data/property ]; then
   echo -n "$USB_AFTER" > /data/property/persist.sys.usb.config 2>/dev/null
   chmod 600 /data/property/persist.sys.usb.config 2>/dev/null
 fi
+
+# Kick MediaScanner for MTP so PC sees storage if we just switched to mtp,adb
+if [ "$USB_AFTER" = "mtp,adb" ]; then
+  # Slight delay to let MtpService start
+  sleep 1
+  am broadcast -a android.intent.action.MEDIA_MOUNTED -d file:///storage/sdcard0 >/dev/null 2>&1
+  am broadcast -a android.intent.action.MEDIA_MOUNTED -d file:///storage/sdcard1 >/dev/null 2>&1
+fi
+
 echo "UMS disabled usb=$USB_AFTER persist=$USB_AFTER"
 exit 0

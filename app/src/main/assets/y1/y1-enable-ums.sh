@@ -8,7 +8,7 @@ fi
 # Fallback when only this file was staged (inline copy).
 VOLS="/storage/sdcard0"
 case "$MODEL" in
-  Y2|*Y2*) VOLS="/storage/sdcard1" ;;
+  Y2|*Y2*|A5|*A5*) VOLS="/storage/sdcard1" ;;
 esac
 PROP="$(getprop sys.usb.config 2>/dev/null)"
 KERN="$(cat /sys/class/android_usb/android0/functions 2>/dev/null)"

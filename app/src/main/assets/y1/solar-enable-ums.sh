@@ -11,7 +11,7 @@ MODEL="$(getprop ro.product.model 2>/dev/null)"
 # Was: Y1 only /storage/sdcard0 — second card never bound when present.
 VOLS="/storage/sdcard0"
 case "$MODEL" in
-  Y2|*Y2*|Y1|*Y1*)
+  Y2|*Y2*|Y1|*Y1*|A5|*A5*)
     VOLS=""
     for p in /storage/sdcard0 /storage/sdcard1; do
       [ -e "$p" ] && VOLS="$VOLS $p"
