@@ -1398,7 +1398,7 @@ https://github.com/thesolarproject/solar</string>
     <!-- Short copy so 480px + glyph fits without cutting off mid-word. -->
     <string name="np_keep_holding_for_options">Options</string>
     <string name="np_keep_holding_for_flow">Flow</string>
-    <string name="context_quick_power">Power</string>
+    <string name="context_quick_power">⏻</string>
     <string name="context_quick_queue">Queue</string>
     <string name="playlist_move_tutorial_title">Move tracks in playlist</string>
     <string name="playlist_move_tutorial_body">Hold OK on a track to pick it up.

@@ -8,7 +8,7 @@
     <string name="context_action_sleep">Sleep</string>
     <string name="context_tier_wifi">Wi-Fi</string>
     <string name="home_menu_bluetooth">Bluetooth</string>
-    <string name="context_quick_power">Power</string>
+    <string name="context_quick_power">⏻</string>
     <string name="context_go_to_now_playing">Go to Now Playing</string>
     <string name="context_quick_brightness">Brightness</string>
     <string name="context_quick_volume">Volume</string>
