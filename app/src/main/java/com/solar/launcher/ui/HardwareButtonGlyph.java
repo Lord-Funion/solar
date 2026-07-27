@@ -460,7 +460,7 @@ public final class HardwareButtonGlyph {
 
     /** 2026-07-20 — Same volume arrow tip (size ignored — text-only). */
     public static CharSequence volumeUpDownHint(Context ctx, int sizePx) {
-        return "🗘 Volume";
+        return "↺ Volume Down ↻ Volume Up";
     }
 
     /**
