@@ -79,7 +79,7 @@ public class FocusScrollHelperTest {
 
     @Test
     public void listSelection_secondRowStillVisible_noJumpToTop() {
-        // Classic bug: sticky-Y put row 1 at Y=0; edge-only keeps Y=45
+        // Regression test: sticky-Y used to put row 1 at Y=0; edge-only keeps Y=45
         assertEquals(45, FocusScrollHelper.computeListSelectionTop(
                 300, 45, 90, true, false, 45, 2));
     }
