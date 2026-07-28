@@ -214,8 +214,8 @@ public class SolarWebServer extends Thread {
                     File newDir = new File(rootFolder, name);
                     newDir.mkdirs();
                     newDir.setReadable(true, false);
+                    newDir.setWritable(true, false);
                     newDir.setExecutable(true, false);
-                    try { Runtime.getRuntime().exec(new String[]{"chmod", "777", newDir.getAbsolutePath()}); } catch(Exception e){}
 
                     String response = "HTTP/1.1 200 OK\r\n\r\nOK";
                     os.write(response.getBytes("UTF-8"));
@@ -580,8 +580,8 @@ public class SolarWebServer extends Thread {
                     if (!targetDir.exists()) {
                         targetDir.mkdirs();
                         targetDir.setReadable(true, false);
+                        targetDir.setWritable(true, false);
                         targetDir.setExecutable(true, false);
-                        try { Runtime.getRuntime().exec(new String[]{"chmod", "777", targetDir.getAbsolutePath()}); } catch(Exception e){}
                     }
                     File outFile = new File(targetDir, name);
 
@@ -599,7 +599,8 @@ public class SolarWebServer extends Thread {
                     fos.close();
 
                     outFile.setReadable(true, false);
-                    try { Runtime.getRuntime().exec(new String[]{"chmod", "777", outFile.getAbsolutePath()}); } catch(Exception e){}
+                    outFile.setWritable(true, false);
+                    outFile.setExecutable(true, false);
 
                     String response = "HTTP/1.1 200 OK\r\n\r\nOK";
                     os.write(response.getBytes("UTF-8"));
