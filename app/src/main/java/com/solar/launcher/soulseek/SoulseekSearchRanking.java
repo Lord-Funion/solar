@@ -93,10 +93,9 @@ public final class SoulseekSearchRanking {
             score += SCORE_ALL_TERMS;
         }
 
-        for (String folder : pathFolders(filename)) {
-            String f = folder.toLowerCase(Locale.US);
+        for (String folder : pathFolders(haystack)) {
             for (String term : pq.terms) {
-                if (f.equals(term)) {
+                if (folder.equals(term)) {
                     score += SCORE_FOLDER;
                     break;
                 }
