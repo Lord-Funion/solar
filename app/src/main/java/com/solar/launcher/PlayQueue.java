@@ -229,7 +229,7 @@ public final class PlayQueue {
 
     public void replaceFileRef(File oldF, File newF, String reachMeta) {
         if (oldF == null || newF == null) return;
-        for (int i = 0; i < items.size(); i++) {
+        for (int i = 0, size = items.size(); i < size; i++) {
             QueueItem q = items.get(i);
             if (q.file == null || !q.file.equals(oldF)) continue;
             if (q.kind == ItemKind.REACH_STREAM) {
@@ -247,7 +247,7 @@ public final class PlayQueue {
     /** After saving a stream temp file to the music library, re-tag as a local music track. */
     public void promoteStreamToMusic(File oldF, File libraryFile) {
         if (oldF == null || libraryFile == null) return;
-        for (int i = 0; i < items.size(); i++) {
+        for (int i = 0, size = items.size(); i < size; i++) {
             QueueItem q = items.get(i);
             if (q.file == null || !q.file.equals(oldF)) continue;
             if (q.kind == ItemKind.REACH_STREAM || q.kind == ItemKind.DEEZER_STREAM
