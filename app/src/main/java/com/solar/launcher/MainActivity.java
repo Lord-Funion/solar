@@ -56765,6 +56765,12 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
 
         try {
+            // Unconditionally use SolarTransport for all regular library playback
+            // to support gapless playback and stem isolation, fixing dual playback bugs.
+            if (tryPrepareMusicViaTransport(track)) {
+                return;
+            }
+
             // 2026-07-15 — Software EQ needs IJK FFmpeg filters; try that first, MediaPlayer fail-open.
             com.solar.launcher.eq.SolarEqController.get().ensureLoaded(this);
             if (com.solar.launcher.eq.SolarEqController.get().needsSoftwareEq()) {
@@ -56794,14 +56800,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 }
             } else {
                 releaseMusicIjkPlayer();
-            }
-
-            // Prefer SolarTransport dual-slot for stock local files (gapless prepare-ahead). 2026-07-20
-            // Was: always MediaPlayer.reset path. Reversal: drop tryPrepareMusicViaTransport branch.
-            if (!com.solar.launcher.eq.SolarEqController.get().needsSoftwareEq()
-                    && !prefersIjkLocalDecode(track)
-                    && tryPrepareMusicViaTransport(track)) {
-                return;
             }
 
             // 🚀 [가장 우아하고 근본적인 해결책]
@@ -63925,12 +63923,13 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             } catch (Exception ignored) {}
         }
 
-        // Pause legacy MP/IJK so only transport layers are audible. 2026-07-20
+        // Reset legacy MP/IJK so only transport layers are audible. 2026-07-20
+        releaseMusicIjkPlayer();
         try {
-            if (isMusicIjkActive() && musicIjkPlayer != null) musicIjkPlayer.pause();
-        } catch (Exception ignored) {}
-        try {
-            if (mediaPlayer != null && mediaPlayer.isPlaying()) mediaPlayer.pause();
+            if (mediaPlayer != null) {
+                if (mediaPlayer.isPlaying()) mediaPlayer.pause();
+                mediaPlayer.reset();
+            }
         } catch (Exception ignored) {}
 
         ensureSolarTransportListener();
@@ -64906,16 +64905,20 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         // #endregion
         File cacheDir = getCacheDir();
         final boolean playingHere = isPlayingSoloOrigin(origin);
-        boolean canInstr = canOfferSoloModeFor(origin,
-                com.solar.launcher.stem.SoloMode.INSTRUMENTAL, cacheDir);
-        boolean canAcap = canOfferSoloModeFor(origin,
-                com.solar.launcher.stem.SoloMode.ACAPELLA, cacheDir);
-        boolean stemsReady = (canInstr && canAcap)
-                || com.solar.launcher.stem.LalalClient.trackStemsReady(
-                        this, origin, true, cacheDir)
-                || com.solar.launcher.stem.LalalClient.trackStemsReady(
-                        this, origin, false, cacheDir);
-        boolean canStems = stemsReady || com.solar.launcher.stem.StemFeatures.isOptedIn(prefs);
+
+        // Fast checks only: DO NOT call canOfferSoloModeFor (which hits Lalal API quota).
+        // Only check local cache for ready stems.
+        boolean localInstrReady = com.solar.launcher.stem.LalalClient.findReadySoloFileFast(
+                origin, com.solar.launcher.stem.SoloMode.INSTRUMENTAL, cacheDir) != null;
+        boolean localAcapReady = com.solar.launcher.stem.LalalClient.findReadySoloFileFast(
+                origin, com.solar.launcher.stem.SoloMode.ACAPELLA, cacheDir) != null;
+
+        boolean stemsReady = localInstrReady && localAcapReady;
+
+        // If not opted in and stems not ready locally, don't show stem options.
+        if (!stemsReady && !com.solar.launcher.stem.StemFeatures.isOptedIn(prefs)) {
+            return;
+        }
 
         if (!stemsReady) {
             addContextAction("Get Stems", new Runnable() {
@@ -65052,14 +65055,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         dismissThemedContextMenu(true, false, null);
         File cacheDir = getCacheDir();
-        boolean canInstr = canOfferSoloModeFor(origin,
-                com.solar.launcher.stem.SoloMode.INSTRUMENTAL, cacheDir);
-        boolean canAcap = canOfferSoloModeFor(origin,
-                com.solar.launcher.stem.SoloMode.ACAPELLA, cacheDir);
-        boolean stemsReady = (canInstr && canAcap)
-                || com.solar.launcher.stem.LalalClient.trackStemsReady(
+        boolean stemsReady = com.solar.launcher.stem.LalalClient.trackStemsReady(
                         this, origin, true, cacheDir)
-                || com.solar.launcher.stem.LalalClient.trackStemsReady(
+                && com.solar.launcher.stem.LalalClient.trackStemsReady(
                         this, origin, false, cacheDir);
                         
         if (!stemsReady) {
