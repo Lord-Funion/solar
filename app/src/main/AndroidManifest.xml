@@ -110,12 +110,12 @@
                 <action android:name="android.hardware.usb.action.USB_STATE" />
             </intent-filter>
         </receiver>
-        <receiver android:name=".SolarRestartReceiver" android:exported="true">
+        <receiver android:name=".SolarRestartReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="com.solar.launcher.action.RESTART_SOLAR" />
             </intent-filter>
         </receiver>
-        <receiver android:name=".ScanTriggerReceiver" android:exported="true">
+        <receiver android:name=".ScanTriggerReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="com.solar.launcher.action.START_LIBRARY_SCAN" />
             </intent-filter>
