@@ -49715,77 +49715,37 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         if (video == null || video.id == null || video.id.isEmpty()) return;
         final YouTubeVideo target = video;
-        // 2026-07-15 — Music→YouTube context is audio-only (no Save video / Open video).
-        // Was: always Play + Save video + Save audio. Reversal: drop audioMode branches.
-        final boolean audioMode = mediaSuite != null && mediaSuite.isYouTubeAudioMode();
         if (currentScreenState == MediaSuiteHost.STATE_YOUTUBE_BROWSE) {
-            addContextAction(getString(audioMode
-                    ? R.string.youtube_ctx_open_audio
-                    : R.string.youtube_ctx_open), new Runnable() {
+            addContextAction(getString(R.string.youtube_ctx_open), new Runnable() {
                 @Override public void run() {
                     if (!requireInternet(R.string.toast_internet_required)) return;
                     mediaSuite.openYouTubeDetailFromContext(target);
                 }
             });
         }
-        addContextAction(getString(R.string.youtube_ctx_play), new Runnable() {
+        addContextAction(getString(R.string.youtube_detail_bookmark), new Runnable() {
+            @Override public void run() {
+                mediaSuite.toggleYouTubeBookmark(target);
+            }
+        });
+        addContextAction(getString(R.string.youtube_detail_search_soulseek), new Runnable() {
             @Override public void run() {
                 if (!requireInternet(R.string.toast_internet_required)) return;
-                mediaSuite.playYouTubeFromContext(target);
+                mediaSuite.searchYouTubeOnSoulseek(target);
             }
         });
-        if (audioMode) {
-            addContextAction(getString(R.string.youtube_ctx_save), new Runnable() {
-                @Override public void run() {
-                    if (!requireInternet(R.string.toast_internet_required)) return;
-                    startYouTubeSave(target, true);
-                }
-            });
-            addContextAction(getString(R.string.context_add_to_local_playlist), new Runnable() {
-                @Override public void run() {
-                    openAddYouTubeTrackToLocalPlaylistFlow(target);
-                }
-            });
-            java.io.File savedAudio = YouTubeSavePaths.findSavedAudio(this, target);
-            if (savedAudio != null && savedAudio.length() > 1024L) {
-                addContextAction(getString(R.string.youtube_ctx_play_saved), new Runnable() {
-                    @Override public void run() {
-                        mediaSuite.playYouTubeFromContext(target);
-                    }
-                });
-            }
-            return;
-        }
-        addContextAction(getString(R.string.youtube_ctx_save_video), new Runnable() {
+        addContextAction(getString(R.string.youtube_detail_copy_link), new Runnable() {
             @Override public void run() {
-                if (!requireInternet(R.string.toast_internet_required)) return;
-                startYouTubeSave(target, false);
+                mediaSuite.copyYouTubeLink(target);
             }
         });
-        addContextAction(getString(R.string.youtube_ctx_save_audio), new Runnable() {
-            @Override public void run() {
-                if (!requireInternet(R.string.toast_internet_required)) return;
-                startYouTubeSave(target, true);
-            }
-        });
-        addContextAction(getString(R.string.context_add_to_local_playlist), new Runnable() {
-            @Override public void run() {
-                openAddYouTubeTrackToLocalPlaylistFlow(target);
-            }
-        });
-        java.io.File savedVideo = YouTubeSavePaths.findSavedVideo(this, target);
-        if (savedVideo != null && savedVideo.length() > 1024L) {
-            addContextAction(getString(R.string.youtube_ctx_play_saved), new Runnable() {
-                @Override public void run() {
-                    mediaSuite.playYouTubeFromContext(target);
-                }
-            });
-        }
     }
 
-    /** MediaSuiteHost adapter — save from detail list actions. */
-    public void mediaRequestYouTubeSave(YouTubeVideo video, boolean audioOnly) {
-        startYouTubeSave(video, audioOnly);
+    /** Route official YouTube metadata into the existing authorized Soulseek search. */
+    public void mediaSearchSoulseekForYouTube(YouTubeVideo video) {
+        String query = com.solar.launcher.youtube.YouTubeAcquisitionPolicy
+                .soulseekQuery(video);
+        if (query.length() > 0) launchReachSearchFromSuggestion(query, false);
     }
 
     /**
@@ -65023,7 +64983,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
         // Not the playing track — Play Instrumental / Play Acapella starts that variant. 2026-07-20
         // Routes through Stems master after play (retire stem_separator for NP). 2026-07-21
-        if (canInstr) {
+        if (localInstrReady) {
             addContextAction(getString(R.string.context_action_play_instrumental), new Runnable() {
                 @Override
                 public void run() {
@@ -65031,7 +64991,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 }
             });
         }
-        if (canAcap) {
+        if (localAcapReady) {
             addContextAction(getString(R.string.context_action_play_acapella), new Runnable() {
                 @Override
                 public void run() {

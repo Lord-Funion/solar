@@ -19,7 +19,11 @@ public final class YouTubeResultJson {
     public static List<YouTubeVideo> parseVideos(String json) throws Exception {
         List<YouTubeVideo> out = new ArrayList<YouTubeVideo>();
         if (json == null || json.trim().isEmpty()) return out;
-        JSONArray arr = new JSONArray(json);
+        String clean = json.trim();
+        JSONArray arr = clean.startsWith("[")
+                ? new JSONArray(clean)
+                : new JSONObject(clean).optJSONArray("items");
+        if (arr == null) return out;
         for (int i = 0; i < arr.length(); i++) {
             JSONObject o = arr.getJSONObject(i);
             out.add(new YouTubeVideo(
@@ -29,6 +33,12 @@ public final class YouTubeResultJson {
                     o.optString("length", "")));
         }
         return out;
+    }
+
+    /** Empty for legacy cached array payloads and on the last page. */
+    public static String parseNextPageToken(String json) throws Exception {
+        if (json == null || json.trim().isEmpty() || json.trim().startsWith("[")) return "";
+        return new JSONObject(json).optString("nextPageToken", "");
     }
 
     public static String parseStreamUrl(String json) throws Exception {
@@ -70,7 +80,11 @@ public final class YouTubeResultJson {
     public static List<YouTubeComment> parseComments(String json) throws Exception {
         List<YouTubeComment> out = new ArrayList<YouTubeComment>();
         if (json == null || json.trim().isEmpty()) return out;
-        JSONArray arr = new JSONArray(json);
+        String clean = json.trim();
+        JSONArray arr = clean.startsWith("[")
+                ? new JSONArray(clean)
+                : new JSONObject(clean).optJSONArray("items");
+        if (arr == null) return out;
         for (int i = 0; i < arr.length(); i++) {
             JSONObject o = arr.getJSONObject(i);
             out.add(new YouTubeComment(
