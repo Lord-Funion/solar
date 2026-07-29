@@ -36101,6 +36101,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                                         .clear(MainActivity.this);
                                 new com.solar.launcher.youtube.YouTubeDiscoverFeedback(
                                         MainActivity.this).clear();
+                                GetMusicSearchHistory.clear(prefs);
+                                SoulseekSearchHistory.clear(prefs);
+                                com.solar.launcher.deezer.DeezerSearchHistory.clear(prefs);
+                                SoulseekDownloadHistory.clear(prefs);
                                 Toast.makeText(MainActivity.this,
                                         R.string.settings_youtube_history_cleared,
                                         Toast.LENGTH_SHORT).show();

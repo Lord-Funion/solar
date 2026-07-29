@@ -446,10 +446,10 @@
     <string name="settings_youtube_clear_cache">Clear YouTube metadata cache</string>
     <string name="settings_youtube_clear_cache_hint">Deletes cached public and account metadata. Bookmarks and feedback remain.</string>
     <string name="settings_youtube_cache_cleared">YouTube metadata cache cleared.</string>
-    <string name="settings_youtube_clear_history">Clear YouTube local history</string>
-    <string name="settings_youtube_clear_history_hint">Clears recent searches and Discover feedback stored on this device.</string>
-    <string name="settings_youtube_clear_history_confirm">Clear recent YouTube searches and local Discover feedback? Research-list bookmarks remain.</string>
-    <string name="settings_youtube_history_cleared">YouTube search and Discover history cleared.</string>
+    <string name="settings_youtube_clear_history">Clear local search history</string>
+    <string name="settings_youtube_clear_history_hint">Clears Get Music, Soulseek, Deezer, and YouTube recent queries, Discover feedback, and remembered Soulseek download sources. Media, bookmarks, subscriptions, and messages remain.</string>
+    <string name="settings_youtube_clear_history_confirm">Clear local acquisition searches, Discover feedback, and remembered Soulseek download sources? Media, bookmarks, subscriptions, and messages will not be deleted.</string>
+    <string name="settings_youtube_history_cleared">Local search and Discover history cleared.</string>
     <string name="settings_power">Power</string>
     <string name="settings_sub_power">Settings: Power</string>
     <string name="settings_reset">Reset</string>
