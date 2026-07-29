@@ -40,9 +40,9 @@
     <permission
         android:name="com.solar.launcher.permission.OVERLAY_TRIGGER"
         android:protectionLevel="signatureOrSystem" />
+    <!-- API 17 adb backup cannot selectively exclude OAuth/Soulseek credentials. -->
     <application
         android:name=".SolarApplication"
-        <!-- API 17 adb backup cannot selectively exclude OAuth/Soulseek credentials. -->
         android:allowBackup="false"
         android:usesCleartextTraffic="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
