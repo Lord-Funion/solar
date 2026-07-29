@@ -43138,8 +43138,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (userInitiated) {
             // #region agent log
             // 2026-07-20 — 0b8f80 H1: toast used customLibrary.size() (0 under SEGMENTED) vs resident count.
-            int toastShown = customLibrary.size();
             int resident = libraryResidentTrackCount();
+            int toastShown = resident;
             try {
                 Debug0b8f80Log.log("MainActivity.finishLibraryScan", "toast counts", "H1",
                         "{\"toastShown\":" + toastShown
@@ -56355,7 +56355,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
      */
     private void refreshLibraryAfterStorageMount() {
         if (isUsbMassStorageUiLocked() || libraryScanRunning) return;
-        if (customLibrary.isEmpty()) {
+        // A SEGMENTED library intentionally keeps customLibrary empty. Testing that list here
+        // caused remount refreshes to take the startup cache fast-path and miss newly copied files.
+        if (libraryResidentTrackCount() <= 0) {
             startLibraryScan(false);
             return;
         }
@@ -56388,7 +56390,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         clockHandler.postDelayed(deferredPostUmsStorageMountRunnable, delay);
     }
 
-    /** Walk disk for audio paths absent from SQLite — merge without deleteExcept purge. */
+    /** Incrementally merge new/changed files and prune missing paths after a complete walk. */
     private void startLibraryNewFilesScan(final boolean showOverlay) {
         if (libraryScanRunning) return;
         if (isUsbMassStorageUiLocked()) return;
@@ -56407,14 +56409,27 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             @Override
             public void run() {
                 final MusicLibraryStore store = MusicLibraryStore.getInstance(getApplicationContext());
-                final int pruned = purgeStaleLibraryPaths(store);
-                final java.util.ArrayList<SongItem> additions = new java.util.ArrayList<SongItem>();
-                collectNewLibraryAudioFromAllRoots(store, additions, gen);
+                final java.util.HashSet<String> seenPaths = MusicLibraryStore.newKeepSet();
+                final java.util.ArrayList<SongItem> newOrChanged =
+                        new java.util.ArrayList<SongItem>();
+                final boolean[] walkComplete = new boolean[] { true };
+                collectChangedLibraryAudioFromAllRoots(
+                        store, seenPaths, newOrChanged, walkComplete, gen);
                 if (libraryScanGen != gen) {
                     abortLibraryScanWorker(gen);
                     return;
                 }
-                if (additions.isEmpty() && pruned == 0) {
+                // A temporarily unreadable SD root must not erase its indexed library rows.
+                int pruned = 0;
+                if (walkComplete[0]) {
+                    final int rowsBeforePrune = store.countTracks();
+                    store.deleteExcept(seenPaths);
+                    pruned = Math.max(0, rowsBeforePrune - store.countTracks());
+                } else {
+                    seenPaths.addAll(store.loadPaths());
+                }
+                final int rowsAfter = store.countTracks();
+                if (newOrChanged.isEmpty() && pruned == 0) {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -56424,15 +56439,35 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                     });
                     return;
                 }
-                if (!additions.isEmpty()) {
+
+                clearArtCacheReadyStamp();
+                boolean segmented =
+                        com.solar.launcher.library.LibraryMemoryBudget.chooseMode(rowsAfter)
+                                == com.solar.launcher.library.LibraryMemoryBudget.Mode.SEGMENTED;
+                if (segmented) {
+                    applySegmentedLibraryHydrate(store);
+                } else {
                     synchronized (customLibrary) {
-                        customLibrary.addAll(additions);
+                        com.solar.launcher.library.LibraryIncrementalReconciler.merge(
+                                customLibrary,
+                                seenPaths,
+                                newOrChanged,
+                                new com.solar.launcher.library.LibraryIncrementalReconciler
+                                        .PathKey<SongItem>() {
+                                    @Override public String pathOf(SongItem item) {
+                                        return item != null && item.file != null
+                                                ? item.file.getAbsolutePath() : "";
+                                    }
+                                });
                     }
+                    refreshLibraryCategoryIndex();
                 }
+                store.pruneFavorites(seenPaths);
+                favoritePaths = store.loadFavoritePaths();
                 invalidateSongPathIndex();
                 invalidateShareDurationCache();
                 clearArtistOwnAlbumCache();
-                normalizeLibraryAlbumTitles();
+                if (!segmented) normalizeLibraryAlbumTitles();
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -56448,32 +56483,46 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }, "LibraryNewFiles").start();
     }
 
-    /** Collect tracks whose paths are not yet in MusicLibraryStore (new files only). */
-    /** 2026-07-15 — Walk every Music/ volume, not only the preferred save root. */
-    private void collectNewLibraryAudioFromAllRoots(MusicLibraryStore store,
-            java.util.ArrayList<SongItem> out, int gen) {
+    /** Walk every Music/ volume; unchanged files retain cached metadata and object identity. */
+    private void collectChangedLibraryAudioFromAllRoots(MusicLibraryStore store,
+            java.util.HashSet<String> seenPaths, java.util.ArrayList<SongItem> out,
+            boolean[] walkComplete, int gen) {
+        boolean foundRoot = false;
         for (File musicRoot : com.solar.launcher.DeviceFeatures.getMusicRoots()) {
             if (libraryScanGen != gen) return;
-            collectNewLibraryAudio(musicRoot, store, out, gen);
+            foundRoot = true;
+            collectChangedLibraryAudio(
+                    musicRoot, store, seenPaths, out, walkComplete, gen);
         }
+        if (!foundRoot) walkComplete[0] = false;
     }
 
-    private void collectNewLibraryAudio(File folder, MusicLibraryStore store,
-            java.util.ArrayList<SongItem> out, int gen) {
-        if (libraryScanGen != gen || folder == null) return;
+    private void collectChangedLibraryAudio(File folder, MusicLibraryStore store,
+            java.util.HashSet<String> seenPaths, java.util.ArrayList<SongItem> out,
+            boolean[] walkComplete, int gen) {
+        if (libraryScanGen != gen) return;
+        if (folder == null || !folder.isDirectory()) {
+            walkComplete[0] = false;
+            return;
+        }
         // 2026-07-19 — Incremental scan must not pick up Stem Player pad files.
         if (com.solar.launcher.stem.LalalClient.isStemLibraryArtifact(folder)) return;
         File[] files = folder.listFiles();
-        if (files == null) return;
+        if (files == null) {
+            walkComplete[0] = false;
+            return;
+        }
         for (File f : files) {
             if (libraryScanGen != gen) return;
             if (f.isDirectory()) {
                 if (com.solar.launcher.stem.LalalClient.isStemLibraryArtifact(f)) continue;
-                collectNewLibraryAudio(f, store, out, gen);
+                collectChangedLibraryAudio(
+                        f, store, seenPaths, out, walkComplete, gen);
             } else if (isAudioFile(f)) {
                 if (blacklist.contains(f.getAbsolutePath())) continue;
                 if (com.solar.launcher.stem.LalalClient.isStemLibraryArtifact(f)) continue;
-                if (store.get(f.getAbsolutePath()) != null) continue;
+                seenPaths.add(f.getAbsolutePath());
+                if (store.getFresh(f) != null) continue;
                 LibraryScanResolved resolved = resolveSongItemForScan(f, store, gen);
                 if (resolved == null || resolved.item == null) continue;
                 out.add(resolved.item);

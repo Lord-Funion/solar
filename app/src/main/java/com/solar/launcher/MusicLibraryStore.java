@@ -330,6 +330,24 @@ public class MusicLibraryStore extends SolarDbHelper {
         return 0;
     }
 
+    /** Absolute paths only, used to preserve indexed rows when one storage root is unreadable. */
+    public Set<String> loadPaths() {
+        Set<String> out = new HashSet<String>();
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = null;
+        try {
+            c = db.query("tracks", new String[] { "path" },
+                    null, null, null, null, null);
+            while (c.moveToNext()) {
+                String path = c.getString(0);
+                if (path != null && path.length() > 0) out.add(path);
+            }
+        } finally {
+            if (c != null) c.close();
+        }
+        return out;
+    }
+
     /**
      * 2026-07-20 — Page of tracks for SEGMENTED ListView (LIMIT/OFFSET, path order).
      * Layman: load one chunk of the big list so scrolling does not need every song in RAM.
