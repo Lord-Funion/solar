@@ -1956,6 +1956,8 @@ Press Back to cancel and restore the original order.</string>
     <string name="youtube_show_more">Show more</string>
     <string name="youtube_show_more_sub">Load the next official API page</string>
     <string name="youtube_load_more_error">Could not load the next page. OK to retry.</string>
+    <string name="youtube_offline_cache">Offline cached metadata · refreshes when Wi‑Fi returns</string>
+    <string name="youtube_quota_today">API estimate today: %1$d units</string>
     <string name="youtube_unavailable">YouTube is unavailable right now.</string>
     <string name="youtube_needs_platform_prep">YouTube needs an internet connection. Check Wi‑Fi and try again.</string>
     <string name="youtube_bridge_not_ready">YouTube backends are slow to wake. Try again in a moment, or check Wi‑Fi.</string>

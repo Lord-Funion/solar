@@ -34,6 +34,23 @@ public class YouTubeClientJsonTest {
     }
 
     @Test
+    public void cacheAnnotationPreservesPayloadShapeAndState() throws Exception {
+        List<YouTubeVideo> vids = new ArrayList<YouTubeVideo>();
+        vids.add(new YouTubeVideo("cached", "Cached title", "Channel", "4:00"));
+        String annotated = YouTubeClient.annotateCache(
+                YouTubeClient.videosToJson(vids), true, true, 42_000L);
+        List<YouTubeVideo> parsed = YouTubeResultJson.parseVideos(annotated);
+        YouTubeResultJson.CacheState cache =
+                YouTubeResultJson.parseCacheState(annotated);
+        if (parsed.size() != 1 || !"cached".equals(parsed.get(0).id)) {
+            throw new AssertionError("annotation changed items: " + annotated);
+        }
+        if (!cache.cached || !cache.stale || cache.ageMs != 42_000L) {
+            throw new AssertionError("cache state missing: " + annotated);
+        }
+    }
+
+    @Test
     public void qualityLadder() {
         // Device-agnostic score / height helpers.
         if (YouTubeQuality.qualityHeight("360p") != 360) {

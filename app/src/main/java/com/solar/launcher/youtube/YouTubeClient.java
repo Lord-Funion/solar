@@ -4,6 +4,7 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 
+import com.solar.launcher.ConnectivityHelper;
 import com.solar.launcher.youtube.official.YouTubeOfficialApi;
 
 import org.json.JSONArray;
@@ -11,6 +12,7 @@ import org.json.JSONObject;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -30,6 +32,10 @@ public final class YouTubeClient {
 
     private static final long DEFAULT_TIMEOUT_MS = 22_000L;
     private static final long PROBE_TIMEOUT_MS = 3_000L;
+    private static final long SEARCH_FRESH_MS = 6L * 60L * 60L * 1000L;
+    private static final long POPULAR_FRESH_MS = 2L * 60L * 60L * 1000L;
+    private static final long COMMENTS_FRESH_MS = 30L * 60L * 1000L;
+    private static final long MAX_STALE_MS = 30L * 24L * 60L * 60L * 1000L;
     public static final String ACQUISITION_BLOCKED = "metadata_only";
 
     private static volatile YouTubeClient instance;
@@ -38,9 +44,16 @@ public final class YouTubeClient {
     // Bounded for the Y1: at most two API requests can consume heap/sockets.
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
     private final YouTubeOfficialApi api;
+    private final YouTubeMetadataCache cache;
+    private final YouTubeQuotaTracker quota;
+    private final Random retryJitter = new Random();
+    private final Context appContext;
 
     private YouTubeClient(Context context) {
-        api = new YouTubeOfficialApi(context.getApplicationContext());
+        appContext = context.getApplicationContext();
+        api = new YouTubeOfficialApi(appContext);
+        cache = new YouTubeMetadataCache(appContext);
+        quota = new YouTubeQuotaTracker(appContext);
     }
 
     public static YouTubeClient getInstance(Context context) {
@@ -83,7 +96,15 @@ public final class YouTubeClient {
         runTimed(DEFAULT_TIMEOUT_MS, callback, new Work() {
             @Override
             public String call() throws Exception {
-                return pageToJson(api.popular(deviceRegion(), pageToken));
+                String region = deviceRegion();
+                return cached("popular:" + region + ":" + nonNull(pageToken),
+                        POPULAR_FRESH_MS, YouTubeQuotaTracker.Operation.POPULAR,
+                        new Work() {
+                            @Override
+                            public String call() throws Exception {
+                                return pageToJson(api.popular(deviceRegion(), pageToken));
+                            }
+                        });
             }
         });
     }
@@ -97,7 +118,17 @@ public final class YouTubeClient {
         runTimed(DEFAULT_TIMEOUT_MS, callback, new Work() {
             @Override
             public String call() throws Exception {
-                return pageToJson(api.search(query, pageToken, deviceRegion()));
+                String region = deviceRegion();
+                String normalized = nonNull(query).trim().toLowerCase(Locale.US);
+                return cached("search:" + region + ":" + normalized + ":"
+                                + nonNull(pageToken),
+                        SEARCH_FRESH_MS, YouTubeQuotaTracker.Operation.SEARCH,
+                        new Work() {
+                            @Override
+                            public String call() throws Exception {
+                                return pageToJson(api.search(query, pageToken, deviceRegion()));
+                            }
+                        });
             }
         });
     }
@@ -122,9 +153,23 @@ public final class YouTubeClient {
         runTimed(DEFAULT_TIMEOUT_MS, callback, new Work() {
             @Override
             public String call() throws Exception {
-                return commentsToJson(api.comments(videoId));
+                return cached("comments:" + nonNull(videoId), COMMENTS_FRESH_MS,
+                        YouTubeQuotaTracker.Operation.COMMENTS, new Work() {
+                            @Override
+                            public String call() throws Exception {
+                                return commentsToJson(api.comments(videoId));
+                            }
+                        });
             }
         });
+    }
+
+    public int estimatedQuotaToday() {
+        return quota.todayTotal();
+    }
+
+    public void clearMetadataCache() {
+        cache.clear();
     }
 
     private void postPolicyError(final Callback callback) {
@@ -135,6 +180,75 @@ public final class YouTubeClient {
                 callback.onError(ACQUISITION_BLOCKED);
             }
         });
+    }
+
+    private String cached(String key, long freshForMs,
+            YouTubeQuotaTracker.Operation operation, Work network) throws Exception {
+        YouTubeMetadataCache.Hit hit = cache.get(key, freshForMs, MAX_STALE_MS);
+        if (hit != null && !hit.stale) {
+            return annotateCache(hit.payload, true, false, hit.ageMs);
+        }
+        if (hit != null && !ConnectivityHelper.isOnline(appContext)) {
+            return annotateCache(hit.payload, true, true, hit.ageMs);
+        }
+        try {
+            // One refresh attempt is enough when a usable stale result exists.
+            String payload = hit != null
+                    ? callOnce(operation, network)
+                    : callWithRetry(operation, network);
+            cache.put(key, payload);
+            return annotateCache(payload, false, false, 0L);
+        } catch (Exception networkFailure) {
+            if (hit != null) {
+                return annotateCache(hit.payload, true, true, hit.ageMs);
+            }
+            throw networkFailure;
+        }
+    }
+
+    private String callWithRetry(YouTubeQuotaTracker.Operation operation,
+            Work network) throws Exception {
+        Exception last = null;
+        for (int attempt = 1; attempt <= YouTubeRetryPolicy.MAX_ATTEMPTS; attempt++) {
+            quota.record(operation);
+            try {
+                return network.call();
+            } catch (Exception error) {
+                last = error;
+                if (!YouTubeRetryPolicy.shouldRetry(error, attempt)) throw error;
+                try {
+                    Thread.sleep(YouTubeRetryPolicy.delayMs(attempt, retryJitter));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new Exception("network_interrupted");
+                }
+            }
+        }
+        throw last != null ? last : new Exception("youtube_error");
+    }
+
+    private String callOnce(YouTubeQuotaTracker.Operation operation,
+            Work network) throws Exception {
+        quota.record(operation);
+        return network.call();
+    }
+
+    static String annotateCache(String payload, boolean cached, boolean stale,
+            long ageMs) throws Exception {
+        String clean = payload != null ? payload.trim() : "";
+        JSONObject root;
+        if (clean.startsWith("[")) {
+            root = new JSONObject();
+            root.put("items", new JSONArray(clean));
+        } else {
+            root = clean.length() > 0 ? new JSONObject(clean) : new JSONObject();
+        }
+        JSONObject source = new JSONObject();
+        source.put("cached", cached);
+        source.put("stale", stale);
+        source.put("ageMs", Math.max(0L, ageMs));
+        root.put("_solarCache", source);
+        return root.toString();
     }
 
     private void runTimed(final long timeoutMs, final Callback callback,

@@ -41,6 +41,35 @@ public final class YouTubeResultJson {
         return new JSONObject(json).optString("nextPageToken", "");
     }
 
+    /** Metadata source annotation added by the bounded official-API cache. */
+    public static CacheState parseCacheState(String json) {
+        if (json == null || json.trim().isEmpty() || json.trim().startsWith("[")) {
+            return new CacheState(false, false, 0L);
+        }
+        try {
+            JSONObject cache = new JSONObject(json).optJSONObject("_solarCache");
+            if (cache == null) return new CacheState(false, false, 0L);
+            return new CacheState(
+                    cache.optBoolean("cached", false),
+                    cache.optBoolean("stale", false),
+                    Math.max(0L, cache.optLong("ageMs", 0L)));
+        } catch (Exception ignored) {
+            return new CacheState(false, false, 0L);
+        }
+    }
+
+    public static final class CacheState {
+        public final boolean cached;
+        public final boolean stale;
+        public final long ageMs;
+
+        CacheState(boolean cached, boolean stale, long ageMs) {
+            this.cached = cached;
+            this.stale = stale;
+            this.ageMs = ageMs;
+        }
+    }
+
     public static String parseStreamUrl(String json) throws Exception {
         StreamResult r = parseStreamResult(json);
         return r != null ? r.url : null;

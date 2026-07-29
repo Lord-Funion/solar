@@ -362,6 +362,8 @@ public final class MediaSuiteHost {
     private String youtubeNextPageToken = "";
     private boolean youtubeAppending;
     private boolean youtubeShowingBookmarks;
+    /** True when visible official metadata came from an expired offline cache entry. */
+    private boolean youtubeMetadataStale;
     private String youtubeNowPlayingTitle;
     private String youtubeNowPlayingId;
     /**
@@ -373,6 +375,7 @@ public final class MediaSuiteHost {
     private YouTubeVideo youtubeDetailVideo;
     private final List<YouTubeComment> youtubeComments = new ArrayList<YouTubeComment>();
     private boolean youtubeCommentsLoading;
+    private boolean youtubeCommentsStale;
     private int youtubeCommentsGen;
     private YouTubeBookmarks youtubeBookmarks;
     private YouTubeDeviceAuth youtubeAuth;
@@ -3898,7 +3901,9 @@ public final class MediaSuiteHost {
                     : (youtubePendingSearch != null && !youtubePendingSearch.isEmpty()
                     ? host.getString(R.string.youtube_empty)
                     : host.getString(R.string.youtube_popular_empty)));
-            virtualSubtitles.add("");
+            virtualSubtitles.add(youtubeMetadataStale
+                    ? host.getString(R.string.youtube_offline_cache)
+                    : "");
             youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_STATUS));
             return;
         }
@@ -3910,7 +3915,9 @@ public final class MediaSuiteHost {
         } else {
             virtualLabels.add(host.getString(R.string.youtube_results_header));
         }
-        virtualSubtitles.add("");
+        virtualSubtitles.add(youtubeMetadataStale
+                ? host.getString(R.string.youtube_offline_cache)
+                : "");
         youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_STATUS));
 
         for (int i = 0; i < youtubeVideos.size(); i++) {
@@ -4035,6 +4042,11 @@ public final class MediaSuiteHost {
                     ? host.getString(R.string.youtube_account_retry_reason, snapshot.safeReason)
                     : host.getString(R.string.youtube_account_sign_in_hint);
         }
+        if (!snapshot.isActive()) {
+            int quota = YouTubeClient.getInstance(host.context()).estimatedQuotaToday();
+            subtitle = subtitle + " · "
+                    + host.getString(R.string.youtube_quota_today, quota);
+        }
         virtualLabels.add(label);
         virtualSubtitles.add(subtitle);
         youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_ACCOUNT));
@@ -4084,6 +4096,7 @@ public final class MediaSuiteHost {
         youtubeLoading = false;
         youtubeAppending = false;
         youtubeShowingBookmarks = true;
+        youtubeMetadataStale = false;
         youtubePendingSearch = null;
         youtubeNextPageToken = "";
         youtubeVideos.clear();
@@ -4113,6 +4126,8 @@ public final class MediaSuiteHost {
                 }
                 youtubeAppending = false;
                 int firstAdded = youtubeVideos.size();
+                youtubeMetadataStale = youtubeMetadataStale
+                        || YouTubeResultJson.parseCacheState(payloadJson).stale;
                 try {
                     List<YouTubeVideo> next = YouTubeResultJson.parseVideos(payloadJson);
                     for (YouTubeVideo video : next) {
@@ -4217,6 +4232,7 @@ public final class MediaSuiteHost {
         youtubeDetailVideo = video;
         youtubeComments.clear();
         youtubeCommentsLoading = true;
+        youtubeCommentsStale = false;
         host.changeScreen(STATE_YOUTUBE_DETAIL);
         loadYouTubeComments(video.id);
     }
@@ -4270,7 +4286,9 @@ public final class MediaSuiteHost {
         }
 
         virtualLabels.add(host.getString(R.string.youtube_comments_header));
-        virtualSubtitles.add("");
+        virtualSubtitles.add(youtubeCommentsStale
+                ? host.getString(R.string.youtube_offline_cache)
+                : "");
         youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_HEADER));
 
         if (youtubeCommentsLoading) {
@@ -4348,6 +4366,8 @@ public final class MediaSuiteHost {
                 if (gen != youtubeCommentsGen) return;
                 youtubeCommentsLoading = false;
                 youtubeComments.clear();
+                youtubeCommentsStale =
+                        YouTubeResultJson.parseCacheState(payloadJson).stale;
                 try {
                     youtubeComments.addAll(YouTubeResultJson.parseComments(payloadJson));
                 } catch (Exception e) {
@@ -4363,6 +4383,7 @@ public final class MediaSuiteHost {
                 if (gen != youtubeCommentsGen) return;
                 youtubeCommentsLoading = false;
                 youtubeComments.clear();
+                youtubeCommentsStale = false;
                 if (host.getCurrentScreenState() == STATE_YOUTUBE_DETAIL) {
                     buildYouTubeDetailUi();
                     Toast.makeText(host.context(), R.string.youtube_comments_error,
@@ -4378,6 +4399,7 @@ public final class MediaSuiteHost {
         youtubeNextPageToken = "";
         youtubeAppending = false;
         youtubeLoading = true;
+        youtubeMetadataStale = false;
         final int gen = ++youtubeLoadGen;
         updateYouTubeStatusPath();
         rebuildYouTubeVirtualRows();
@@ -4392,6 +4414,8 @@ public final class MediaSuiteHost {
                 if (gen != youtubeLoadGen) return;
                 if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) return;
                 youtubeLoading = false;
+                youtubeMetadataStale =
+                        YouTubeResultJson.parseCacheState(payloadJson).stale;
                 try {
                     youtubeVideos.clear();
                     youtubeVideos.addAll(YouTubeResultJson.parseVideos(payloadJson));
@@ -4413,6 +4437,7 @@ public final class MediaSuiteHost {
                 youtubeLoading = false;
                 youtubeVideos.clear();
                 youtubeNextPageToken = "";
+                youtubeMetadataStale = false;
                 updateYouTubeStatusPath();
                 rebuildYouTubeVirtualRows();
                 notifyVirtualDataChangedPreserveFocus();
@@ -4428,6 +4453,7 @@ public final class MediaSuiteHost {
         youtubeNextPageToken = "";
         youtubeAppending = false;
         youtubeLoading = true;
+        youtubeMetadataStale = false;
         final int gen = ++youtubeLoadGen;
         // #region agent log
         try {
@@ -4461,6 +4487,8 @@ public final class MediaSuiteHost {
                 }
                 if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) return;
                 youtubeLoading = false;
+                youtubeMetadataStale =
+                        YouTubeResultJson.parseCacheState(payloadJson).stale;
                 int parsed = 0;
                 try {
                     youtubeVideos.clear();
@@ -4506,6 +4534,7 @@ public final class MediaSuiteHost {
                 youtubeLoading = false;
                 youtubeVideos.clear();
                 youtubeNextPageToken = "";
+                youtubeMetadataStale = false;
                 // #region agent log
                 try {
                     org.json.JSONObject d = new org.json.JSONObject();

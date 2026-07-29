@@ -16,8 +16,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
@@ -39,11 +41,18 @@ public final class YouTubeOfficialApi {
 
     private final Context appContext;
     private final YouTubeDeviceAuth auth;
+    private final OkHttpClient http;
 
     public YouTubeOfficialApi(Context context) {
         if (context == null) throw new IllegalArgumentException("context");
         appContext = context.getApplicationContext();
         auth = YouTubeDeviceAuth.getInstance(appContext);
+        // Keep one attempt inside YouTubeClient's 22-second UI deadline.
+        http = TlsHelper.client().newBuilder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.SECONDS)
+                .build();
     }
 
     public boolean isConfigured() {
@@ -216,7 +225,7 @@ public final class YouTubeOfficialApi {
             request.header("Authorization", "Bearer " + accessToken);
         }
         TlsHelper.ensureSecurityProvider();
-        Response response = TlsHelper.client().newCall(request.build()).execute();
+        Response response = http.newCall(request.build()).execute();
         String body;
         int responseCode = response.code();
         boolean successful = response.isSuccessful();
