@@ -105,6 +105,7 @@ import com.solar.launcher.ui.ScreenTransitionCoordinator;
 import com.solar.launcher.ui.ScreenTransitionMap;
 import com.solar.launcher.ui.UiBusy;
 import com.solar.launcher.media.FlowHoldHintPolicy;
+import com.solar.launcher.media.AuthorizedMediaImporter;
 import com.solar.launcher.media.MediaSuiteHost;
 import com.solar.launcher.media.MediaSuiteHostAdapter;
 import com.solar.launcher.media.MediaCompatibilityService;
@@ -265,6 +266,7 @@ public class MainActivity extends Activity {
     /** 2026-07-19 — 3-deck Mix (full tracks; replaces NP while active). */
     static final int STATE_MIX = 34;
     static final int STATE_DOWNLOADS = 35;
+    private static final int REQUEST_MEDIA_IMPORT = 0x5349;
     private static final int KEYBOARD_WIFI = 0;
     private static final int KEYBOARD_SOULSEEK_USER = 1;
     private static final int KEYBOARD_SOULSEEK_PASS = 2;
@@ -2640,6 +2642,9 @@ public class MainActivity extends Activity {
     private boolean isPickingBackground = false;
     /** Apps → Install: folder browse for .apk only; Back returns to Apps. */
     private boolean isPickingApk = false;
+    /** Get Music → Import: wheel-friendly browse for audio on Solar storage. */
+    private boolean isPickingMediaImport = false;
+    private int mediaImportReturnScreen = STATE_SOULSEEK;
 
     // 💡 마지막으로 재생된 앨범 아트를 기억하는 변수
     private byte[] lastAlbumArtBytes = null;
@@ -3557,11 +3562,242 @@ public class MainActivity extends Activity {
      */
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQUEST_MEDIA_IMPORT) {
+            isIntentionalFocusLoss = false;
+            endExternalInputHandoff();
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                closeMediaImportPicker();
+                importSelectedMedia(data.getData());
+            }
+            return;
+        }
         if (phoneChromeHost != null
                 && phoneChromeHost.onActivityResult(requestCode, resultCode, data)) {
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    private void requestAuthorizedMediaImport() {
+        mediaImportReturnScreen = currentScreenState;
+        isPickingMediaImport = true;
+        currentFolder = getStorageRoot();
+        currentBrowserMode = BROWSER_FOLDER;
+        changeScreen(STATE_BROWSER);
+    }
+
+    private void requestExternalMediaImport() {
+        Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+        pick.setType("audio/*");
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            isIntentionalFocusLoss = true;
+            beginExternalInputHandoff();
+            startActivityForResult(Intent.createChooser(
+                    pick, getString(R.string.get_music_import_picker_title)),
+                    REQUEST_MEDIA_IMPORT);
+        } catch (android.content.ActivityNotFoundException e) {
+            isIntentionalFocusLoss = false;
+            endExternalInputHandoff();
+            Toast.makeText(this, getString(R.string.get_music_import_picker_unavailable),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void closeMediaImportPicker() {
+        if (!isPickingMediaImport) return;
+        int returnScreen = mediaImportReturnScreen;
+        isPickingMediaImport = false;
+        currentBrowserMode = BROWSER_ROOT;
+        currentFolder = rootFolder;
+        changeScreen(returnScreen >= 0 ? returnScreen : STATE_SOULSEEK, true);
+    }
+
+    private static final class SelectedImport {
+        final String displayName;
+        final long size;
+
+        SelectedImport(String displayName, long size) {
+            this.displayName = displayName;
+            this.size = size;
+        }
+    }
+
+    private interface SelectedImportInput {
+        java.io.InputStream open() throws Exception;
+    }
+
+    private SelectedImport describeSelectedImport(Uri uri) {
+        String displayName = null;
+        long size = -1L;
+        android.database.Cursor cursor = null;
+        try {
+            cursor = getContentResolver().query(uri,
+                    new String[] {
+                            android.provider.OpenableColumns.DISPLAY_NAME,
+                            android.provider.OpenableColumns.SIZE
+                    },
+                    null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameColumn = cursor.getColumnIndex(
+                        android.provider.OpenableColumns.DISPLAY_NAME);
+                if (nameColumn >= 0 && !cursor.isNull(nameColumn)) {
+                    displayName = cursor.getString(nameColumn);
+                }
+                int sizeColumn = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE);
+                if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) {
+                    size = Math.max(0L, cursor.getLong(sizeColumn));
+                }
+            }
+        } catch (Exception ignored) {
+            // Providers are allowed to omit metadata; URI and MIME fallbacks remain usable.
+        } finally {
+            if (cursor != null) try { cursor.close(); } catch (Exception ignored) {}
+        }
+        if (displayName == null || displayName.trim().length() == 0) {
+            displayName = Uri.decode(uri.getLastPathSegment());
+        }
+        String mime = null;
+        try {
+            mime = getContentResolver().getType(uri);
+        } catch (Exception ignored) {}
+        return new SelectedImport(compatibleImportName(displayName, mime), size);
+    }
+
+    private static String compatibleImportName(String displayName, String mimeType) {
+        String safeName = AuthorizedMediaImporter.safeBasename(displayName);
+        if (MediaCompatibilityService.isSupportedAudioName(safeName)) return safeName;
+        String extension = extensionForAudioMime(mimeType);
+        if (extension.length() == 0) return safeName;
+        int dot = safeName.lastIndexOf('.');
+        String stem = dot > 0 ? safeName.substring(0, dot) : safeName;
+        return stem + "." + extension;
+    }
+
+    private static String extensionForAudioMime(String mimeType) {
+        if (mimeType == null) return "";
+        String mime = mimeType.toLowerCase(Locale.US);
+        int semicolon = mime.indexOf(';');
+        if (semicolon >= 0) mime = mime.substring(0, semicolon).trim();
+        if ("audio/mpeg".equals(mime) || "audio/mp3".equals(mime)) return "mp3";
+        if ("audio/flac".equals(mime) || "audio/x-flac".equals(mime)) return "flac";
+        if ("audio/wav".equals(mime) || "audio/x-wav".equals(mime)
+                || "audio/wave".equals(mime)) return "wav";
+        if ("audio/ogg".equals(mime)) return "ogg";
+        if ("audio/mp4".equals(mime) || "audio/x-m4a".equals(mime)) return "m4a";
+        if ("audio/aac".equals(mime)) return "aac";
+        if ("audio/opus".equals(mime)) return "opus";
+        if ("audio/webm".equals(mime)) return "webm";
+        if ("audio/ape".equals(mime) || "audio/x-ape".equals(mime)) return "ape";
+        if ("audio/x-ms-wma".equals(mime)) return "wma";
+        return "";
+    }
+
+    private void importSelectedMedia(final Uri uri) {
+        final SelectedImport selected = describeSelectedImport(uri);
+        startSelectedImport(selected, uri.toString(), new SelectedImportInput() {
+            @Override
+            public java.io.InputStream open() throws Exception {
+                return getContentResolver().openInputStream(uri);
+            }
+        });
+    }
+
+    private void importSelectedFile(final File source) {
+        if (source == null || !source.isFile()) return;
+        final SelectedImport selected = new SelectedImport(
+                AuthorizedMediaImporter.safeBasename(source.getName()), source.length());
+        startSelectedImport(selected, "file:" + source.getAbsolutePath(),
+                new SelectedImportInput() {
+            @Override
+            public java.io.InputStream open() throws Exception {
+                return new java.io.FileInputStream(source);
+            }
+        });
+    }
+
+    private void startSelectedImport(final SelectedImport selected, final String sourceId,
+            final SelectedImportInput selectedInput) {
+        final MediaCompatibilityService.Decision compatibility =
+                MediaCompatibilityService.analyzeName(selected.displayName);
+        if (!compatibility.canImportWithoutConversion) {
+            Toast.makeText(this,
+                    getString(R.string.get_music_import_unsupported, selected.displayName),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        File mediaRoot = DeviceFeatures.getNewMediaRoot(this);
+        if (mediaRoot == null) {
+            Toast.makeText(this, getString(R.string.get_music_import_no_storage),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        final File importDirectory = new File(new File(mediaRoot, "Music"), "Imports");
+        final File expectedTarget = new File(importDirectory, selected.displayName);
+        final String transferId = beginTransferJob(null, TransferJobStore.Provider.IMPORT,
+                selected.displayName, getString(R.string.get_music_import_source),
+                sourceId, expectedTarget.getAbsolutePath(), false, 1);
+        Toast.makeText(this,
+                getString(R.string.get_music_import_started, selected.displayName),
+                Toast.LENGTH_SHORT).show();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                java.io.InputStream input = null;
+                try {
+                    input = selectedInput.open();
+                    if (input == null) throw new IOException("The selected file could not be opened");
+                    final long[] lastProgress = new long[] {0L, 0L};
+                    final AuthorizedMediaImporter.Result result =
+                            AuthorizedMediaImporter.copyToLibrary(
+                                    input, selected.displayName, selected.size, importDirectory,
+                                    new AuthorizedMediaImporter.Progress() {
+                                @Override
+                                public void onProgress(long copiedBytes, long totalBytes) {
+                                    long now = android.os.SystemClock.elapsedRealtime();
+                                    if (lastProgress[1] == 0L
+                                            || copiedBytes - lastProgress[0] >= 512L * 1024L
+                                            || now - lastProgress[1] >= 500L
+                                            || (totalBytes > 0L && copiedBytes >= totalBytes)) {
+                                        lastProgress[0] = copiedBytes;
+                                        lastProgress[1] = now;
+                                        progressTransferJob(
+                                                transferId, copiedBytes, totalBytes);
+                                    }
+                                }
+                            });
+                    finishTransferJob(transferId, result.file, true);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            scanMediaLibraryAsync();
+                            requestSoulseekShareRescan();
+                            Toast.makeText(MainActivity.this,
+                                    getString(result.duplicate
+                                                    ? R.string.get_music_import_duplicate
+                                                    : R.string.get_music_import_done,
+                                            result.file.getName()),
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } catch (final Exception e) {
+                    final String message = e.getMessage() != null
+                            ? e.getMessage() : getString(R.string.get_music_import_failed_unknown);
+                    failTransferJob(transferId, message);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(MainActivity.this,
+                                    getString(R.string.get_music_import_failed, message),
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } finally {
+                    if (input != null) try { input.close(); } catch (IOException ignored) {}
+                }
+            }
+        }, "SolarMediaImport").start();
     }
 
     /**
@@ -14580,6 +14816,7 @@ public class MainActivity extends Activity {
         if (state == STATE_MENU) {
             isPickingBackground = false;
             isPickingApk = false;
+            isPickingMediaImport = false;
             settingsBrowseFullWidth = false;
             applyFullWidthMenusLayout();
             applyPodcastBrowserLayout();
@@ -17523,18 +17760,11 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     }
 
     private void openGetMusicScreen(boolean preserveReturnState) {
-        if (!hasInternetConnection()) {
-            Toast.makeText(this, getString(R.string.toast_internet_required), Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (!GetMusicSources.anyAvailable(prefs, soulseekActive(), deezerActive())) {
-            Toast.makeText(this, getString(R.string.get_music_unavailable), Toast.LENGTH_LONG).show();
-            return;
-        }
         getMusicMode = GetMusicSources.resolveMode(prefs, soulseekActive(), deezerActive());
         getMusicFromEntryPoint = true;
         getMusicEmbeddedInDeezer = false;
-        if (GetMusicSources.deezerConfiguredForGetMusic(prefs, deezerActive())
+        if (hasInternetConnection()
+                && GetMusicSources.deezerConfiguredForGetMusic(prefs, deezerActive())
                 && !ConnectivityHelper.isDeezerLoginOk()) {
             refreshDeezerSessionFromPrefs(false);
         }
@@ -30363,6 +30593,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         if (currentScreenState == STATE_BROWSER && currentBrowserMode == BROWSER_ROOT && !isPickingBackground
                 && !isPickingApk
+                && !isPickingMediaImport
                 && isFlowEnabled()) {
             addContextAction(getString(R.string.flow_open), new Runnable() {
                 @Override
@@ -30378,7 +30609,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             });
         }
         if (currentScreenState == STATE_BROWSER && currentBrowserMode == BROWSER_FOLDER && !isPickingBackground
-                && !isPickingApk) {
+                && !isPickingApk && !isPickingMediaImport) {
             final File audio = browserFocusedAudioFile();
             if (audio != null) {
                 addContextAction(getString(R.string.context_action_play_now), new Runnable() {
@@ -33355,7 +33586,20 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             return;
         }
         if (currentScreenState == STATE_BROWSER) {
-            if (isPickingApk) {
+            if (isPickingMediaImport) {
+                if (com.solar.launcher.DeviceFeatures.isStorageVolumeRoot(currentFolder)) {
+                    closeMediaImportPicker();
+                } else {
+                    final File parent = currentFolder.getParentFile();
+                    drillBrowserBack(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (parent != null) currentFolder = parent;
+                            buildFileBrowserUI();
+                        }
+                    });
+                }
+            } else if (isPickingApk) {
                 if (currentFolder.getAbsolutePath().equals(getStorageRoot().getAbsolutePath())) {
                     isPickingApk = false;
                     changeScreen(STATE_APPS, true);
@@ -43314,6 +43558,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             String pathLabel = cleanPathLabel(currentFolder.getAbsolutePath());
             return getString(R.string.path_apk_install, pathLabel);
         }
+        if (isPickingMediaImport) {
+            String pathLabel = cleanPathLabel(currentFolder.getAbsolutePath());
+            return getString(R.string.path_media_import, pathLabel);
+        }
         if (isPickingBackground) {
             String pathLabel = cleanPathLabel(currentFolder.getAbsolutePath());
             return getString(R.string.path_library_pick_image, pathLabel);
@@ -43793,6 +44041,13 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     private String beginTransferJob(String preferredId, TransferJobStore.Provider provider,
             String title, String sourceName, String remoteId, String targetPath, int maxAttempts) {
+        return beginTransferJob(preferredId, provider, title, sourceName, remoteId,
+                targetPath, true, maxAttempts);
+    }
+
+    private String beginTransferJob(String preferredId, TransferJobStore.Provider provider,
+            String title, String sourceName, String remoteId, String targetPath,
+            boolean wifiOnly, int maxAttempts) {
         if (transferJobStore == null || provider == null) return null;
         try {
             TransferJobStore.Job job = transferJobStore.get(preferredId);
@@ -43805,7 +44060,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
             if (job == null) {
                 job = transferJobStore.create(provider, title, sourceName, remoteId, targetPath,
-                        true, maxAttempts);
+                        wifiOnly, maxAttempts);
             }
             if (job.state == TransferJobStore.State.FAILED) {
                 job = transferJobStore.retry(job.id);
@@ -45207,7 +45462,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (scrollViewBrowser != null) scrollViewBrowser.setVisibility(View.VISIBLE); if (listVirtualSongs != null) listVirtualSongs.setVisibility(View.GONE);
         containerBrowserItems.removeAllViews();
 
-        if (isPickingBackground || isPickingApk || currentBrowserMode == BROWSER_FOLDER) {
+        if (isPickingBackground || isPickingApk || isPickingMediaImport
+                || currentBrowserMode == BROWSER_FOLDER) {
             buildFolderBrowserUI();
             return;
         }
@@ -49205,14 +49461,15 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         String pathLabel = cleanPathLabel(currentFolder.getAbsolutePath());
         browserStatusTitle = isPickingApk
                 ? getString(R.string.status_apk_install)
-                : getString(R.string.status_path, pathLabel);
+                : (isPickingMediaImport
+                        ? getString(R.string.status_media_import)
+                        : getString(R.string.status_path, pathLabel));
         updateStatusBarTitle();
         updateLibraryBreadcrumb();
         File[] files = currentFolder.listFiles();
 
-        final File storageRoot = getStorageRoot();
-        boolean showUp = isPickingBackground || isPickingApk
-                ? !currentFolder.getAbsolutePath().equals(storageRoot.getAbsolutePath())
+        boolean showUp = isPickingBackground || isPickingApk || isPickingMediaImport
+                ? !com.solar.launcher.DeviceFeatures.isStorageVolumeRoot(currentFolder)
                 : !currentFolder.getAbsolutePath().equals(rootFolder.getAbsolutePath());
 
         if (files == null || files.length == 0) {
@@ -49237,6 +49494,19 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 });
                 containerBrowserItems.addView(btnUp);
             }
+            if (isPickingMediaImport
+                    && com.solar.launcher.DeviceFeatures.isStorageVolumeRoot(currentFolder)) {
+                Button otherApps = createListButton(
+                        "↗ " + getString(R.string.get_music_import_other_apps));
+                otherApps.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        clickFeedback();
+                        requestExternalMediaImport();
+                    }
+                });
+                containerBrowserItems.addView(otherApps);
+            }
             Button btnEmpty = createListButton(
                     files == null ? "⚠️ USB Disconnect Required (Tap to go back)" : "📂 Empty Folder (Tap to go back)");
             btnEmpty.setTextColor(0xFFFF5555);
@@ -49244,7 +49514,15 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 @Override
                 public void onClick(View v) {
                     clickFeedback();
-                    if (isPickingApk) {
+                    if (isPickingMediaImport) {
+                        if (com.solar.launcher.DeviceFeatures.isStorageVolumeRoot(currentFolder)) {
+                            closeMediaImportPicker();
+                        } else {
+                            File parent = currentFolder.getParentFile();
+                            if (parent != null) currentFolder = parent;
+                            buildFileBrowserUI();
+                        }
+                    } else if (isPickingApk) {
                         if (currentFolder.getAbsolutePath().equals(getStorageRoot().getAbsolutePath())) {
                             isPickingApk = false;
                             changeScreen(STATE_APPS);
@@ -49289,7 +49567,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             else if (isPickingBackground && isImageFile(f)) imageFiles.add(f);
             else if (isPickingApk && isApkFile(f)) apkFiles.add(f);
             else if (!isPickingBackground && !isPickingApk && isAudioFile(f)) audioFiles.add(f);
-            else if (!isPickingBackground && !isPickingApk && isApkFile(f)) apkFiles.add(f);
+            else if (!isPickingBackground && !isPickingApk && !isPickingMediaImport
+                    && isApkFile(f)) apkFiles.add(f);
         }
         java.util.Comparator<File> fileSorter = new java.util.Comparator<File>() {
             @Override
@@ -49305,6 +49584,12 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (showUp) {
             folderBrowserEntries.add(FolderBrowserEntry.up(getString(R.string.browser_up)));
             currentScrollIndexList.add(getString(R.string.browser_up));
+        }
+        if (isPickingMediaImport
+                && com.solar.launcher.DeviceFeatures.isStorageVolumeRoot(currentFolder)) {
+            folderBrowserEntries.add(FolderBrowserEntry.externalImport(
+                    getString(R.string.get_music_import_other_apps)));
+            currentScrollIndexList.add(getString(R.string.get_music_import_other_apps));
         }
         appendOtherStorageVolumeEntries();
         for (File folder : folders) {
@@ -53706,8 +53991,44 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         });
         containerBrowserItems.addView(back);
 
-        if (!ConnectivityHelper.isOnline(this)) {
+        final boolean online = ConnectivityHelper.isOnline(this);
+        if (getMusic) {
+            View localImport = createGetMusicListRow(
+                    getString(R.string.get_music_import_local),
+                    getString(R.string.get_music_import_local_hint),
+                    new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    clickFeedback();
+                    requestAuthorizedMediaImport();
+                }
+            });
+            containerBrowserItems.addView(localImport);
+
+            if (online && com.solar.launcher.youtube.YouTubeExperiment.isEnabled(prefs)) {
+                View youtube = createGetMusicListRow(
+                        getString(R.string.get_music_youtube_discover),
+                        getString(R.string.get_music_youtube_discover_hint),
+                        new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        clickFeedback();
+                        if (mediaSuite != null) mediaSuite.openYouTubeAudioBrowse();
+                    }
+                });
+                containerBrowserItems.addView(youtube);
+            }
+        }
+
+        if (!online) {
             if (containerBrowserItems.getChildCount() > 0) containerBrowserItems.getChildAt(0).requestFocus();
+            return;
+        }
+        if (getMusic && !GetMusicSources.anyAvailable(
+                prefs, soulseekActive(), deezerActive())) {
+            if (containerBrowserItems.getChildCount() > 0) {
+                containerBrowserItems.getChildAt(0).requestFocus();
+            }
             return;
         }
 
@@ -62699,6 +63020,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         static final int KIND_IMAGE = 4;
         /** Y2 cross-link to the other storage volume from a mount root. */
         static final int KIND_STORAGE = 5;
+        /** Optional Android content-provider picker from the Solar import browser. */
+        static final int KIND_EXTERNAL_IMPORT = 6;
 
         final int kind;
         final File file;
@@ -62733,6 +63056,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         static FolderBrowserEntry storageVolume(File f, String label) {
             return new FolderBrowserEntry(KIND_STORAGE, f, label);
         }
+
+        static FolderBrowserEntry externalImport(String label) {
+            return new FolderBrowserEntry(KIND_EXTERNAL_IMPORT, null, label);
+        }
     }
 
     private class FolderBrowserAdapter extends android.widget.BaseAdapter {
@@ -62759,6 +63086,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             else if (entry.kind == FolderBrowserEntry.KIND_IMAGE) prefix = "🖼 ";
             else if (entry.kind == FolderBrowserEntry.KIND_UP) prefix = "";
             else if (entry.kind == FolderBrowserEntry.KIND_STORAGE) prefix = "💾 ";
+            else if (entry.kind == FolderBrowserEntry.KIND_EXTERNAL_IMPORT) prefix = "↗ ";
             if (entry.kind == FolderBrowserEntry.KIND_APK) {
                 btn.setText(getString(R.string.browser_install_apk, entry.label));
                 btn.setTextColor(0xFF00FFFF);
@@ -62805,8 +63133,16 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                                 buildFileBrowserUI();
                             }
                         });
+                    } else if (entry.kind == FolderBrowserEntry.KIND_EXTERNAL_IMPORT) {
+                        requestExternalMediaImport();
                     } else if (entry.kind == FolderBrowserEntry.KIND_AUDIO && entry.file != null) {
-                        setupFolderPlaylist(entry.file);
+                        if (isPickingMediaImport) {
+                            File selected = entry.file;
+                            closeMediaImportPicker();
+                            importSelectedFile(selected);
+                        } else {
+                            setupFolderPlaylist(entry.file);
+                        }
                     } else if (entry.kind == FolderBrowserEntry.KIND_APK && entry.file != null) {
                         if (isPickingApk) {
                             confirmAndInstallUserApk(entry.file);

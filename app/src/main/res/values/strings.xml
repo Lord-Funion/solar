@@ -263,6 +263,7 @@
     <string name="status_library_genres">Library: Genres</string>
     <string name="status_library_playlists">Library: Playlists</string>
     <string name="status_path">Path: %1$s</string>
+    <string name="status_media_import">Import audio</string>
 
     <!-- Breadcrumbs -->
     <string name="path_library_root">Library</string>
@@ -1225,6 +1226,22 @@ https://github.com/thesolarproject/solar</string>
     <string name="get_music_searching_reach">Searching Reach…</string>
     <string name="get_music_recent_searches">Recent searches</string>
     <string name="get_music_type_search">Type search…</string>
+    <string name="get_music_import_local">Import local audio</string>
+    <string name="get_music_import_local_hint">Copy a file you own or may use to Music/Imports</string>
+    <string name="get_music_import_picker_title">Select audio to import</string>
+    <string name="get_music_import_other_apps">Choose from another app…</string>
+    <string name="get_music_import_picker_unavailable">No file picker is installed. You can still copy audio to Music over USB.</string>
+    <string name="get_music_import_source">Local import</string>
+    <string name="get_music_import_started">Importing %1$s…</string>
+    <string name="get_music_import_done">Imported %1$s</string>
+    <string name="get_music_import_duplicate">%1$s is already in Music/Imports</string>
+    <string name="get_music_import_unsupported">Solar cannot play %1$s, and this build does not bundle a converter.</string>
+    <string name="get_music_import_no_storage">No writable media storage is available.</string>
+    <string name="get_music_import_failed">Import failed: %1$s</string>
+    <string name="get_music_import_failed_unknown">Unknown import error</string>
+    <string name="get_music_youtube_discover">YouTube Discover</string>
+    <string name="get_music_youtube_discover_hint">Browse official YouTube metadata</string>
+    <string name="path_media_import">Import audio / %1$s</string>
     <string name="get_music_back_home">@string/common_back</string>
     <string name="get_music_back_search">@string/common_back</string>
     <string name="get_music_back_results">@string/common_back</string>
