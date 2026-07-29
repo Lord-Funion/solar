@@ -57,6 +57,12 @@ for bridge in SolarContextBridgeY1.apk SolarContextBridgeY2.apk; do
         || die "$bridge missing SystemErrorDialogRouting"
     echo "$dex_strings" | grep 'scheduleCrashOverlayFailOpen' >/dev/null \
         || die "$bridge missing crash 2s fail-open"
+    echo "$dex_strings" | grep 'BluetoothPairingVariantPolicy' >/dev/null \
+        || die "$bridge missing shared interactive pairing policy"
+    if echo "$dex_strings" | grep -E \
+            'BluetoothPairingDialog silent PIN|BluetoothPairingDialog silent confirm' >/dev/null; then
+        die "$bridge still contains silent Bluetooth pairing acceptance"
+    fi
 done
 # 2026-07-08 — Manifest prepVersion must match sync-platform-assets.sh source of truth.
 SYNC_PREP="$(grep -E '^\s*"prepVersion":' "$ROOT/solar-rom/scripts/sync-platform-assets.sh" | head -1 | grep -oE '[0-9]+' || true)"

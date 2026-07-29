@@ -7,7 +7,7 @@ import android.content.Intent;
 
 /**
  * Manifest receiver — PAIRING_REQUEST and bond events for all apps (Settings, Rockbox, Solar).
- * 2026-07-19 — Sole PAIRING_REQUEST owner; notifies coordinator on BOND_BONDED to cancel delayed PIN.
+ * Sole PAIRING_REQUEST owner; notifies the coordinator when bonding completes.
  */
 public class BluetoothAudioRepairReceiver extends BroadcastReceiver {
     @Override

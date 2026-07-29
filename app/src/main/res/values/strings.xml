@@ -407,6 +407,8 @@
     <string name="hearing_safety_volume_ear_hint">Keep scrolling right for more volume</string>
     <string name="hearing_safety_unlock_hint">Hearing Safety unlocked for this session</string>
     <string name="stream_seek_buffering">Buffering to %1$s…</string>
+    <string name="video_seek_target">Seeking to %1$s…</string>
+    <string name="video_seek_failed">Unable to seek this video</string>
     <string name="settings_screen_off_control">Screen-Off Control</string>
     <string name="settings_paint_system_apps">Paint system apps with theme</string>
     <string name="settings_app_theme">Theme</string>
@@ -671,6 +673,9 @@
     <string name="wifi_open_network">Open Network (Direct Connect)</string>
     <string name="keyboard_target_wifi">Target: %1$s</string>
     <string name="keyboard_bt_pairing_pin">Pairing PIN for %1$s</string>
+    <string name="keyboard_bt_pairing_passkey">Pairing passkey for %1$s</string>
+    <string name="bt_pairing_passkey_invalid">Enter a 1–6 digit passkey</string>
+    <string name="bt_pairing_submit_failed">Could not submit the pairing key. Try again.</string>
     <string name="bt_pairing_passkey_title">Pair with %1$s</string>
     <string name="bt_pairing_passkey_body">Enter this PIN on the other device:\n\n%1$s</string>
     <string name="bt_pairing_passkey_ok">OK</string>
