@@ -22,6 +22,7 @@ final class OverlayBtPinKeyboard {
     private String targetAddress;
     private String deviceName;
     private String prefill;
+    private String keyboardTitle;
     private int pairingMode = BluetoothPairingCoordinator.MODE_PIN;
     private long playPauseDownAt;
 
@@ -94,8 +95,9 @@ final class OverlayBtPinKeyboard {
         int titleRes = pairingMode == BluetoothPairingCoordinator.MODE_PASSKEY_ENTRY
                 ? R.string.keyboard_bt_pairing_passkey
                 : R.string.keyboard_bt_pairing_pin;
+        keyboardTitle = context.getString(titleRes, deviceName);
         shellHost = new SolarKeyboardShellHost(
-                context, shellRoot, context.getString(titleRes, deviceName));
+                context, shellRoot, context.getString(R.string.bt_pairing_passkey_ok));
         parent.addView(shellRoot, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         refreshUi();
@@ -162,6 +164,7 @@ final class OverlayBtPinKeyboard {
         targetAddress = null;
         deviceName = null;
         prefill = null;
+        keyboardTitle = null;
         pairingMode = BluetoothPairingCoordinator.MODE_PIN;
         playPauseDownAt = 0L;
     }
@@ -179,9 +182,11 @@ final class OverlayBtPinKeyboard {
         String buffer = controller.getBuffer();
         boolean empty = buffer == null || buffer.length() == 0;
         String input = empty
-                ? (pairingMode == BluetoothPairingCoordinator.MODE_PASSKEY_ENTRY
-                        ? "000000" : "0000")
+                ? context.getString(
+                        pairingMode == BluetoothPairingCoordinator.MODE_PASSKEY_ENTRY
+                                ? R.string.bt_pairing_passkey_placeholder
+                                : R.string.bt_pairing_pin_placeholder)
                 : controller.renderBuffer(true);
-        shellHost.getKeyboardUi().refresh(controller, null, input, empty);
+        shellHost.getKeyboardUi().refresh(controller, keyboardTitle, input, empty);
     }
 }
