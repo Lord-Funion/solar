@@ -7,6 +7,25 @@ VENDOR="$ROOT/solar-rom/vendor/xposed"
 
 die() { echo "verify-platform-assets: $*" >&2; exit 1; }
 
+printable_strings() {
+    if command -v strings >/dev/null 2>&1; then
+        strings
+        return
+    fi
+    local python_cmd=""
+    if command -v python3 >/dev/null 2>&1; then
+        python_cmd="python3"
+    elif command -v python >/dev/null 2>&1; then
+        python_cmd="python"
+    else
+        die "verification needs strings, python3, or python"
+    fi
+    "$python_cmd" -c 'import re, sys
+data = sys.stdin.buffer.read()
+for value in re.findall(rb"[\x20-\x7e]{4,}", data):
+    print(value.decode("ascii"))'
+}
+
 [ -f "$DST/manifest.json" ] || die "missing manifest — run sync-platform-assets.sh"
 [ -f "$DST/xposed/XposedInstaller.apk" ] || die "missing XposedInstaller.apk asset"
 [ -f "$DST/xposed/SolarContextBridgeY1.apk" ] || die "missing SolarContextBridgeY1.apk asset"
@@ -23,12 +42,13 @@ die() { echo "verify-platform-assets: $*" >&2; exit 1; }
 [ -f "$DST/companion/SolarHomeHelper.apk" ] || die "missing SolarHomeHelper.apk asset"
 # 2026-07-08 — Companion must ship interactive sole-shell host (not text placeholder only).
 if ! unzip -p "$DST/companion/SolarGlobalContextModal.apk" classes.dex 2>/dev/null \
-        | strings | grep -E 'CompanionOverlayKeyGate|CompanionTierScheduler' >/dev/null; then
+        | printable_strings | grep -E 'CompanionOverlayKeyGate|CompanionTierScheduler' >/dev/null; then
     die "SolarGlobalContextModal.apk missing companion overlay gate/tier (rebuild :global-context-modal)"
 fi
 # 2026-07-08 — Bridge assets must retain companion retarget + system ANR/crash fail-open.
 for bridge in SolarContextBridgeY1.apk SolarContextBridgeY2.apk; do
-    dex_strings="$(unzip -p "$DST/xposed/$bridge" classes.dex 2>/dev/null | strings || true)"
+    dex_strings="$(unzip -p "$DST/xposed/$bridge" classes.dex 2>/dev/null \
+        | printable_strings || true)"
     echo "$dex_strings" | grep 'legacy_shell' >/dev/null \
         || die "$bridge missing legacy_shell rollback prop"
     echo "$dex_strings" | grep 'globalcontext' >/dev/null \
