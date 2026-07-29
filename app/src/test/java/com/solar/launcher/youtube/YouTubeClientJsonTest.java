@@ -3,6 +3,7 @@ package com.solar.launcher.youtube;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /** 2026-07-15 — Native client JSON matches YouTubeResultJson shapes. */
@@ -47,6 +48,23 @@ public class YouTubeClientJsonTest {
         }
         if (!cache.cached || !cache.stale || cache.ageMs != 42_000L) {
             throw new AssertionError("cache state missing: " + annotated);
+        }
+    }
+
+    @Test
+    public void discoverAccountSignalsRoundTrip() throws Exception {
+        List<YouTubeVideo> liked = Arrays.asList(
+                new YouTubeVideo("liked1", "Liked title", "Liked channel", "3:00"));
+        String json = YouTubeClient.discoverSignalsToJson(
+                Arrays.asList("One", "Two"), liked, true, true, false);
+        YouTubeDiscoverSignals parsed = YouTubeDiscoverSignals.parse(json);
+        if (!parsed.accountConnected || !parsed.stale || parsed.partial) {
+            throw new AssertionError("signal flags lost: " + json);
+        }
+        if (parsed.subscribedChannels.size() != 2
+                || parsed.likedVideos.size() != 1
+                || !"liked1".equals(parsed.likedVideos.get(0).id)) {
+            throw new AssertionError("signals lost: " + json);
         }
     }
 

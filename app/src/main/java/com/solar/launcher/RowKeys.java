@@ -45,6 +45,12 @@ public final class RowKeys {
     public static final String DEVICE = "settings.device";
     public static final String LIBRARY = "settings.library";
     public static final String MEDIA = "settings.media";
+    public static final String YOUTUBE_REGION = "settings.youtube.region";
+    public static final String YOUTUBE_DISCOVER_DURATION =
+            "settings.youtube.discover_duration";
+    public static final String YOUTUBE_CACHE_SIZE = "settings.youtube.cache_size";
+    public static final String YOUTUBE_CLEAR_CACHE = "settings.youtube.clear_cache";
+    public static final String YOUTUBE_CLEAR_HISTORY = "settings.youtube.clear_history";
     public static final String POWER = "settings.power";
     public static final String USB = "settings.usb";
     public static final String USB_AUTO_CONNECT = "settings.usb_auto_connect";

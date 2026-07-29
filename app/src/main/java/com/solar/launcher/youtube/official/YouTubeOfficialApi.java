@@ -59,6 +59,10 @@ public final class YouTubeOfficialApi {
         return apiKey().length() > 0 || auth.hasAccount();
     }
 
+    public boolean hasAccount() {
+        return auth.hasAccount();
+    }
+
     public Page search(String query, String pageToken, String regionCode) throws Exception {
         String clean = query != null ? query.trim() : "";
         if (clean.length() == 0) return new Page(new ArrayList<YouTubeVideo>(), "");
@@ -98,6 +102,26 @@ public final class YouTubeOfficialApi {
                 .addQueryParameter("order", "relevance")
                 .addQueryParameter("textFormat", "plainText");
         return parseComments(getJson(url));
+    }
+
+    /** First bounded page of channels followed by the connected read-only account. */
+    public List<String> subscriptions() throws Exception {
+        if (!auth.hasAccount()) return new ArrayList<String>();
+        HttpUrl.Builder url = endpoint("subscriptions")
+                .addQueryParameter("part", "snippet")
+                .addQueryParameter("mine", "true")
+                .addQueryParameter("maxResults", "50");
+        return parseSubscriptions(getJson(url));
+    }
+
+    /** First bounded page of videos the connected account marked as liked. */
+    public List<YouTubeVideo> likedVideos() throws Exception {
+        if (!auth.hasAccount()) return new ArrayList<YouTubeVideo>();
+        HttpUrl.Builder url = endpoint("videos")
+                .addQueryParameter("part", "snippet,contentDetails")
+                .addQueryParameter("myRating", "like")
+                .addQueryParameter("maxResults", "50");
+        return parseVideoDetails(getJson(url), null);
     }
 
     static List<String> parseSearchIds(JSONObject response) {
@@ -158,6 +182,20 @@ public final class YouTubeOfficialApi {
             String text = comment.optString("textOriginal",
                     comment.optString("textDisplay", ""));
             out.add(new YouTubeComment(author, decodeEntities(text)));
+        }
+        return out;
+    }
+
+    static List<String> parseSubscriptions(JSONObject response) {
+        List<String> out = new ArrayList<String>();
+        JSONArray items = response != null ? response.optJSONArray("items") : null;
+        if (items == null) return out;
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            JSONObject snippet = item != null ? item.optJSONObject("snippet") : null;
+            String title = snippet != null
+                    ? decodeEntities(snippet.optString("title", "")).trim() : "";
+            if (title.length() > 0 && !out.contains(title)) out.add(title);
         }
         return out;
     }

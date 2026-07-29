@@ -52,4 +52,14 @@ public class YouTubeOfficialApiTest {
         assertEquals("A & B", comments.get(0).author);
         assertEquals("Useful comment", comments.get(0).content);
     }
+
+    @Test
+    public void parsesUniqueSubscriptionChannelTitles() throws Exception {
+        JSONObject response = new JSONObject("{\"items\":["
+                + "{\"snippet\":{\"title\":\"Channel &amp; One\"}},"
+                + "{\"snippet\":{\"title\":\"Channel &amp; One\"}},"
+                + "{\"snippet\":{\"title\":\"Channel Two\"}}]}");
+        assertEquals(Arrays.asList("Channel & One", "Channel Two"),
+                YouTubeOfficialApi.parseSubscriptions(response));
+    }
 }

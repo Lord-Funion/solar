@@ -21487,6 +21487,37 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (RowKeys.SOULSEEK_ACCOUNT.equals(rowKey) && SettingsScreens.isSoulseek(settingsSubScreenKey)) {
             return SoulseekAccount.displayLabel(SoulseekAccount.load(prefs));
         }
+        if (RowKeys.YOUTUBE_REGION.equals(rowKey)) {
+            String configured = com.solar.launcher.youtube.YouTubeDiscoverSettings
+                    .configuredRegion(prefs);
+            String effective = com.solar.launcher.youtube.YouTubeDiscoverSettings
+                    .effectiveRegion(prefs, Locale.getDefault().getCountry());
+            return configured.length() > 0
+                    ? configured
+                    : getString(R.string.settings_youtube_region_auto, effective);
+        }
+        if (RowKeys.YOUTUBE_DISCOVER_DURATION.equals(rowKey)) {
+            int preset = com.solar.launcher.youtube.YouTubeDiscoverSettings
+                    .durationPreset(
+                            prefs.getInt(com.solar.launcher.youtube.YouTubeDiscoverRanker
+                                    .PREF_MIN_DURATION_SECONDS, 0),
+                            prefs.getInt(com.solar.launcher.youtube.YouTubeDiscoverRanker
+                                    .PREF_MAX_DURATION_SECONDS, 0));
+            if (preset == 1) return getString(R.string.settings_youtube_duration_one_plus);
+            if (preset == 2) return getString(R.string.settings_youtube_duration_two_twenty);
+            if (preset == 3) return getString(R.string.settings_youtube_duration_long);
+            return getString(R.string.settings_youtube_duration_all);
+        }
+        if (RowKeys.YOUTUBE_CACHE_SIZE.equals(rowKey)) {
+            return formatBytes(com.solar.launcher.youtube.YouTubeDiscoverSettings
+                    .cacheBytes(prefs));
+        }
+        if (RowKeys.YOUTUBE_CLEAR_CACHE.equals(rowKey)) {
+            return getString(R.string.settings_youtube_clear_cache_hint);
+        }
+        if (RowKeys.YOUTUBE_CLEAR_HISTORY.equals(rowKey)) {
+            return getString(R.string.settings_youtube_clear_history_hint);
+        }
         if (RowKeys.STEM_FEATURES.equals(rowKey)) {
             // 2026-07-19 — Plain On/Off for inline ✓ (hint lives in dual-pane via resolveMediaStemPreview).
             // Was: state + hint in one string → isOnOffToggleRow failed. Reversal: concat hint here.
@@ -35570,6 +35601,124 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
         });
         containerSettingsItems.addView(btnVideo);
+
+        LinearLayout btnYouTubeRegion = createSettingsRow(
+                RowKeys.YOUTUBE_REGION, R.string.settings_youtube_region, false);
+        btnYouTubeRegion.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                String current = com.solar.launcher.youtube.YouTubeDiscoverSettings
+                        .configuredRegion(prefs);
+                String next = com.solar.launcher.youtube.YouTubeDiscoverSettings
+                        .nextRegion(current);
+                prefs.edit().putString(
+                        com.solar.launcher.youtube.YouTubeDiscoverSettings.PREF_REGION,
+                        next).commit();
+                com.solar.launcher.youtube.YouTubeClient.getInstance(MainActivity.this)
+                        .clearMetadataCache();
+                refreshSettingsPreview(RowKeys.YOUTUBE_REGION);
+            }
+        });
+        containerSettingsItems.addView(btnYouTubeRegion);
+
+        LinearLayout btnDiscoverDuration = createSettingsRow(
+                RowKeys.YOUTUBE_DISCOVER_DURATION,
+                R.string.settings_youtube_discover_duration, false);
+        btnDiscoverDuration.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                int min = prefs.getInt(
+                        com.solar.launcher.youtube.YouTubeDiscoverRanker
+                                .PREF_MIN_DURATION_SECONDS, 0);
+                int max = prefs.getInt(
+                        com.solar.launcher.youtube.YouTubeDiscoverRanker
+                                .PREF_MAX_DURATION_SECONDS, 0);
+                int preset = com.solar.launcher.youtube.YouTubeDiscoverSettings
+                        .nextDurationPreset(
+                                com.solar.launcher.youtube.YouTubeDiscoverSettings
+                                        .durationPreset(min, max));
+                prefs.edit()
+                        .putInt(com.solar.launcher.youtube.YouTubeDiscoverRanker
+                                        .PREF_MIN_DURATION_SECONDS,
+                                com.solar.launcher.youtube.YouTubeDiscoverSettings
+                                        .minDurationSeconds(preset))
+                        .putInt(com.solar.launcher.youtube.YouTubeDiscoverRanker
+                                        .PREF_MAX_DURATION_SECONDS,
+                                com.solar.launcher.youtube.YouTubeDiscoverSettings
+                                        .maxDurationSeconds(preset))
+                        .commit();
+                refreshSettingsPreview(RowKeys.YOUTUBE_DISCOVER_DURATION);
+            }
+        });
+        containerSettingsItems.addView(btnDiscoverDuration);
+
+        LinearLayout btnYouTubeCacheSize = createSettingsRow(
+                RowKeys.YOUTUBE_CACHE_SIZE,
+                R.string.settings_youtube_cache_size, false);
+        btnYouTubeCacheSize.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                long next = com.solar.launcher.youtube.YouTubeDiscoverSettings
+                        .nextCacheBytes(
+                                com.solar.launcher.youtube.YouTubeDiscoverSettings
+                                        .cacheBytes(prefs));
+                prefs.edit().putLong(
+                        com.solar.launcher.youtube.YouTubeDiscoverSettings.PREF_CACHE_BYTES,
+                        next).commit();
+                com.solar.launcher.youtube.YouTubeClient.getInstance(MainActivity.this)
+                        .setMetadataCacheBytes(next);
+                refreshSettingsPreview(RowKeys.YOUTUBE_CACHE_SIZE);
+            }
+        });
+        containerSettingsItems.addView(btnYouTubeCacheSize);
+
+        LinearLayout btnClearYouTubeCache = createSettingsRow(
+                RowKeys.YOUTUBE_CLEAR_CACHE,
+                R.string.settings_youtube_clear_cache, true);
+        btnClearYouTubeCache.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                com.solar.launcher.youtube.YouTubeClient.getInstance(MainActivity.this)
+                        .clearMetadataCache();
+                Toast.makeText(MainActivity.this,
+                        R.string.settings_youtube_cache_cleared,
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
+        containerSettingsItems.addView(btnClearYouTubeCache);
+
+        LinearLayout btnClearYouTubeHistory = createSettingsRow(
+                RowKeys.YOUTUBE_CLEAR_HISTORY,
+                R.string.settings_youtube_clear_history, true);
+        btnClearYouTubeHistory.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                showThemedConfirm(
+                        getString(R.string.settings_youtube_clear_history),
+                        getString(R.string.settings_youtube_clear_history_confirm),
+                        getString(R.string.dialog_clear_cache_confirm),
+                        getString(R.string.common_cancel),
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                com.solar.launcher.youtube.YouTubeRecentSearches
+                                        .clear(MainActivity.this);
+                                new com.solar.launcher.youtube.YouTubeDiscoverFeedback(
+                                        MainActivity.this).clear();
+                                Toast.makeText(MainActivity.this,
+                                        R.string.settings_youtube_history_cleared,
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        },
+                        null);
+            }
+        });
+        containerSettingsItems.addView(btnClearYouTubeHistory);
 
         // 2026-07-19 — Enable Stem features: boolean toggle like Deezer Enable (not a submenu drill).
         // Was: createSettingsRow(..., true) → chevron, no ✓. Reversal: submenu=true.
@@ -54044,15 +54193,17 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             });
             containerBrowserItems.addView(localImport);
 
-            if (online && com.solar.launcher.youtube.YouTubeExperiment.isEnabled(prefs)) {
+            if (com.solar.launcher.youtube.YouTubeExperiment.isEnabled(prefs)) {
                 View youtube = createGetMusicListRow(
                         getString(R.string.get_music_youtube_discover),
-                        getString(R.string.get_music_youtube_discover_hint),
+                        getString(online
+                                ? R.string.get_music_youtube_discover_hint
+                                : R.string.get_music_youtube_discover_offline_hint),
                         new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
                         clickFeedback();
-                        if (mediaSuite != null) mediaSuite.openYouTubeAudioBrowse();
+                        if (mediaSuite != null) mediaSuite.openYouTubeDiscoverBrowse();
                     }
                 });
                 containerBrowserItems.addView(youtube);

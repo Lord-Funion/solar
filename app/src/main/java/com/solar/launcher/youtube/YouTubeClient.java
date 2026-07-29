@@ -1,6 +1,7 @@
 package com.solar.launcher.youtube;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -35,6 +36,8 @@ public final class YouTubeClient {
     private static final long SEARCH_FRESH_MS = 6L * 60L * 60L * 1000L;
     private static final long POPULAR_FRESH_MS = 2L * 60L * 60L * 1000L;
     private static final long COMMENTS_FRESH_MS = 30L * 60L * 1000L;
+    private static final long ACCOUNT_SIGNALS_FRESH_MS = 12L * 60L * 60L * 1000L;
+    private static final long DISCOVER_TIMEOUT_MS = 38_000L;
     private static final long MAX_STALE_MS = 30L * 24L * 60L * 60L * 1000L;
     public static final String ACQUISITION_BLOCKED = "metadata_only";
 
@@ -48,11 +51,15 @@ public final class YouTubeClient {
     private final YouTubeQuotaTracker quota;
     private final Random retryJitter = new Random();
     private final Context appContext;
+    private final SharedPreferences settings;
 
     private YouTubeClient(Context context) {
         appContext = context.getApplicationContext();
+        settings = appContext.getSharedPreferences(
+                YouTubeDiscoverSettings.PREFS_NAME, Context.MODE_PRIVATE);
         api = new YouTubeOfficialApi(appContext);
         cache = new YouTubeMetadataCache(appContext);
+        cache.setMaxBytes(YouTubeDiscoverSettings.cacheBytes(settings));
         quota = new YouTubeQuotaTracker(appContext);
     }
 
@@ -164,12 +171,70 @@ public final class YouTubeClient {
         });
     }
 
+    /**
+     * Fetches only read-only account metadata used by Solar's local ranker.
+     * Regional candidates are loaded separately so the feed can render while
+     * these two low-cost account requests finish.
+     */
+    public void fetchDiscoverSignals(final Callback callback) {
+        runTimed(DISCOVER_TIMEOUT_MS, callback, new Work() {
+            @Override
+            public String call() throws Exception {
+                if (!api.hasAccount()) {
+                    return discoverSignalsToJson(null, null, false,
+                            false, false);
+                }
+                List<String> channels = new java.util.ArrayList<String>();
+                List<YouTubeVideo> liked = new java.util.ArrayList<YouTubeVideo>();
+                boolean stale = false;
+                boolean partial = false;
+
+                try {
+                    String subscriptions = cachedSingleAttempt("discover:subscriptions",
+                            ACCOUNT_SIGNALS_FRESH_MS,
+                            YouTubeQuotaTracker.Operation.SUBSCRIPTIONS,
+                            new Work() {
+                                @Override
+                                public String call() throws Exception {
+                                    return subscriptionsToJson(api.subscriptions());
+                                }
+                            });
+                    channels.addAll(parseSubscriptionsJson(subscriptions));
+                    stale |= YouTubeResultJson.parseCacheState(subscriptions).stale;
+                } catch (Exception ignored) {
+                    partial = true;
+                }
+
+                try {
+                    String likedPayload = cachedSingleAttempt("discover:liked",
+                            ACCOUNT_SIGNALS_FRESH_MS,
+                            YouTubeQuotaTracker.Operation.LIKED_VIDEOS,
+                            new Work() {
+                                @Override
+                                public String call() throws Exception {
+                                    return videosToJson(api.likedVideos());
+                                }
+                            });
+                    liked.addAll(YouTubeResultJson.parseVideos(likedPayload));
+                    stale |= YouTubeResultJson.parseCacheState(likedPayload).stale;
+                } catch (Exception ignored) {
+                    partial = true;
+                }
+                return discoverSignalsToJson(channels, liked, true, stale, partial);
+            }
+        });
+    }
+
     public int estimatedQuotaToday() {
         return quota.todayTotal();
     }
 
     public void clearMetadataCache() {
         cache.clear();
+    }
+
+    public void setMetadataCacheBytes(long bytes) {
+        cache.setMaxBytes(bytes);
     }
 
     private void postPolicyError(final Callback callback) {
@@ -191,11 +256,38 @@ public final class YouTubeClient {
         if (hit != null && !ConnectivityHelper.isOnline(appContext)) {
             return annotateCache(hit.payload, true, true, hit.ageMs);
         }
+        if (hit == null && !ConnectivityHelper.isOnline(appContext)) {
+            throw new Exception("network_unavailable");
+        }
         try {
             // One refresh attempt is enough when a usable stale result exists.
             String payload = hit != null
                     ? callOnce(operation, network)
                     : callWithRetry(operation, network);
+            cache.put(key, payload);
+            return annotateCache(payload, false, false, 0L);
+        } catch (Exception networkFailure) {
+            if (hit != null) {
+                return annotateCache(hit.payload, true, true, hit.ageMs);
+            }
+            throw networkFailure;
+        }
+    }
+
+    private String cachedSingleAttempt(String key, long freshForMs,
+            YouTubeQuotaTracker.Operation operation, Work network) throws Exception {
+        YouTubeMetadataCache.Hit hit = cache.get(key, freshForMs, MAX_STALE_MS);
+        if (hit != null && !hit.stale) {
+            return annotateCache(hit.payload, true, false, hit.ageMs);
+        }
+        if (hit != null && !ConnectivityHelper.isOnline(appContext)) {
+            return annotateCache(hit.payload, true, true, hit.ageMs);
+        }
+        if (hit == null && !ConnectivityHelper.isOnline(appContext)) {
+            throw new Exception("network_unavailable");
+        }
+        try {
+            String payload = callOnce(operation, network);
             cache.put(key, payload);
             return annotateCache(payload, false, false, 0L);
         } catch (Exception networkFailure) {
@@ -340,10 +432,50 @@ public final class YouTubeClient {
         return array.toString();
     }
 
-    private static String deviceRegion() {
-        String country = Locale.getDefault().getCountry();
-        return country != null && country.matches("[A-Za-z]{2}")
-                ? country.toUpperCase(Locale.US) : "US";
+    static String subscriptionsToJson(List<String> channels) throws Exception {
+        JSONObject root = new JSONObject();
+        JSONArray array = new JSONArray();
+        if (channels != null) {
+            for (String channel : channels) {
+                String clean = nonNull(channel).trim();
+                if (clean.length() > 0) array.put(clean);
+            }
+        }
+        root.put("channels", array);
+        return root.toString();
+    }
+
+    static List<String> parseSubscriptionsJson(String payload) throws Exception {
+        List<String> out = new java.util.ArrayList<String>();
+        JSONObject root = new JSONObject(nonNull(payload));
+        JSONArray array = root.optJSONArray("channels");
+        if (array == null) return out;
+        for (int i = 0; i < array.length(); i++) {
+            String value = array.optString(i, "").trim();
+            if (value.length() > 0 && !out.contains(value)) out.add(value);
+        }
+        return out;
+    }
+
+    static String discoverSignalsToJson(List<String> channels,
+            List<YouTubeVideo> liked, boolean accountConnected, boolean stale,
+            boolean partial) throws Exception {
+        JSONObject root = new JSONObject();
+        JSONArray subscriptions = new JSONArray();
+        if (channels != null) {
+            for (String channel : channels) subscriptions.put(nonNull(channel));
+        }
+        root.put("subscribedChannels", subscriptions);
+        root.put("likedVideos", videosArray(liked));
+        root.put("accountConnected", accountConnected);
+        root.put("stale", stale);
+        root.put("partial", partial);
+        return root.toString();
+    }
+
+    private String deviceRegion() {
+        return YouTubeDiscoverSettings.effectiveRegion(
+                settings, Locale.getDefault().getCountry());
     }
 
     private static String safeMessage(Exception error) {
