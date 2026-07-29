@@ -37,11 +37,15 @@
 
 - Hardened custom Wi-Fi joins, saved-network operations, diagnostics,
   configurable auto-connect, and transfer resume after Wi-Fi recovery.
-- Hardened Bluetooth reconnect/service recovery and added text diagnostics.
+- Hardened Bluetooth reconnect/service recovery, added text diagnostics, and
+  replaced silent `0000`/auto-confirm pairing with immediate wheel PIN,
+  passkey, confirmation, consent, and stock-dialog fallback paths.
 - Improved ring/grouped wheel keyboard editing, hold acceleration, password
   privacy, suggestions, and path-independent tests.
+- Kept the video elapsed/progress/duration strip visible and made short seeks,
+  hold-to-fast-forward/rewind, and resume jumps submit directly to the active
+  player with seek-complete and bounded timeout handling.
 - Fixed incremental library reconciliation and routed fallback audio through
   the existing IJK playback path.
 - Corrected wheel chrome, empty playback position, stem hold semantics, melody
   selection, and Windows-portable host tests.
-

@@ -67,6 +67,10 @@ Test AirPods 4, one SBC-only earbud/headset, one common earbud set, and one
 speaker.
 
 - Discover, pair, reject/cancel pairing, unpair, and pair again.
+- Verify legacy PIN entry, six-digit passkey entry, numeric-match confirmation,
+  Just Works consent, and display-only PIN/passkey prompts where supported by
+  the available accessories. Confirm no credential-entry path guesses `0000`
+  or accepts a user-confirmation request.
 - Route audio, use AVRCP play/pause/previous/next, and change volume.
 - Walk out of range and return; reboot with the device available/unavailable.
 - Toggle Bluetooth auto-reconnect.
@@ -109,6 +113,11 @@ YouTube download action. Local listening signals remain on device.
 - Missing/corrupt tags, large artwork, missing file, USB/removable media.
 - Artist/album/track, folder, playlist, favorite, shuffle/repeat, queue,
   reboot-resume, previous/next, wired and Bluetooth output.
+- Play local, cached, and proxy-backed videos. Verify the elapsed/progress/
+  duration strip stays visible; short streaming skip seeks ±5 seconds; holding
+  Previous/Next moves the scrub marker and commits rewind/fast-forward on
+  release; Center/wheel fine scrub, pause, resume, end-of-file, and saved
+  position all seek without a permanent “Buffering to” state.
 
 Expected: incremental additions without a complete rebuild, bounded memory,
 correct queue, and no navigation-time artwork stalls.
@@ -135,4 +144,3 @@ adb logcat -d -v threadtime > y1-logcat.txt
 
 Before sharing, remove tokens, passwords, private SSIDs, device identifiers,
 peer-private data, and personal media paths.
-
