@@ -119,6 +119,7 @@ import com.solar.launcher.podcast.PodcastLibrary;
 import com.solar.launcher.podcast.PodcastPlayedStore;
 import com.solar.launcher.podcast.PodcastResumeStore;
 import com.solar.launcher.podcast.PodcastSubscriptions;
+import com.solar.launcher.transfer.TransferJobStore;
 
 import org.json.JSONObject;
 
@@ -262,6 +263,7 @@ public class MainActivity extends Activity {
     static final int STATE_STEM_PLAYER = 33;
     /** 2026-07-19 — 3-deck Mix (full tracks; replaces NP while active). */
     static final int STATE_MIX = 34;
+    static final int STATE_DOWNLOADS = 35;
     private static final int KEYBOARD_WIFI = 0;
     private static final int KEYBOARD_SOULSEEK_USER = 1;
     private static final int KEYBOARD_SOULSEEK_PASS = 2;
@@ -855,6 +857,24 @@ public class MainActivity extends Activity {
     private int activeLibraryScanGen = 0;
     private final PlaybackCoordinator playback = new PlaybackCoordinator();
     private MediaSuiteHost mediaSuite;
+    private TransferJobStore transferJobStore;
+    private String downloadsDetailJobId;
+    private String soulseekTransferJobId;
+    private boolean soulseekPausedForNetworkLoss;
+    private String podcastStreamTransferJobId;
+    private String podcastSaveTransferJobId;
+    private long downloadsLastUiRefreshMs;
+    private final Runnable downloadsUiRefreshRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (currentScreenState != STATE_DOWNLOADS) return;
+            downloadsLastUiRefreshMs = android.os.SystemClock.uptimeMillis();
+            TransferJobStore.Job detail = transferJobStore != null
+                    ? transferJobStore.get(downloadsDetailJobId) : null;
+            if (detail != null) buildDownloadJobDetailUI(detail);
+            else buildDownloadsUI();
+        }
+    };
     private int podcastLoadGeneration = 0;
     private boolean podcastEpisodeLoading = false;
     private volatile boolean podcastPartialPlaybackStarted = false;
@@ -4077,6 +4097,12 @@ public class MainActivity extends Activity {
 
         migrateLegacyPrefs();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        try {
+            transferJobStore = TransferJobStore.get(this);
+        } catch (RuntimeException e) {
+            android.util.Log.w("Solar", "Transfer journal unavailable", e);
+            transferJobStore = null;
+        }
         prefs.registerOnSharedPreferenceChangeListener(solarConfigWritebackListener);
         applyMediaRootPreference();
         playbackSpeed = prefs.getFloat("playback_speed", 1.0f);
@@ -9624,10 +9650,18 @@ public class MainActivity extends Activity {
 
     /** NTP / geo / Reach probes — disk+network; must not run mid-scroll. */
     private void runDeferredInternetAvailabilityHooks() {
-        if (hasInternetConnection() && soulseekReachEnabled) {
+        boolean internetAvailable = hasInternetConnection();
+        if (!internetAvailable) {
+            pausePodcastBackgroundDownload();
+            pauseSoulseekDownloadForNetworkLoss();
+        } else {
+            maybeResumePodcastDownload();
+            maybeResumeSoulseekDownloadAfterNetworkLoss();
+        }
+        if (internetAvailable && soulseekReachEnabled) {
             SolarDiagnosticReporter.onReachInternetAvailable(this, prefs);
         }
-        if (hasInternetConnection()) {
+        if (internetAvailable) {
             SolarAutoTime.onInternetAvailable(this);
             SolarGeoRegion.onInternetAvailable(this);
         }
@@ -10879,6 +10913,7 @@ public class MainActivity extends Activity {
                 || isSettingsFullWidthSubScreen(settingsSubScreenKey)
                 || currentScreenState == STATE_DEEZER
                 || currentScreenState == STATE_SOULSEEK
+                || currentScreenState == STATE_DOWNLOADS
                 || MediaSuiteHost.isMediaSuiteState(currentScreenState);
         applyFullWidthMenusLayout();
     }
@@ -12519,6 +12554,9 @@ public class MainActivity extends Activity {
         } else if (HomeMenuConfig.ID_SOULSEEK.equals(id)) {
             if (!requireInternet(R.string.toast_internet_required)) return;
             openGetMusicScreen();
+        } else if (HomeMenuConfig.ID_DOWNLOADS.equals(id)) {
+            downloadsDetailJobId = null;
+            changeScreen(STATE_DOWNLOADS);
         } else if (HomeMenuConfig.ID_THEMES.equals(id) || HomeMenuConfig.ID_GET_THEMES.equals(id)) {
             openThemesScreen(null);
         } else if (HomeMenuConfig.ID_MORE.equals(id)) {
@@ -12932,6 +12970,7 @@ public class MainActivity extends Activity {
             case STATE_STORAGE: return getString(R.string.status_storage);
             case STATE_WEBSERVER: return getString(R.string.status_pc_upload);
             case STATE_PODCASTS: return getString(R.string.status_podcasts);
+            case STATE_DOWNLOADS: return getString(R.string.status_downloads);
             case STATE_FLOW: return getString(R.string.status_flow);
             case STATE_SOULSEEK:
                 return browserStatusTitle != null && isGetMusicUnifiedUi()
@@ -14291,7 +14330,7 @@ public class MainActivity extends Activity {
         if (state != STATE_MENU && layoutMainMenu != null) {
             layoutMainMenu.setVisibility(View.GONE);
         }
-        layoutBrowserMode.setVisibility((state == STATE_BROWSER || state == STATE_PODCASTS || state == STATE_SOULSEEK || state == STATE_DEEZER || state == STATE_APPS || state == STATE_MORE
+        layoutBrowserMode.setVisibility((state == STATE_BROWSER || state == STATE_PODCASTS || state == STATE_SOULSEEK || state == STATE_DEEZER || state == STATE_APPS || state == STATE_MORE || state == STATE_DOWNLOADS
                 || state == STATE_USB_STORAGE || state == STATE_NAVIDROME || state == STATE_PLEX || state == STATE_JELLYFIN
                 || state == MediaSuiteHost.STATE_RADIO || state == MediaSuiteHost.STATE_RADIO_FM_BROWSE
                 || state == MediaSuiteHost.STATE_RADIO_FM_PLAYER
@@ -14300,7 +14339,7 @@ public class MainActivity extends Activity {
                 || state == MediaSuiteHost.STATE_YOUTUBE_DETAIL
                 || state == MediaSuiteHost.STATE_PHOTOS) ? View.VISIBLE : View.GONE);
         if (state == STATE_BROWSER || state == STATE_PODCASTS || state == STATE_SOULSEEK || state == STATE_DEEZER
-                || state == STATE_APPS || state == STATE_MORE || state == STATE_USB_STORAGE
+                || state == STATE_APPS || state == STATE_MORE || state == STATE_DOWNLOADS || state == STATE_USB_STORAGE
                 || state == STATE_NAVIDROME || state == STATE_PLEX || state == STATE_JELLYFIN
                 || state == MediaSuiteHost.STATE_RADIO || state == MediaSuiteHost.STATE_RADIO_FM_BROWSE
                 || state == MediaSuiteHost.STATE_RADIO_FM_PLAYER
@@ -14657,6 +14696,11 @@ public class MainActivity extends Activity {
             buildAppsLauncherUI();
         } else if (state == STATE_MORE) {
             buildMoreMenuUI();
+        } else if (state == STATE_DOWNLOADS) {
+            TransferJobStore.Job detail = transferJobStore != null
+                    ? transferJobStore.get(downloadsDetailJobId) : null;
+            if (detail != null) buildDownloadJobDetailUI(detail);
+            else buildDownloadsUI();
         } else if (state == STATE_NAVIDROME) {
             if (!NavidromePrefs.isConfigured(prefs)) {
                 if (hasInternetConnection()) {
@@ -14690,6 +14734,7 @@ public class MainActivity extends Activity {
         // 2026-07-15 — Media suite (YouTube/radio/videos/photos) also needs host width on enter.
         if (state == STATE_BROWSER || state == STATE_SOULSEEK || state == STATE_DEEZER
                 || state == STATE_PODCASTS || state == STATE_APPS || state == STATE_MORE
+                || state == STATE_DOWNLOADS
                 || state == STATE_NAVIDROME || state == STATE_PLEX || state == STATE_JELLYFIN
                 || MediaSuiteHost.isMediaSuiteState(state)) {
             applyPodcastBrowserLayout();
@@ -19993,6 +20038,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 || currentScreenState == STATE_BROWSER
                 || currentScreenState == STATE_SOULSEEK
                 || currentScreenState == STATE_DEEZER
+                || currentScreenState == STATE_DOWNLOADS
                 || currentScreenState == STATE_USB_STORAGE
                 || mediaSuiteWide
                 || (currentScreenState == STATE_NAVIDROME && !navidromeDual)
@@ -20012,7 +20058,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             blp.leftMargin = 0;
             if (!isFullWidthMenus && (currentScreenState == STATE_PODCASTS
                     || currentScreenState == STATE_BROWSER || currentScreenState == STATE_SOULSEEK
-                    || currentScreenState == STATE_DEEZER || currentScreenState == STATE_USB_STORAGE
+                    || currentScreenState == STATE_DEEZER || currentScreenState == STATE_DOWNLOADS
+                    || currentScreenState == STATE_USB_STORAGE
                     || currentScreenState == STATE_NAVIDROME || currentScreenState == STATE_PLEX
                     || currentScreenState == STATE_JELLYFIN
                     || mediaSuiteWide)) {
@@ -22272,6 +22319,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             case STATE_DEEZER:
             case STATE_APPS:
             case STATE_MORE:
+            case STATE_DOWNLOADS:
             case STATE_USB_STORAGE:
             case STATE_NAVIDROME:
             case STATE_PLEX:
@@ -22385,6 +22433,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 || currentScreenState == STATE_DEEZER
                 || currentScreenState == STATE_APPS
                 || currentScreenState == STATE_MORE
+                || currentScreenState == STATE_DOWNLOADS
                 || currentScreenState == STATE_NAVIDROME
                 || currentScreenState == STATE_PLEX
                 || currentScreenState == STATE_JELLYFIN
@@ -22690,6 +22739,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                     case STATE_PODCASTS:
                     case STATE_APPS:
                     case STATE_MORE:
+                    case STATE_DOWNLOADS:
                     case STATE_USB_STORAGE:
                         ensureBrowserListFocus();
                         break;
@@ -29597,6 +29647,14 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                         openGetMusicScreen();
                     }
                 });
+            } else if (HomeMenuConfig.ID_DOWNLOADS.equals(homeId)) {
+                addContextAction(getString(R.string.home_menu_downloads), new Runnable() {
+                    @Override
+                    public void run() {
+                        downloadsDetailJobId = null;
+                        changeScreen(STATE_DOWNLOADS);
+                    }
+                });
             } else if (HomeMenuConfig.ID_APPS.equals(homeId)) {
                 addContextAction(getString(R.string.context_action_open_apps), new Runnable() {
                     @Override
@@ -33139,6 +33197,15 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             changeScreen(STATE_MENU, true);
             return;
         }
+        if (currentScreenState == STATE_DOWNLOADS) {
+            if (downloadsDetailJobId != null) {
+                downloadsDetailJobId = null;
+                buildDownloadsUI();
+            } else {
+                changeScreen(STATE_MENU, true);
+            }
+            return;
+        }
         if (currentScreenState == STATE_BLUETOOTH || currentScreenState == STATE_WIFI) {
             returnFromAuxScreen();
             return;
@@ -33227,6 +33294,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             if (currentScreenState != STATE_BROWSER && currentScreenState != STATE_PODCASTS
                     && currentScreenState != STATE_SOULSEEK && currentScreenState != STATE_DEEZER
                     && currentScreenState != STATE_APPS && currentScreenState != STATE_MORE
+                    && currentScreenState != STATE_DOWNLOADS
                     && currentScreenState != STATE_USB_STORAGE
                     && currentScreenState != STATE_NAVIDROME && currentScreenState != STATE_PLEX
                     && currentScreenState != STATE_JELLYFIN
@@ -43052,6 +43120,545 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
     }
 
+    private void buildDownloadsUI() {
+        applyReachBrowseLayoutMode();
+        downloadsDetailJobId = null;
+        if (scrollViewBrowser != null) scrollViewBrowser.setVisibility(View.VISIBLE);
+        if (listVirtualSongs != null) listVirtualSongs.setVisibility(View.GONE);
+        containerBrowserItems.removeAllViews();
+        browserStatusTitle = getString(R.string.status_downloads);
+        updateStatusBarTitle();
+        if (tvBrowserPath != null) {
+            tvBrowserPath.setText(getString(R.string.path_downloads));
+            setBrowserPathBreadcrumbVisible(true);
+        }
+
+        Button back = createListButton(getString(R.string.common_back));
+        styleSecondaryLabel(back);
+        back.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                changeScreen(STATE_MENU);
+            }
+        });
+        containerBrowserItems.addView(back);
+
+        if (transferJobStore == null) {
+            Button unavailable = createListButton(getString(R.string.downloads_empty));
+            unavailable.setEnabled(false);
+            containerBrowserItems.addView(unavailable);
+            back.requestFocus();
+            return;
+        }
+
+        TransferJobStore.Aggregate aggregate = transferJobStore.aggregate();
+        Button summary = createListButton(getString(R.string.downloads_summary,
+                aggregate.activeCount, aggregate.pausedCount, aggregate.failedCount));
+        summary.setEnabled(false);
+        containerBrowserItems.addView(summary);
+
+        List<TransferJobStore.Job> jobs = transferJobStore.list();
+        boolean hasFinished = false;
+        if (jobs.isEmpty()) {
+            Button empty = createListButton(getString(R.string.downloads_empty));
+            empty.setEnabled(false);
+            containerBrowserItems.addView(empty);
+        } else {
+            for (final TransferJobStore.Job job : jobs) {
+                Button row = createListButton(formatTransferJobRow(job));
+                row.setTag(job.id);
+                row.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        clickFeedback();
+                        downloadsDetailJobId = job.id;
+                        buildDownloadJobDetailUI(job);
+                    }
+                });
+                containerBrowserItems.addView(row);
+                if (job.state.isTerminal()) hasFinished = true;
+            }
+        }
+
+        if (hasFinished) {
+            Button clear = createListButton(getString(R.string.downloads_clear_finished));
+            clear.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    clickFeedback();
+                    if (transferJobStore != null) {
+                        try {
+                            transferJobStore.clearFinished();
+                        } catch (RuntimeException e) {
+                            android.util.Log.w("Solar", "Could not clear transfer history", e);
+                        }
+                    }
+                    buildDownloadsUI();
+                }
+            });
+            containerBrowserItems.addView(clear);
+        }
+        back.requestFocus();
+    }
+
+    private void buildDownloadJobDetailUI(final TransferJobStore.Job job) {
+        if (job == null || transferJobStore == null) {
+            buildDownloadsUI();
+            return;
+        }
+        applyReachBrowseLayoutMode();
+        downloadsDetailJobId = job.id;
+        if (scrollViewBrowser != null) scrollViewBrowser.setVisibility(View.VISIBLE);
+        if (listVirtualSongs != null) listVirtualSongs.setVisibility(View.GONE);
+        containerBrowserItems.removeAllViews();
+        browserStatusTitle = getString(R.string.status_downloads);
+        updateStatusBarTitle();
+        if (tvBrowserPath != null) {
+            tvBrowserPath.setText(getString(R.string.path_downloads));
+            setBrowserPathBreadcrumbVisible(true);
+        }
+
+        Button back = createListButton(getString(R.string.common_back));
+        styleSecondaryLabel(back);
+        back.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                downloadsDetailJobId = null;
+                buildDownloadsUI();
+            }
+        });
+        containerBrowserItems.addView(back);
+
+        Button title = createListButton(job.title);
+        title.setEnabled(false);
+        containerBrowserItems.addView(title);
+
+        Button state = createListButton(transferProviderLabel(job.provider) + " - "
+                + transferStateLabel(job.state));
+        state.setEnabled(false);
+        containerBrowserItems.addView(state);
+
+        Button progress = createListButton(formatTransferProgress(job));
+        progress.setEnabled(false);
+        containerBrowserItems.addView(progress);
+
+        if (job.detail != null && job.detail.length() > 0) {
+            Button detail = createListButton(job.detail);
+            detail.setEnabled(false);
+            containerBrowserItems.addView(detail);
+        }
+        if (job.error != null && job.error.length() > 0) {
+            Button error = createListButton(job.error);
+            error.setEnabled(false);
+            containerBrowserItems.addView(error);
+        }
+
+        boolean activeSoulseek = job.provider == TransferJobStore.Provider.SOULSEEK
+                && job.id.equals(soulseekTransferJobId) && isSoulseekTransferInProgress();
+        boolean activePodcast = job.provider == TransferJobStore.Provider.PODCAST
+                && job.id.equals(podcastStreamTransferJobId) && podcastDownloadInProgress;
+        if (activeSoulseek || activePodcast) {
+            Button pause = createListButton(getString(R.string.downloads_pause));
+            pause.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    clickFeedback();
+                    pauseTransferFromDownloads(job);
+                }
+            });
+            containerBrowserItems.addView(pause);
+
+            Button cancel = createListButton(getString(R.string.downloads_cancel));
+            cancel.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    clickFeedback();
+                    cancelTransferFromDownloads(job);
+                }
+            });
+            containerBrowserItems.addView(cancel);
+        } else if ((job.state == TransferJobStore.State.PAUSED
+                || job.state == TransferJobStore.State.FAILED)
+                && canResumeTransferJob(job)) {
+            Button resume = createListButton(getString(job.state == TransferJobStore.State.FAILED
+                    ? R.string.downloads_retry : R.string.downloads_resume));
+            resume.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    clickFeedback();
+                    resumeTransferJob(job);
+                }
+            });
+            containerBrowserItems.addView(resume);
+        }
+
+        if (job.state.isTerminal() || job.state == TransferJobStore.State.PAUSED) {
+            Button remove = createListButton(getString(R.string.downloads_remove));
+            remove.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    clickFeedback();
+                    removeTransferHistory(job);
+                }
+            });
+            containerBrowserItems.addView(remove);
+        }
+        back.requestFocus();
+    }
+
+    private String formatTransferJobRow(TransferJobStore.Job job) {
+        StringBuilder line = new StringBuilder(job.title != null ? job.title : "");
+        line.append('\n').append(transferProviderLabel(job.provider)).append(" - ")
+                .append(transferStateLabel(job.state));
+        int percent = job.percent();
+        if (percent >= 0) line.append(" - ").append(percent).append('%');
+        if (job.speedBytesPerSecond > 0 && job.state.isRunning()) {
+            line.append(" - ").append(formatSoulseekSpeed(job.speedBytesPerSecond));
+        }
+        return line.toString();
+    }
+
+    private String formatTransferProgress(TransferJobStore.Job job) {
+        String done = formatSoulseekSize(job.doneBytes);
+        String total = job.totalBytes > 0 ? formatSoulseekSize(job.totalBytes) : "?";
+        StringBuilder line = new StringBuilder(done).append(" / ").append(total);
+        if (job.speedBytesPerSecond > 0 && job.state.isRunning()) {
+            line.append(" - ").append(formatSoulseekSpeed(job.speedBytesPerSecond));
+        }
+        if (job.etaSeconds >= 0 && job.state.isRunning()) {
+            long minutes = job.etaSeconds / 60L;
+            line.append(" - ");
+            if (minutes > 0) line.append(minutes).append('m');
+            else line.append(job.etaSeconds).append('s');
+            line.append(" left");
+        }
+        if (job.attempt > 0) {
+            line.append(" - attempt ").append(job.attempt).append('/').append(job.maxAttempts);
+        }
+        return line.toString();
+    }
+
+    private static String transferProviderLabel(TransferJobStore.Provider provider) {
+        if (provider == null) return "Transfer";
+        switch (provider) {
+            case SOULSEEK: return "Soulseek";
+            case PODCAST: return "Podcast";
+            case DIRECT: return "Direct";
+            case IMPORT: return "Import";
+            case CONVERSION: return "Conversion";
+            case DEEZER: return "Deezer";
+            default: return "Transfer";
+        }
+    }
+
+    private static String transferStateLabel(TransferJobStore.State state) {
+        if (state == null) return "Unknown";
+        String raw = state.name().toLowerCase(Locale.US).replace('_', ' ');
+        return raw.length() == 0 ? raw
+                : Character.toUpperCase(raw.charAt(0)) + raw.substring(1);
+    }
+
+    private void scheduleDownloadsUiRefresh() {
+        if (currentScreenState != STATE_DOWNLOADS) return;
+        long now = android.os.SystemClock.uptimeMillis();
+        long delay = Math.max(0L, 350L - (now - downloadsLastUiRefreshMs));
+        progressHandler.removeCallbacks(downloadsUiRefreshRunnable);
+        progressHandler.postDelayed(downloadsUiRefreshRunnable, delay);
+    }
+
+    private TransferJobStore.Job transitionTransferJob(String id, TransferJobStore.State state,
+            String detail, String error) {
+        if (transferJobStore == null || id == null || state == null) return null;
+        try {
+            TransferJobStore.Job current = transferJobStore.get(id);
+            if (current == null) return null;
+            if (current.state != state
+                    && !TransferJobStore.canTransition(current.state, state)) {
+                return current;
+            }
+            TransferJobStore.Job changed = transferJobStore.transition(
+                    id, state, detail != null ? detail : "", safeTransferError(error));
+            scheduleDownloadsUiRefresh();
+            return changed;
+        } catch (RuntimeException e) {
+            android.util.Log.w("Solar", "Could not update transfer state", e);
+            return null;
+        }
+    }
+
+    private void progressTransferJob(String id, long done, long total) {
+        if (transferJobStore == null || id == null) return;
+        try {
+            TransferJobStore.Job current = transferJobStore.get(id);
+            if (current == null || current.state.isTerminal()
+                    || current.state == TransferJobStore.State.PAUSED) return;
+            transferJobStore.progress(id, done, total);
+            scheduleDownloadsUiRefresh();
+        } catch (RuntimeException e) {
+            android.util.Log.w("Solar", "Could not persist transfer progress", e);
+        }
+    }
+
+    private String beginTransferJob(String preferredId, TransferJobStore.Provider provider,
+            String title, String sourceName, String remoteId, String targetPath, int maxAttempts) {
+        if (transferJobStore == null || provider == null) return null;
+        try {
+            TransferJobStore.Job job = transferJobStore.get(preferredId);
+            if (!transferJobMatches(job, provider, sourceName, remoteId, targetPath)
+                    || job.state == TransferJobStore.State.COMPLETED
+                    || job.state == TransferJobStore.State.CANCELED
+                    || (job.state == TransferJobStore.State.FAILED
+                            && job.attempt >= job.maxAttempts)) {
+                job = findReusableTransferJob(provider, sourceName, remoteId, targetPath);
+            }
+            if (job == null) {
+                job = transferJobStore.create(provider, title, sourceName, remoteId, targetPath,
+                        true, maxAttempts);
+            }
+            if (job.state == TransferJobStore.State.FAILED) {
+                job = transferJobStore.retry(job.id);
+            }
+            if (job.state == TransferJobStore.State.PAUSED
+                    || job.state == TransferJobStore.State.RETRYING
+                    || job.state == TransferJobStore.State.QUEUED) {
+                job = transferJobStore.transition(
+                        job.id, TransferJobStore.State.CONNECTING, "Connecting", "");
+            }
+            scheduleDownloadsUiRefresh();
+            return job.id;
+        } catch (RuntimeException e) {
+            android.util.Log.w("Solar", "Could not start transfer journal", e);
+            return null;
+        }
+    }
+
+    private TransferJobStore.Job findReusableTransferJob(TransferJobStore.Provider provider,
+            String sourceName, String remoteId, String targetPath) {
+        if (transferJobStore == null) return null;
+        for (TransferJobStore.Job job : transferJobStore.list()) {
+            if (!transferJobMatches(job, provider, sourceName, remoteId, targetPath)) continue;
+            if (job.state == TransferJobStore.State.PAUSED
+                    || job.state == TransferJobStore.State.QUEUED
+                    || (job.state == TransferJobStore.State.FAILED
+                            && job.attempt < job.maxAttempts)) {
+                return job;
+            }
+        }
+        return null;
+    }
+
+    private static boolean transferJobMatches(TransferJobStore.Job job,
+            TransferJobStore.Provider provider, String sourceName, String remoteId,
+            String targetPath) {
+        return job != null && job.provider == provider
+                && safeEquals(job.sourceName, sourceName)
+                && safeEquals(job.remoteId, remoteId)
+                && safeEquals(job.targetPath, targetPath);
+    }
+
+    private static boolean safeEquals(String left, String right) {
+        return left == null ? right == null : left.equals(right);
+    }
+
+    private static String safeTransferError(String error) {
+        if (error == null) return "";
+        return error.replaceAll("(?i)https?://\\S+", "network source");
+    }
+
+    private void finishTransferJob(String id, File file, boolean index) {
+        if (transferJobStore == null || id == null) return;
+        try {
+            TransferJobStore.Job job = transferJobStore.get(id);
+            if (job == null || job.state.isTerminal()
+                    || job.state == TransferJobStore.State.PAUSED) return;
+            long length = file != null && file.isFile() ? file.length() : job.doneBytes;
+            long total = job.totalBytes > 0 ? job.totalBytes : length;
+            if (job.state == TransferJobStore.State.QUEUED
+                    || job.state == TransferJobStore.State.CONNECTING
+                    || job.state == TransferJobStore.State.RETRYING) {
+                job = transferJobStore.progress(id, length, total);
+            }
+            if (job.state == TransferJobStore.State.DOWNLOADING) {
+                job = transferJobStore.transition(
+                        id, TransferJobStore.State.VERIFYING, "Verifying", "");
+            }
+            if (index && job.state == TransferJobStore.State.VERIFYING) {
+                job = transferJobStore.transition(
+                        id, TransferJobStore.State.INDEXING, "Indexing", "");
+            }
+            if (job.state == TransferJobStore.State.VERIFYING
+                    || job.state == TransferJobStore.State.INDEXING) {
+                transferJobStore.transition(
+                        id, TransferJobStore.State.COMPLETED, "Complete", "");
+            }
+            scheduleDownloadsUiRefresh();
+        } catch (RuntimeException e) {
+            android.util.Log.w("Solar", "Could not finish transfer journal", e);
+        }
+    }
+
+    private void failTransferJob(String id, String error) {
+        if (transferJobStore == null || id == null) return;
+        try {
+            TransferJobStore.Job job = transferJobStore.get(id);
+            if (job == null || job.state.isTerminal()
+                    || job.state == TransferJobStore.State.PAUSED) return;
+            transferJobStore.transition(id, TransferJobStore.State.FAILED,
+                    "Failed", safeTransferError(error));
+            scheduleDownloadsUiRefresh();
+        } catch (RuntimeException e) {
+            android.util.Log.w("Solar", "Could not record transfer failure", e);
+        }
+    }
+
+    private boolean canResumeTransferJob(TransferJobStore.Job job) {
+        if (job == null || job.remoteId == null || job.remoteId.length() == 0
+                || job.targetPath == null || job.targetPath.length() == 0) return false;
+        return job.provider == TransferJobStore.Provider.SOULSEEK
+                || job.provider == TransferJobStore.Provider.PODCAST;
+    }
+
+    private void pauseTransferFromDownloads(TransferJobStore.Job job) {
+        if (job.provider == TransferJobStore.Provider.SOULSEEK
+                && job.id.equals(soulseekTransferJobId)) {
+            pauseSoulseekDownloadForResume();
+        } else if (job.provider == TransferJobStore.Provider.PODCAST
+                && job.id.equals(podcastStreamTransferJobId)) {
+            pausePodcastBackgroundDownload();
+        }
+        TransferJobStore.Job refreshed = transferJobStore != null
+                ? transferJobStore.get(job.id) : null;
+        if (refreshed != null) buildDownloadJobDetailUI(refreshed);
+    }
+
+    private void cancelTransferFromDownloads(TransferJobStore.Job job) {
+        transitionTransferJob(job.id, TransferJobStore.State.CANCELED, "Canceled", "");
+        if (job.provider == TransferJobStore.Provider.SOULSEEK
+                && job.id.equals(soulseekTransferJobId)) {
+            cancelSoulseekDownloadSilent();
+        } else if (job.provider == TransferJobStore.Provider.PODCAST
+                && job.id.equals(podcastStreamTransferJobId)) {
+            stopPodcastDownloadFully();
+        }
+        TransferJobStore.Job refreshed = transferJobStore != null
+                ? transferJobStore.get(job.id) : null;
+        if (refreshed != null) buildDownloadJobDetailUI(refreshed);
+    }
+
+    private void resumeTransferJob(TransferJobStore.Job job) {
+        if (!ConnectivityHelper.isOnline(this)) {
+            Toast.makeText(this, getString(R.string.toast_internet_required),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (job.provider == TransferJobStore.Provider.SOULSEEK) {
+            SoulseekClient.Result result = new SoulseekClient.Result(
+                    job.sourceName, job.remoteId, job.totalBytes, 0, 0,
+                    true, false, 0, 0);
+            soulseekTransferJobId = job.id;
+            int action = rootFolder != null
+                    && rootFolder.getAbsolutePath().equals(job.targetPath)
+                    ? SOULSEEK_ACTION_SAVE : SOULSEEK_ACTION_PLAY;
+            changeScreen(STATE_SOULSEEK);
+            startSoulseekTransfer(result, action);
+            return;
+        }
+        if (job.provider == TransferJobStore.Provider.PODCAST) {
+            resumePodcastTransferJob(job);
+            return;
+        }
+        Toast.makeText(this, getString(R.string.downloads_retry_unavailable),
+                Toast.LENGTH_LONG).show();
+    }
+
+    private void resumePodcastTransferJob(final TransferJobStore.Job original) {
+        if (transferJobStore == null || original == null) return;
+        try {
+            TransferJobStore.Job job = transferJobStore.get(original.id);
+            if (job == null) return;
+            if (job.state == TransferJobStore.State.FAILED) {
+                job = transferJobStore.retry(job.id);
+            }
+            if (job.state == TransferJobStore.State.PAUSED
+                    || job.state == TransferJobStore.State.RETRYING
+                    || job.state == TransferJobStore.State.QUEUED) {
+                transferJobStore.transition(
+                        job.id, TransferJobStore.State.CONNECTING, "Connecting", "");
+            }
+        } catch (RuntimeException e) {
+            Toast.makeText(this, getString(R.string.downloads_retry_unavailable),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        buildDownloadJobDetailUI(transferJobStore.get(original.id));
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final File target = new File(original.targetPath);
+                    File completed;
+                    if (target.getName().startsWith("pod_")
+                            && target.getName().endsWith(".audio")) {
+                        completed = OpenRssClient.downloadAudio(
+                                target.getParentFile(), original.remoteId,
+                                new OpenRssClient.AudioDownloadListener() {
+                                    @Override
+                                    public void onProgress(long done, long total) {
+                                        progressTransferJob(original.id, done, total);
+                                    }
+
+                                    @Override
+                                    public boolean onPartialReady(File partial, long done) {
+                                        return false;
+                                    }
+                                });
+                    } else {
+                        PodcastLibrary.downloadTo(target, original.remoteId,
+                                new com.solar.launcher.net.SolarHttp.DownloadProgress() {
+                                    @Override
+                                    public void onProgress(long done, long total) {
+                                        progressTransferJob(original.id, done, total);
+                                    }
+                                });
+                        PodcastLibrary.tryEmbedSaveTags(
+                                target, original.sourceName, original.title);
+                        completed = target;
+                    }
+                    finishTransferJob(original.id, completed,
+                            !target.getName().startsWith("pod_"));
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (!original.targetPath.contains(File.separator + "pod_")) {
+                                scanMediaLibraryAsync();
+                            }
+                            scheduleDownloadsUiRefresh();
+                        }
+                    });
+                } catch (Exception e) {
+                    failTransferJob(original.id,
+                            e.getMessage() != null ? e.getMessage()
+                                    : getString(R.string.podcasts_save_failed));
+                }
+            }
+        }, "PodcastResume").start();
+    }
+
+    private void removeTransferHistory(TransferJobStore.Job job) {
+        if (transferJobStore == null || job == null) return;
+        try {
+            transferJobStore.remove(job.id);
+            downloadsDetailJobId = null;
+            Toast.makeText(this, getString(R.string.downloads_removed),
+                    Toast.LENGTH_SHORT).show();
+            buildDownloadsUI();
+        } catch (RuntimeException e) {
+            android.util.Log.w("Solar", "Could not remove transfer history", e);
+        }
+    }
+
     private void buildUsbStorageUI() {
         applyUsbStorageScreenLayout();
         if (scrollViewBrowser != null) scrollViewBrowser.setVisibility(View.VISIBLE);
@@ -51163,6 +51770,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
+                    updateSoulseekTransferJournalPhase(phase, detail);
                     if (soulseekUiMode != SOULSEEK_UI_DOWNLOAD || soulseekActiveDownload == null) return;
                     long now = android.os.SystemClock.uptimeMillis();
                     if (now - soulseekLastStatusUiMs < 200) return;
@@ -51200,6 +51808,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                         SolarDevelopmentBootstrap.onSoulseekConnected(
                                 MainActivity.this, prefs, client);
                     }
+                    maybeResumeSoulseekDownloadAfterNetworkLoss();
                 }
             });
         }
@@ -51385,6 +51994,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 @Override
                 public void run() {
                     if (soulseekActiveDownload == null) return;
+                    progressTransferJob(soulseekTransferJobId, done, total);
                     long now = android.os.SystemClock.uptimeMillis();
                     // 2026-07-15 — Coarser progress UI while user is interacting off download/NP.
                     long minGap = 150L;
@@ -51451,6 +52061,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                         handleSoulseekDownloadCompleteOnUi(file);
                     } catch (Throwable t) {
                         android.util.Log.w("Solar", "Reach download complete UI", t);
+                        failTransferJob(soulseekTransferJobId, "Download completion failed");
                         clearSoulseekBackgroundSaveState();
                         stopSoulseekDownloadUiRunnables();
                         soulseekActiveDownload = null;
@@ -51469,6 +52080,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                         handleSoulseekDownloadErrorOnUi(message);
                     } catch (Throwable t) {
                         android.util.Log.w("Solar", "Reach download error UI", t);
+                        failTransferJob(soulseekTransferJobId, "Download failed");
                         clearSoulseekBackgroundSaveState();
                         stopSoulseekDownloadUiRunnables();
                         soulseekActiveDownload = null;
@@ -53426,8 +54038,12 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         soulseekLastProgressUiMs = 0;
         soulseekPendingThankYouResult = thankAfter ? r : null;
         watchDownloadPeerSharing(r.username);
+        soulseekTransferJobId = beginTransferJob(soulseekTransferJobId,
+                TransferJobStore.Provider.SOULSEEK, r.title(), r.username, r.filename,
+                rootFolder.getAbsolutePath(), 3);
         SoulseekClient client = ensureSoulseekClient();
         if (client == null) {
+            failTransferJob(soulseekTransferJobId, getString(R.string.soulseek_error_unknown));
             clearSoulseekBackgroundSaveState();
             return;
         }
@@ -53437,8 +54053,14 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     }
 
     private void handleSoulseekDownloadCompleteOnUi(final File file) {
+        soulseekPausedForNetworkLoss = false;
         final boolean backgroundSave = soulseekBackgroundSave;
         final int action = soulseekPendingAction;
+        if (file != null && file.isFile()) {
+            finishTransferJob(soulseekTransferJobId, file, action == SOULSEEK_ACTION_SAVE);
+        } else {
+            failTransferJob(soulseekTransferJobId, "Downloaded file is missing");
+        }
         final File queuePartial = reachQueuePartialFile;
         final boolean reachStream = reachPartialPlaybackStarted;
         final String reachMeta = soulseekActiveDownload != null
@@ -53523,6 +54145,14 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     private void handleSoulseekDownloadErrorOnUi(final String message) {
         if ("Download cancelled".equals(message)) {
+            if (soulseekPausedForNetworkLoss) return;
+            TransferJobStore.Job job = transferJobStore != null
+                    ? transferJobStore.get(soulseekTransferJobId) : null;
+            if (job != null && job.state != TransferJobStore.State.PAUSED
+                    && job.state != TransferJobStore.State.CANCELED) {
+                transitionTransferJob(job.id, TransferJobStore.State.CANCELED,
+                        "Canceled", "");
+            }
             if (soulseekBackgroundSave) {
                 clearSoulseekBackgroundSaveState();
             }
@@ -53531,6 +54161,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
             return;
         }
+        soulseekPausedForNetworkLoss = false;
+        failTransferJob(soulseekTransferJobId, humanizeSoulseekError(message));
         if (soulseekBackgroundSave) {
             clearSoulseekBackgroundSaveState();
             stopSoulseekDownloadUiRunnables();
@@ -53606,13 +54238,45 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         watchDownloadPeerSharing(r.username);
         buildSoulseekDownloadUI(r, action);
         File dest = action == SOULSEEK_ACTION_SAVE ? rootFolder : reachCacheDir();
+        soulseekTransferJobId = beginTransferJob(soulseekTransferJobId,
+                TransferJobStore.Provider.SOULSEEK, r.title(), r.username, r.filename,
+                dest.getAbsolutePath(), 3);
         SoulseekClient client = ensureSoulseekClient();
         if (client == null) {
+            failTransferJob(soulseekTransferJobId, getString(R.string.soulseek_error_unknown));
             showSoulseekDownloadFailure(r, getString(R.string.soulseek_error_unknown));
             return;
         }
         client.download(r, dest);
         scheduleSoulseekSharePolicyRefresh();
+    }
+
+    private void updateSoulseekTransferJournalPhase(String phase, String detail) {
+        if (transferJobStore == null || soulseekTransferJobId == null) return;
+        TransferJobStore.Job job = transferJobStore.get(soulseekTransferJobId);
+        if (job == null || job.state.isTerminal()
+                || job.state == TransferJobStore.State.PAUSED) return;
+        String phaseText = phase != null ? phase.trim() : "";
+        String detailText = detail != null ? detail.trim() : "";
+        String journalDetail = phaseText;
+        if (detailText.length() > 0) {
+            journalDetail = journalDetail.length() > 0
+                    ? journalDetail + " - " + detailText : detailText;
+        }
+        String lower = phaseText.toLowerCase(Locale.US);
+        TransferJobStore.State next;
+        if (lower.contains("retry")) {
+            next = TransferJobStore.State.RETRYING;
+        } else if (lower.contains("receiv") || lower.contains("resum")
+                || lower.contains("download")) {
+            next = TransferJobStore.State.DOWNLOADING;
+        } else if (job.state == TransferJobStore.State.DOWNLOADING) {
+            next = TransferJobStore.State.DOWNLOADING;
+        } else {
+            next = TransferJobStore.State.CONNECTING;
+        }
+        transitionTransferJob(job.id, next,
+                journalDetail.length() > 0 ? journalDetail : "Connecting", "");
     }
 
     private void watchDownloadPeerSharing(final String peer) {
@@ -54019,6 +54683,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     private void cancelSoulseekDownloadSilent() {
         stopSoulseekDownloadUiRunnables();
+        soulseekPausedForNetworkLoss = false;
+        transitionTransferJob(soulseekTransferJobId,
+                TransferJobStore.State.CANCELED, "Canceled", "");
         if (soulseekClient != null) soulseekClient.cancelDownload();
         soulseekBackgroundSave = false;
         soulseekActiveDownload = null;
@@ -54038,6 +54705,67 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         reachGrowingTotalBytes = 0;
         progressHandler.removeCallbacks(reachGrowingEdgePoll);
         purgeUnreferencedReachCache();
+        scheduleSoulseekSharePolicyRefresh();
+    }
+
+    private void pauseSoulseekDownloadForResume() {
+        stopSoulseekDownloadUiRunnables();
+        soulseekPausedForNetworkLoss = false;
+        transitionTransferJob(soulseekTransferJobId,
+                TransferJobStore.State.PAUSED, "Paused", "");
+        if (soulseekClient != null) soulseekClient.cancelDownload();
+        soulseekBackgroundSave = false;
+        soulseekActiveDownload = null;
+        com.solar.launcher.ui.UiBusy.clear(com.solar.launcher.ui.UiBusy.REASON_DOWNLOAD);
+        soulseekDownloadProgressBar = null;
+        soulseekDownloadPercentText = null;
+        soulseekDownloadDetailText = null;
+        soulseekDownloadStatusRow = null;
+        soulseekTryAnotherRow = null;
+        soulseekReSearchRowsShown = false;
+        soulseekPendingAction = 0;
+        reachPartialPlaybackStarted = false;
+        reachGrowingCacheFile = null;
+        reachQueuePartialFile = null;
+        reachGrowingPreparedBytes = 0;
+        reachGrowingTotalBytes = 0;
+        progressHandler.removeCallbacks(reachGrowingEdgePoll);
+        scheduleSoulseekSharePolicyRefresh();
+        scheduleDownloadsUiRefresh();
+    }
+
+    private void pauseSoulseekDownloadForNetworkLoss() {
+        if (soulseekPausedForNetworkLoss || soulseekActiveDownload == null
+                || soulseekClient == null || !soulseekClient.isTransferActive()) return;
+        soulseekPausedForNetworkLoss = true;
+        stopSoulseekDownloadUiRunnables();
+        transitionTransferJob(soulseekTransferJobId,
+                TransferJobStore.State.PAUSED, "Paused - Wi-Fi unavailable", "");
+        com.solar.launcher.ui.UiBusy.clear(com.solar.launcher.ui.UiBusy.REASON_DOWNLOAD);
+        soulseekClient.cancelDownload();
+        scheduleDownloadsUiRefresh();
+    }
+
+    private void maybeResumeSoulseekDownloadAfterNetworkLoss() {
+        if (!soulseekPausedForNetworkLoss || soulseekActiveDownload == null
+                || soulseekClient == null || !hasInternetConnection()
+                || !soulseekClient.isLoggedIn() || soulseekClient.isTransferActive()) return;
+        File dest = soulseekPendingAction == SOULSEEK_ACTION_SAVE
+                ? rootFolder : reachCacheDir();
+        soulseekTransferJobId = beginTransferJob(soulseekTransferJobId,
+                TransferJobStore.Provider.SOULSEEK, soulseekActiveDownload.title(),
+                soulseekActiveDownload.username, soulseekActiveDownload.filename,
+                dest.getAbsolutePath(), 3);
+        soulseekPausedForNetworkLoss = false;
+        soulseekDownloadPhase = "Connecting";
+        soulseekDownloadPhaseDetail = soulseekActiveDownload.username;
+        soulseekDownloadStartMs = android.os.SystemClock.uptimeMillis();
+        if (soulseekUiMode == SOULSEEK_UI_DOWNLOAD) {
+            soulseekUiHandler.postDelayed(soulseekStallWatchRunnable, SOULSEEK_STALL_MS);
+            soulseekUiHandler.postDelayed(soulseekDownloadTickRunnable, 1000L);
+            updateSoulseekDownloadStatusUi();
+        }
+        soulseekClient.download(soulseekActiveDownload, dest);
         scheduleSoulseekSharePolicyRefresh();
     }
 
@@ -54883,9 +55611,26 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private void pausePodcastBackgroundDownload() {
         if (!podcastDownloadInProgress && !podcastPartialPlaybackStarted) return;
         if (podcastDownloadInProgress) {
+            transitionTransferJob(podcastStreamTransferJobId,
+                    TransferJobStore.State.PAUSED, "Paused", "");
             podcastDownloadCancel.set(true);
             podcastDownloadInProgress = false;
             podcastDownloadPaused = true;
+            if (podcastGrowingCacheFile == null && playback.isPodcastActive()
+                    && playback.podcastIndex() >= 0
+                    && playback.podcastIndex() < playback.podcastQueue().size()) {
+                OpenRssClient.Episode episode =
+                        playback.podcastQueue().get(playback.podcastIndex());
+                File target = podcastCacheTarget(episode.audioUrl);
+                String name = target.getName();
+                File partial = new File(target.getParentFile(),
+                        name.substring(0, name.length() - ".audio".length()) + ".part");
+                if (partial.isFile()) {
+                    podcastGrowingCacheFile = partial;
+                    podcastGrowingCacheFinal = target;
+                    podcastDownloadBytesRead = partial.length();
+                }
+            }
         }
         progressHandler.removeCallbacks(podcastGrowingEdgePoll);
         saveCurrentPodcastResume();
@@ -54893,6 +55638,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     }
 
     private void stopPodcastDownloadFully() {
+        transitionTransferJob(podcastStreamTransferJobId,
+                TransferJobStore.State.CANCELED, "Canceled", "");
         podcastDownloadCancel.set(true);
         podcastDownloadCancel = new java.util.concurrent.atomic.AtomicBoolean(false);
         podcastDownloadInProgress = false;
@@ -55639,6 +56386,13 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             final boolean resume) {
         if (gen != podcastLoadGeneration) return;
         if (currentScreenState != STATE_PLAYER) return;
+        File journalTarget = podcastCacheTarget(ep.audioUrl);
+        String showTitle = podcastSelected != null
+                ? podcastSelected.title : playback.podcastShowTitle();
+        podcastStreamTransferJobId = beginTransferJob(podcastStreamTransferJobId,
+                TransferJobStore.Provider.PODCAST, ep.title, showTitle, ep.audioUrl,
+                journalTarget.getAbsolutePath(), PODCAST_DOWNLOAD_MAX_RETRIES + 1);
+        final String streamTransferJobId = podcastStreamTransferJobId;
         podcastDownloadPaused = false;
         if (!resume) {
             updatePodcastLoadUi(gen, getString(R.string.podcasts_downloading), 0);
@@ -55695,6 +56449,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                                 @Override
                                 public void onProgress(final long bytesRead, final long totalBytes) {
                                     if (gen != podcastLoadGeneration || cancel.get()) return;
+                                    progressTransferJob(
+                                            streamTransferJobId, bytesRead, totalBytes);
                                     podcastDownloadBytesRead = bytesRead;
                                     if (totalBytes > 0) podcastDownloadBytesTotal = totalBytes;
                                     if (bytesRead > podcastDownloadStallCheckBytes) {
@@ -55722,6 +56478,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                         public void run() {
                             if (gen != podcastLoadGeneration || !playback.isPodcastActive()
                                     || playback.podcastIndex() != index) return;
+                            finishTransferJob(streamTransferJobId, audioFile, false);
                             podcastDownloadInProgress = false;
                             podcastDownloadBytesRead = audioFile.length();
                             if (podcastDownloadBytesTotal <= 0) {
@@ -55738,6 +56495,15 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                     });
                 } catch (final Exception e) {
                     if (cancel.get()) return;
+                    if (podcastPartialPlaybackStarted
+                            && podcastDownloadRetryCount < PODCAST_DOWNLOAD_MAX_RETRIES) {
+                        transitionTransferJob(streamTransferJobId,
+                                TransferJobStore.State.RETRYING, "Waiting to retry", "");
+                    } else {
+                        failTransferJob(streamTransferJobId,
+                                e.getMessage() != null ? e.getMessage()
+                                        : getString(R.string.podcasts_stream_failed));
+                    }
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -55756,6 +56522,12 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 }
             }
         }, "PodcastDl").start();
+    }
+
+    private File podcastCacheTarget(String audioUrl) {
+        File cacheDir = new File(streamAppCacheRoot(), "podcast");
+        String key = Integer.toHexString(audioUrl != null ? audioUrl.hashCode() : 0);
+        return new File(cacheDir, "pod_" + key + ".audio");
     }
 
     private void maybeRenamePodcastGrowingCache() {
@@ -55997,6 +56769,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             Toast.makeText(this, getString(R.string.podcasts_already_saved), Toast.LENGTH_SHORT).show();
             return;
         }
+        final String saveTransferJobId = beginTransferJob(podcastSaveTransferJobId,
+                TransferJobStore.Provider.PODCAST, ep.title, showTitle, ep.audioUrl,
+                dest.getAbsolutePath(), 3);
+        podcastSaveTransferJobId = saveTransferJobId;
         acquireBlockingOverlay(OVERLAY_PODCAST, getString(R.string.podcasts_saving));
         new Thread(new Runnable() {
             @Override
@@ -56005,6 +56781,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                     PodcastLibrary.downloadTo(dest, ep.audioUrl, new com.solar.launcher.net.SolarHttp.DownloadProgress() {
                         @Override
                         public void onProgress(final long bytesRead, final long totalBytes) {
+                            progressTransferJob(
+                                    saveTransferJobId, bytesRead, totalBytes);
                             runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
@@ -56021,6 +56799,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                     });
                     // 2026-07-15 — Stamp show/episode into the file so scans survive folder moves.
                     PodcastLibrary.tryEmbedSaveTags(dest, showTitle, ep.title);
+                    finishTransferJob(saveTransferJobId, dest, true);
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -56032,6 +56811,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                         }
                     });
                 } catch (final Exception e) {
+                    failTransferJob(saveTransferJobId,
+                            e.getMessage() != null ? e.getMessage()
+                                    : getString(R.string.podcasts_save_failed));
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -59377,6 +60159,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 || currentScreenState == STATE_WIFI || currentScreenState == STATE_PODCASTS
                 || currentScreenState == STATE_SOULSEEK || currentScreenState == STATE_DEEZER
                 || currentScreenState == STATE_APPS || currentScreenState == STATE_MORE
+                || currentScreenState == STATE_DOWNLOADS
                 || currentScreenState == STATE_NAVIDROME || currentScreenState == STATE_PLEX || currentScreenState == STATE_JELLYFIN
                 || MediaSuiteHost.isMediaListBrowseState(currentScreenState)) {
             // 2026-07-06 — FM: wheel navigates menu rows; settings+tune mode alone steps MHz (not volume).

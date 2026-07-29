@@ -554,6 +554,7 @@
     <string name="home_menu_radio">Radio</string>
     <string name="home_menu_pc_upload">Wi‑Fi Transfer</string>
     <string name="home_menu_podcasts">Podcasts</string>
+    <string name="home_menu_downloads">Downloads</string>
     <string name="home_menu_youtube_audio">YouTube Metadata</string>
     <string name="home_menu_soulseek">Get Music</string>
     <string name="home_menu_deezer">Deezer</string>
@@ -579,6 +580,18 @@
     <string name="home_screen_online_only">Online only</string>
     <string name="home_screen_network_only">Network only</string>
     <string name="path_more">Home / More</string>
+    <string name="path_downloads">Home / Downloads</string>
+    <string name="status_downloads">Downloads</string>
+    <string name="downloads_empty">No transfers yet</string>
+    <string name="downloads_summary">%1$d active · %2$d paused · %3$d failed</string>
+    <string name="downloads_clear_finished">Clear finished history</string>
+    <string name="downloads_pause">Pause transfer</string>
+    <string name="downloads_resume">Resume transfer</string>
+    <string name="downloads_retry">Retry transfer</string>
+    <string name="downloads_cancel">Cancel transfer</string>
+    <string name="downloads_remove">Remove history record</string>
+    <string name="downloads_removed">Transfer record removed</string>
+    <string name="downloads_retry_unavailable">This transfer cannot be resumed from Downloads</string>
     <string name="themes_section_installed">Installed</string>
     <string name="themes_section_online">Available Themes</string>
     <string name="theme_context_change_variant">Change variant</string>
