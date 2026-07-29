@@ -675,6 +675,8 @@
     <string name="keyboard_bt_pairing_pin">Pairing PIN for %1$s</string>
     <string name="keyboard_bt_pairing_passkey">Pairing passkey for %1$s</string>
     <string name="bt_pairing_passkey_invalid">Enter a 1–6 digit passkey</string>
+    <string name="bt_pairing_passkey_placeholder">Enter 1–6 digits</string>
+    <string name="bt_pairing_pin_placeholder">Enter PIN</string>
     <string name="bt_pairing_submit_failed">Could not submit the pairing key. Try again.</string>
     <string name="bt_pairing_passkey_title">Pair with %1$s</string>
     <string name="bt_pairing_passkey_body">Enter this PIN on the other device:\n\n%1$s</string>
