@@ -2709,7 +2709,7 @@ public class MainActivity extends Activity {
     private static final String TAG_BT_ROW_SPIN = "bt_row_spin";
     private final Runnable btConnectTimeoutRunnable = new Runnable() {
         @Override public void run() {
-            // 2026-07-19 — Escalate silent PIN to overlay if still negotiating this address.
+            // Record a stalled connection row; pairing prompts are already shown immediately.
             String addr = btConnectingAddress;
             if (addr != null) {
                 BluetoothDiagnostics.recordConnectionTimeout(MainActivity.this, addr);
@@ -60988,14 +60988,16 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             long now = System.currentTimeMillis();
             if (event.getRepeatCount() > 0) {
                 if (!scrubbing && now - downAt >= MEDIA_SKIP_LONG_PRESS_MS) {
-                    scrubbing = true;
-                    if (next) mediaNextScrubActive = true;
-                    else mediaPrevScrubActive = true;
-                    clickFeedback();
-                    mediaSuite.pulseVideoTransport();
+                    scrubbing = mediaSuite.beginVideoSkipScrub();
+                    if (scrubbing) {
+                        if (next) mediaNextScrubActive = true;
+                        else mediaPrevScrubActive = true;
+                        clickFeedback();
+                    }
                 }
                 if (scrubbing) {
-                    mediaSuite.seekVideoMs(next ? MEDIA_SCRUB_STEP_MS : -MEDIA_SCRUB_STEP_MS);
+                    mediaSuite.moveVideoScrubCursor(
+                            next ? MEDIA_SCRUB_STEP_MS : -MEDIA_SCRUB_STEP_MS);
                 }
             }
             return true;
@@ -61041,7 +61043,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         else mediaPrevScrubActive = false;
         if (scrubbing) {
             if (playback.isPodcastActive()) flushPodcastResumeIfNeeded();
-            if (currentScreenState == MediaSuiteHost.STATE_VIDEO_PLAYER && mediaSuite != null) return true;
+            if (currentScreenState == MediaSuiteHost.STATE_VIDEO_PLAYER && mediaSuite != null) {
+                mediaSuite.commitVideoSkipScrub();
+                return true;
+            }
             if (playback.isRadioActive() && mediaSuite != null) return true;
             return true;
         }

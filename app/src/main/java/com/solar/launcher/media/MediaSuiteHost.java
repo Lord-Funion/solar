@@ -22,6 +22,7 @@ import android.widget.Toast;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.widget.TextView;
 
@@ -56,6 +57,7 @@ import com.solar.launcher.radio.net.InternetRadioPlayer;
 import com.solar.launcher.radio.net.RadioBrowserClient;
 import com.solar.launcher.video.VideoLibrary;
 import com.solar.launcher.video.VideoPlayerController;
+import com.solar.launcher.video.VideoSeekPolicy;
 import com.solar.launcher.youtube.YouTubeClient;
 import com.solar.launcher.youtube.YouTubeComment;
 import com.solar.launcher.youtube.CreatorDownloadLinkExtractor;
@@ -423,12 +425,9 @@ public final class MediaSuiteHost {
      * Layman: how far the video has downloaded so far.
      */
     private int videoBufferPercent;
-    /**
-     * 2026-07-18 — User seek target beyond current buffer; wait then catch up.
-     * Layman: where you asked to jump; we play there once enough data arrives.
-     * Technical: &lt;0 = none; else ms. Cleared on apply / cancel / stop.
-     */
+    /** Last target submitted to IJK/MediaPlayer; negative once completion or timeout is observed. */
     private long videoPendingSeekMs = -1L;
+    private long videoSeekRequestedAtMs;
 
     private File photoBrowseFolder;
     private List<File> photoFiles = new ArrayList<File>();
@@ -5444,8 +5443,11 @@ public final class MediaSuiteHost {
             if (show) {
                 transport.styleVideoChrome();
                 transport.setVideoOverlayMode(true);
-                transport.setVisible(false);
+                transport.setVideoOverlayPersistent(true);
+                transport.showScrubTrack();
+                transport.setVisible(true);
             } else {
+                transport.setVideoOverlayPersistent(false);
                 transport.setVideoOverlayMode(false);
                 transport.hideVolumePulse();
                 transport.setVisible(false);
@@ -5468,7 +5470,18 @@ public final class MediaSuiteHost {
                         return;
                     }
                     if (!videoScrubActive) {
-                        updateVideoProgressUi(videoController.getCurrentPosition());
+                        long actualMs = videoController.getCurrentPosition();
+                        if (videoPendingSeekMs >= 0L) {
+                            if (VideoSeekPolicy.isComplete(videoPendingSeekMs, actualMs)
+                                    || VideoSeekPolicy.hasTimedOut(
+                                            videoSeekRequestedAtMs, SystemClock.uptimeMillis())) {
+                                completeVideoSeek(actualMs);
+                            } else {
+                                updateVideoProgressUi(videoPendingSeekMs);
+                            }
+                        } else {
+                            updateVideoProgressUi(actualMs);
+                        }
                     }
                     videoProgressHandler.postDelayed(this, 500);
                 }
@@ -5497,6 +5510,18 @@ public final class MediaSuiteHost {
         } else {
             enterVideoScrubMode();
         }
+    }
+
+    /** Begin a visible side-button fast-forward/rewind session. */
+    public boolean beginVideoSkipScrub() {
+        if (videoScrubActive) return true;
+        enterVideoScrubMode();
+        return videoScrubActive;
+    }
+
+    /** Commit the side-button scrub cursor as one engine seek on key release. */
+    public void commitVideoSkipScrub() {
+        commitVideoScrub();
     }
 
     public void moveVideoScrubCursor(int deltaMs) {
@@ -5553,83 +5578,45 @@ public final class MediaSuiteHost {
         }
         if (cur != null) cur.setText(formatVideoTime(positionMs));
         if (tot != null) {
-            if (videoPendingSeekMs >= 0L) {
-                // Layman: show we’re catching up to the scrub target.
-                tot.setText(host.getString(R.string.stream_seek_buffering,
-                        formatVideoTime(videoPendingSeekMs)));
-            } else {
-                tot.setText(dur > 0 ? formatVideoTime(dur) : "00:00");
-            }
+            tot.setText(dur > 0 ? formatVideoTime(dur) : "00:00");
         }
     }
 
     /**
-     * 2026-07-18 — Seek video; if past buffered edge, arm pending seek + status throbber.
-     * Layman: jump where you asked; if not downloaded yet, show buffering and catch up.
-     * Technical: buffer edge from videoBufferPercent × duration; pending until onBuffering covers target.
+     * Submit every target directly to the engine. IJK/MediaPlayer perform their own network Range
+     * and buffering work; waiting for onBufferingUpdate first can deadlock proxy-backed streams.
      */
     private void seekVideoToTarget(long targetMs) {
         if (videoController == null || !videoController.isPrepared()) return;
         long dur = videoDurationMs();
-        long pos = clampVideoScrubMs(targetMs, dur);
-        long bufferedEdge = videoBufferedEdgeMs(dur);
-        if (dur <= 0 || pos <= bufferedEdge + 500L || videoBufferPercent >= 99) {
-            videoPendingSeekMs = -1L;
-            com.solar.launcher.ui.UiBusy.clear(com.solar.launcher.ui.UiBusy.REASON_SEEK_BUFFER);
-            videoController.seekTo(pos);
-            updateVideoProgressUi(pos);
-            return;
-        }
-        // Past buffer — accept intent, wait for catch-up.
+        long pos = VideoSeekPolicy.clampTarget(targetMs, dur);
         videoPendingSeekMs = pos;
+        videoSeekRequestedAtMs = SystemClock.uptimeMillis();
         com.solar.launcher.ui.UiBusy.beginAutoEnd(
-                com.solar.launcher.ui.UiBusy.REASON_SEEK_BUFFER, 45_000L);
-        setVideoStatusText(host.getString(R.string.stream_seek_buffering, formatVideoTime(pos)));
-        // Seek to buffer edge first so player keeps loading toward target when engine allows.
-        if (bufferedEdge > 0) {
-            try {
-                videoController.seekTo(Math.min(pos, bufferedEdge));
-            } catch (Throwable ignored) {}
+                com.solar.launcher.ui.UiBusy.REASON_SEEK_BUFFER,
+                VideoSeekPolicy.SEEK_TIMEOUT_MS);
+        setVideoStatusText(host.getString(R.string.video_seek_target, formatVideoTime(pos)));
+        if (!videoController.seekTo(pos)) {
+            clearVideoSeekState();
+            Toast.makeText(host.context(), R.string.video_seek_failed, Toast.LENGTH_SHORT).show();
+            updateVideoProgressUi(videoController.getCurrentPosition());
+            return;
         }
         updateVideoProgressUi(pos);
         pulseVideoTransport();
     }
 
-    /** Furthest ms considered buffered from last onBufferingUpdate percent. */
-    private long videoBufferedEdgeMs(long durationMs) {
-        if (durationMs <= 0) return 0L;
-        int pct = Math.max(0, Math.min(100, videoBufferPercent));
-        // 2026-07-18 — Same edge math as audio NP (StreamSeekBuffer).
-        int edge = com.solar.launcher.media.StreamSeekBuffer.edgeFromPercent(
-                (int) Math.min(Integer.MAX_VALUE, durationMs), pct);
-        return edge > 0 ? edge : 0L;
+    private void completeVideoSeek(long actualMs) {
+        clearVideoSeekState();
+        updateVideoProgressUi(actualMs);
+        pulseVideoTransport();
     }
 
-    /** Apply pending seek when buffer catches the target. */
-    private void maybeCompletePendingVideoSeek() {
-        if (videoPendingSeekMs < 0L || videoController == null || !videoController.isPrepared()) {
-            return;
-        }
-        long dur = videoDurationMs();
-        long edge = videoBufferedEdgeMs(dur);
-        if (!com.solar.launcher.media.StreamSeekBuffer.pendingReady(
-                (int) Math.min(Integer.MAX_VALUE, videoPendingSeekMs),
-                (int) Math.min(Integer.MAX_VALUE, edge),
-                750,
-                videoBufferPercent)) {
-            // Still short — refresh buffering label.
-            setVideoStatusText(host.getString(R.string.stream_seek_buffering,
-                    formatVideoTime(videoPendingSeekMs)));
-            updateVideoProgressUi(videoPendingSeekMs);
-            return;
-        }
-        long target = videoPendingSeekMs;
+    private void clearVideoSeekState() {
         videoPendingSeekMs = -1L;
+        videoSeekRequestedAtMs = 0L;
         com.solar.launcher.ui.UiBusy.clear(com.solar.launcher.ui.UiBusy.REASON_SEEK_BUFFER);
         clearVideoStatusText();
-        videoController.seekTo(target);
-        updateVideoProgressUi(target);
-        pulseVideoTransport();
     }
 
     private void updateVideoScrubMarker() {
@@ -5680,15 +5667,11 @@ public final class MediaSuiteHost {
     }
 
     private static long clampVideoScrubMs(long ms, long dur) {
-        if (ms < 0) return 0;
-        if (dur > 0 && ms > dur) return dur;
-        return ms;
+        return VideoSeekPolicy.clampTarget(ms, dur);
     }
 
     private static String formatVideoTime(long ms) {
-        int s = (int) ((ms / 1000) % 60);
-        int m = (int) ((ms / (1000 * 60)) % 60);
-        return String.format(Locale.US, "%02d:%02d", m, s);
+        return VideoSeekPolicy.formatTime(ms);
     }
 
     private void startVideoProgressUpdates() {
@@ -5795,7 +5778,7 @@ public final class MediaSuiteHost {
         setVideoStatusText(null);
     }
 
-    /** Buffering % from IJK — first fill + mid-seek past buffer catch-up. */
+    /** Buffering % from IJK/MediaPlayer for load status and secondary progress. */
     private VideoPlayerController.BufferingListener videoBufferingListener() {
         return new VideoPlayerController.BufferingListener() {
             @Override
@@ -5804,10 +5787,10 @@ public final class MediaSuiteHost {
                     @Override
                     public void run() {
                         if (host.getCurrentScreenState() != STATE_VIDEO_PLAYER) return;
-                        // 2026-07-18 — Track buffer edge for scrub-past-buffer + secondary progress.
+                        // Secondary progress remains useful even though the engine now owns seeking.
                         videoBufferPercent = Math.max(0, Math.min(100, percent));
                         if (videoPendingSeekMs >= 0L) {
-                            maybeCompletePendingVideoSeek();
+                            updateVideoProgressUi(videoPendingSeekMs);
                             return;
                         }
                         if (percent >= 100 || (videoController != null && videoController.isPlaying())) {
@@ -5850,19 +5833,34 @@ public final class MediaSuiteHost {
                         com.solar.launcher.ui.UiBusy.clear(
                                 com.solar.launcher.ui.UiBusy.REASON_MEDIA_BUFFER);
                         if (videoPendingSeekMs >= 0L) {
-                            maybeCompletePendingVideoSeek();
-                        } else {
-                            String key = getVideoResumeKey();
-                            if (key != null) {
-                                long savedPos = host.prefs().getLong(key, 0L);
-                                if (savedPos > 0) {
-                                    seekVideoToTarget(savedPos);
-                                    host.prefs().edit().remove(key).apply();
-                                    return;
-                                }
-                            }
-                            clearVideoStatusText();
+                            updateVideoProgressUi(videoPendingSeekMs);
+                            return;
                         }
+                        String key = getVideoResumeKey();
+                        if (key != null) {
+                            long savedPos = host.prefs().getLong(key, 0L);
+                            if (savedPos > 0) {
+                                seekVideoToTarget(savedPos);
+                                host.prefs().edit().remove(key).apply();
+                                return;
+                            }
+                        }
+                        clearVideoStatusText();
+                    }
+                });
+            }
+        };
+    }
+
+    private VideoPlayerController.SeekListener videoSeekListener() {
+        return new VideoPlayerController.SeekListener() {
+            @Override
+            public void onSeekComplete(final long positionMs) {
+                host.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (videoPendingSeekMs < 0L) return;
+                        completeVideoSeek(positionMs);
                     }
                 });
             }
@@ -5879,7 +5877,7 @@ public final class MediaSuiteHost {
                     com.solar.launcher.video.VideoSettings.ijkAspectRatio(host.context()));
             // Re-assert center gravity after size-driven requestLayout.
             videoSurface.setLayoutParams(centeredVideoSurfaceLp());
-            clearVideoStatusText();
+            if (videoPendingSeekMs < 0L) clearVideoStatusText();
         }
         boolean portraitSource = height > width;
         if (portraitSource) {
@@ -5984,6 +5982,7 @@ public final class MediaSuiteHost {
         videoController = new VideoPlayerController(host.context());
         videoController.setPlaybackListener(videoPlaybackListener());
         videoController.setBufferingListener(videoBufferingListener());
+        videoController.setSeekListener(videoSeekListener());
         videoController.attachHolder(videoSurface.getHolder());
         try {
             setVideoStatusText(host.getString(R.string.youtube_resolve_opening));
@@ -6036,6 +6035,7 @@ public final class MediaSuiteHost {
         videoController = new VideoPlayerController(host.context());
         videoController.setPlaybackListener(videoPlaybackListener());
         videoController.setBufferingListener(videoBufferingListener());
+        videoController.setSeekListener(videoSeekListener());
         videoController.attachHolder(videoSurface.getHolder());
 
         final int gen = ++youtubeLoadGen;
@@ -6153,6 +6153,7 @@ public final class MediaSuiteHost {
                                 videoController = new VideoPlayerController(host.context());
                                 videoController.setPlaybackListener(videoPlaybackListener());
                                 videoController.setBufferingListener(videoBufferingListener());
+                                videoController.setSeekListener(videoSeekListener());
                                 videoController.attachHolder(videoSurface.getHolder());
                             }
                             openYoutubeCachedFile(playFile);
@@ -6204,6 +6205,7 @@ public final class MediaSuiteHost {
                 videoController = new VideoPlayerController(host.context());
                 videoController.setPlaybackListener(videoPlaybackListener());
                 videoController.setBufferingListener(videoBufferingListener());
+                videoController.setSeekListener(videoSeekListener());
                 if (videoSurface != null) {
                     videoController.attachHolder(videoSurface.getHolder());
                 }
@@ -6314,7 +6316,7 @@ public final class MediaSuiteHost {
         youtubeProgCancel.set(true);
         stopVideoProgressUpdates();
         clearVideoScrubMode(false);
-        clearVideoStatusText();
+        clearVideoSeekState();
         if (videoController != null) {
             if (videoSurface != null) {
                 videoController.detachHolder(videoSurface.getHolder());
@@ -6334,9 +6336,8 @@ public final class MediaSuiteHost {
     public void onVideoPlaybackStopped() {
         stopVideoProgressUpdates();
         clearVideoScrubMode(false);
-        videoPendingSeekMs = -1L;
+        clearVideoSeekState();
         videoBufferPercent = 0;
-        com.solar.launcher.ui.UiBusy.clear(com.solar.launcher.ui.UiBusy.REASON_SEEK_BUFFER);
         host.setStatusBarVisible(true);
     }
 
@@ -6367,11 +6368,8 @@ public final class MediaSuiteHost {
         long base = videoPendingSeekMs >= 0L
                 ? videoPendingSeekMs
                 : videoController.getCurrentPosition();
-        long pos = base + deltaMs;
-        if (pos < 0) pos = 0;
         long dur = videoDurationMs();
-        if (dur > 0 && pos > dur) pos = dur;
-        // 2026-07-18 — Hold-seek / skip steps may land past buffer; same pending path as scrub.
+        long pos = VideoSeekPolicy.steppedTarget(base, deltaMs, dur);
         seekVideoToTarget(pos);
         pulseVideoTransport();
     }
