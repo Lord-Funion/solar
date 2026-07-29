@@ -105,6 +105,7 @@ import com.solar.launcher.ui.ScreenTransitionCoordinator;
 import com.solar.launcher.ui.ScreenTransitionMap;
 import com.solar.launcher.ui.UiBusy;
 import com.solar.launcher.media.FlowHoldHintPolicy;
+import com.solar.launcher.media.AuthorizedDirectDownload;
 import com.solar.launcher.media.AuthorizedMediaImporter;
 import com.solar.launcher.media.MediaSuiteHost;
 import com.solar.launcher.media.MediaSuiteHostAdapter;
@@ -300,6 +301,8 @@ public class MainActivity extends Activity {
     private static final int KEYBOARD_VIDEO_FILE_SEARCH = 53;
     /** 2026-07-20 — Online Radio station name search (wheel keyboard → Radio Browser). */
     private static final int KEYBOARD_RADIO_NET_SEARCH = 54;
+    /** Creator-provided direct audio URL; kept outside plugin keyboard ID ranges. */
+    private static final int KEYBOARD_DIRECT_AUDIO_URL = 55;
     /** ponytail: stock Y1 row art — home=itemConfig, settings/menu lists=menuConfig, file lists=itemConfig */
     private static final int Y1_ROW_HOME = 0;
     private static final int Y1_ROW_MENU = 1;
@@ -868,6 +871,19 @@ public class MainActivity extends Activity {
     private boolean soulseekPausedForNetworkLoss;
     private String podcastStreamTransferJobId;
     private String podcastSaveTransferJobId;
+    private static final class DirectDownloadControl {
+        final String jobId;
+        final AuthorizedDirectDownload.Plan plan;
+        final java.util.concurrent.atomic.AtomicBoolean cancel =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        volatile boolean pauseRequested;
+
+        DirectDownloadControl(String jobId, AuthorizedDirectDownload.Plan plan) {
+            this.jobId = jobId;
+            this.plan = plan;
+        }
+    }
+    private volatile DirectDownloadControl directDownloadControl;
     private long downloadsLastUiRefreshMs;
     private final Runnable downloadsUiRefreshRunnable = new Runnable() {
         @Override
@@ -3800,6 +3816,232 @@ public class MainActivity extends Activity {
                 }
             }
         }, "SolarMediaImport").start();
+    }
+
+    private File directAudioDownloadDirectory() {
+        File mediaRoot = DeviceFeatures.getNewMediaRoot(this);
+        return mediaRoot != null
+                ? new File(new File(mediaRoot, "Music"), "Downloads") : null;
+    }
+
+    private void openAuthorizedDirectDownloadKeyboard() {
+        if (!requireInternet(R.string.toast_internet_required)) return;
+        if (directDownloadControl != null) {
+            Toast.makeText(this, getString(R.string.get_music_direct_audio_busy),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        keyboardPurpose = KEYBOARD_DIRECT_AUDIO_URL;
+        keyboardReturnState = STATE_SOULSEEK;
+        keyboardPrefill = "https://";
+        changeScreen(STATE_WIFI_KEYBOARD);
+    }
+
+    private void finishAuthorizedDirectDownloadUrlEntry() {
+        final String suppliedUrl = typedPassword != null ? typedPassword.trim() : "";
+        changeScreen(STATE_SOULSEEK);
+        if (!requireInternet(R.string.toast_internet_required)) return;
+        if (directDownloadControl != null) {
+            Toast.makeText(this, getString(R.string.get_music_direct_audio_busy),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (transferJobStore == null) {
+            Toast.makeText(this, getString(R.string.get_music_direct_audio_unavailable),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        final AuthorizedDirectDownload.Plan plan;
+        try {
+            plan = AuthorizedDirectDownload.prepare(
+                    suppliedUrl, directAudioDownloadDirectory());
+        } catch (IOException e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+        showThemedConfirm(
+                getString(R.string.get_music_direct_audio_confirm_title, plan.displayName),
+                getString(R.string.get_music_direct_audio_confirm, plan.host),
+                getString(R.string.get_music_direct_audio_confirm_action),
+                getString(R.string.common_cancel),
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        startAuthorizedDirectDownload(plan);
+                    }
+                },
+                null);
+    }
+
+    private void startAuthorizedDirectDownload(AuthorizedDirectDownload.Plan plan) {
+        if (plan == null) return;
+        if (!ConnectivityHelper.isOnline(this)) {
+            Toast.makeText(this, getString(R.string.toast_internet_required),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (directDownloadControl != null) {
+            Toast.makeText(this, getString(R.string.get_music_direct_audio_busy),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        String transferId = beginTransferJob(null, TransferJobStore.Provider.DIRECT,
+                plan.displayName,
+                getString(R.string.get_music_direct_audio_source, plan.host),
+                plan.url, plan.target.getAbsolutePath(), true, 3);
+        if (transferId == null) {
+            Toast.makeText(this, getString(R.string.get_music_direct_audio_unavailable),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        DirectDownloadControl control = new DirectDownloadControl(transferId, plan);
+        directDownloadControl = control;
+        Toast.makeText(this,
+                getString(R.string.get_music_direct_audio_started, plan.displayName),
+                Toast.LENGTH_SHORT).show();
+        runAuthorizedDirectDownload(control);
+    }
+
+    private void runAuthorizedDirectDownload(final DirectDownloadControl control) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final long[] lastProgress = new long[] {0L, 0L};
+                    final AuthorizedDirectDownload.Result result =
+                            AuthorizedDirectDownload.download(
+                                    control.plan,
+                                    new com.solar.launcher.net.SolarHttp.DownloadProgress() {
+                                @Override
+                                public void onProgress(long done, long total) {
+                                    long now = android.os.SystemClock.elapsedRealtime();
+                                    if (lastProgress[1] == 0L
+                                            || done - lastProgress[0] >= 512L * 1024L
+                                            || now - lastProgress[1] >= 500L
+                                            || (total > 0L && done >= total)) {
+                                        lastProgress[0] = done;
+                                        lastProgress[1] = now;
+                                        progressTransferJob(control.jobId, done, total);
+                                    }
+                                }
+                            },
+                                    control.cancel);
+                    finishTransferJob(control.jobId, result.file, true);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            scanMediaLibraryAsync();
+                            requestSoulseekShareRescan();
+                            Toast.makeText(MainActivity.this,
+                                    getString(result.duplicate
+                                                    ? R.string.get_music_direct_audio_duplicate
+                                                    : R.string.get_music_direct_audio_done,
+                                            result.file.getName()),
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } catch (final Exception e) {
+                    if (control.cancel.get()) {
+                        if (!control.pauseRequested) {
+                            AuthorizedDirectDownload.deletePartial(control.plan);
+                        }
+                    } else {
+                        final String message = e.getMessage() != null
+                                ? e.getMessage()
+                                : getString(R.string.get_music_import_failed_unknown);
+                        failTransferJob(control.jobId, message);
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Toast.makeText(MainActivity.this,
+                                        getString(R.string.get_music_direct_audio_failed, message),
+                                        Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }
+                } finally {
+                    if (directDownloadControl == control) {
+                        directDownloadControl = null;
+                    }
+                    scheduleDownloadsUiRefresh();
+                }
+            }
+        }, "SolarDirectAudio").start();
+    }
+
+    private AuthorizedDirectDownload.Plan directPlanForJob(TransferJobStore.Job job)
+            throws IOException {
+        if (job == null || job.provider != TransferJobStore.Provider.DIRECT) {
+            throw new IOException("This is not a direct audio transfer");
+        }
+        if (job.remoteId == null || job.remoteId.length() == 0
+                || job.targetPath == null || job.targetPath.length() == 0) {
+            throw new IOException("The saved direct download is incomplete");
+        }
+        return AuthorizedDirectDownload.resume(
+                job.remoteId, new File(job.targetPath), directAudioDownloadDirectory());
+    }
+
+    private void pauseDirectDownloadForResume(TransferJobStore.Job job) {
+        DirectDownloadControl control = directDownloadControl;
+        if (control == null || job == null || !job.id.equals(control.jobId)) return;
+        control.pauseRequested = true;
+        control.cancel.set(true);
+        transitionTransferJob(job.id, TransferJobStore.State.PAUSED, "Paused", "");
+    }
+
+    private void cancelDirectDownload(TransferJobStore.Job job) {
+        DirectDownloadControl control = directDownloadControl;
+        if (control != null && job != null && job.id.equals(control.jobId)) {
+            control.pauseRequested = false;
+            control.cancel.set(true);
+            return;
+        }
+        try {
+            AuthorizedDirectDownload.deletePartial(directPlanForJob(job));
+        } catch (Exception ignored) {}
+    }
+
+    private void resumeDirectDownload(final TransferJobStore.Job original) {
+        if (original == null || transferJobStore == null) return;
+        if (directDownloadControl != null) {
+            Toast.makeText(this, getString(R.string.get_music_direct_audio_busy),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        final AuthorizedDirectDownload.Plan plan;
+        try {
+            plan = directPlanForJob(original);
+            TransferJobStore.Job job = transferJobStore.get(original.id);
+            if (job == null) return;
+            if (job.state == TransferJobStore.State.FAILED) {
+                job = transferJobStore.retry(job.id);
+            }
+            if (job.state == TransferJobStore.State.PAUSED
+                    || job.state == TransferJobStore.State.RETRYING
+                    || job.state == TransferJobStore.State.QUEUED) {
+                transferJobStore.transition(
+                        job.id, TransferJobStore.State.CONNECTING, "Connecting", "");
+            }
+        } catch (Exception e) {
+            Toast.makeText(this,
+                    getString(R.string.get_music_direct_audio_failed,
+                            e.getMessage() != null ? e.getMessage()
+                                    : getString(R.string.downloads_retry_unavailable)),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        DirectDownloadControl control = new DirectDownloadControl(original.id, plan);
+        directDownloadControl = control;
+        buildDownloadJobDetailUI(transferJobStore.get(original.id));
+        runAuthorizedDirectDownload(control);
+    }
+
+    private void deleteDirectPartialForJob(TransferJobStore.Job job) {
+        if (job == null || job.provider != TransferJobStore.Provider.DIRECT) return;
+        try {
+            AuthorizedDirectDownload.deletePartial(directPlanForJob(job));
+        } catch (Exception ignored) {}
     }
 
     /**
@@ -13300,6 +13542,9 @@ public class MainActivity extends Activity {
         if (keyboardPurpose == KEYBOARD_YOUTUBE_SEARCH) {
             return getString(R.string.youtube_search_title);
         }
+        if (keyboardPurpose == KEYBOARD_DIRECT_AUDIO_URL) {
+            return getString(R.string.get_music_direct_audio_title);
+        }
         if (keyboardPurpose == KEYBOARD_RADIO_NET_SEARCH) {
             return getString(R.string.radio_net_search_title);
         }
@@ -17645,7 +17890,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 || keyboardPurpose == KEYBOARD_BT_PAIRING_PIN
                 || keyboardPurpose == KEYBOARD_LIBRARY_SEARCH
                 || keyboardPurpose == KEYBOARD_REPORT_ISSUE
-                || keyboardPurpose == KEYBOARD_LALAL_KEY;
+                || keyboardPurpose == KEYBOARD_LALAL_KEY
+                || keyboardPurpose == KEYBOARD_DIRECT_AUDIO_URL;
     }
 
     private String[] keyboardCharsetForPurpose() {
@@ -18576,6 +18822,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (keyboardPurpose == KEYBOARD_LALAL_KEY) {
             return getString(R.string.lalal_key_prompt);
         }
+        if (keyboardPurpose == KEYBOARD_DIRECT_AUDIO_URL) {
+            return getString(R.string.get_music_direct_audio_placeholder);
+        }
         if (keyboardPurpose == KEYBOARD_SOULSEEK_SEARCH) {
             return getString(getMusicFromEntryPoint
                     ? R.string.get_music_type_search : R.string.soulseek_type_search);
@@ -18748,6 +18997,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         else if (keyboardPurpose == KEYBOARD_VIDEO_FILE_SEARCH) finishVideoFileSearchEntry();
         else if (keyboardPurpose == KEYBOARD_LALAL_KEY) finishLalalKeyEntry();
         else if (keyboardPurpose == KEYBOARD_REPORT_ISSUE) finishReportIssueEntry();
+        else if (keyboardPurpose == KEYBOARD_DIRECT_AUDIO_URL) {
+            finishAuthorizedDirectDownloadUrlEntry();
+        }
         else if (keyboardPurpose == NavidromeSettingsHost.KEYBOARD_URL
                 || keyboardPurpose == NavidromeSettingsHost.KEYBOARD_USER
                 || keyboardPurpose == NavidromeSettingsHost.KEYBOARD_PASS) {
@@ -44006,7 +44258,18 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                     clickFeedback();
                     if (transferJobStore != null) {
                         try {
-                            transferJobStore.clearFinished();
+                            for (TransferJobStore.Job finished : transferJobStore.list()) {
+                                if (!finished.state.isTerminal()) continue;
+                                DirectDownloadControl directControl = directDownloadControl;
+                                if (directControl != null
+                                        && finished.id.equals(directControl.jobId)) {
+                                    continue;
+                                }
+                                if (finished.state != TransferJobStore.State.COMPLETED) {
+                                    deleteDirectPartialForJob(finished);
+                                }
+                                transferJobStore.remove(finished.id);
+                            }
                         } catch (RuntimeException e) {
                             android.util.Log.w("Solar", "Could not clear transfer history", e);
                         }
@@ -44076,7 +44339,11 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 && job.id.equals(soulseekTransferJobId) && isSoulseekTransferInProgress();
         boolean activePodcast = job.provider == TransferJobStore.Provider.PODCAST
                 && job.id.equals(podcastStreamTransferJobId) && podcastDownloadInProgress;
-        if (activeSoulseek || activePodcast) {
+        DirectDownloadControl directControl = directDownloadControl;
+        boolean activeDirect = job.provider == TransferJobStore.Provider.DIRECT
+                && directControl != null && job.id.equals(directControl.jobId)
+                && job.state.isRunning();
+        if (activeSoulseek || activePodcast || activeDirect) {
             Button pause = createListButton(getString(R.string.downloads_pause));
             pause.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -44111,7 +44378,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             containerBrowserItems.addView(resume);
         }
 
-        if (job.state.isTerminal() || job.state == TransferJobStore.State.PAUSED) {
+        boolean directWorkerStopping = directControl != null
+                && job.id.equals(directControl.jobId);
+        if ((job.state.isTerminal() || job.state == TransferJobStore.State.PAUSED)
+                && !directWorkerStopping) {
             Button remove = createListButton(getString(R.string.downloads_remove));
             remove.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -44340,8 +44610,14 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private boolean canResumeTransferJob(TransferJobStore.Job job) {
         if (job == null || job.remoteId == null || job.remoteId.length() == 0
                 || job.targetPath == null || job.targetPath.length() == 0) return false;
+        DirectDownloadControl directControl = directDownloadControl;
+        if (job.provider == TransferJobStore.Provider.DIRECT
+                && directControl != null && job.id.equals(directControl.jobId)) {
+            return false;
+        }
         return job.provider == TransferJobStore.Provider.SOULSEEK
-                || job.provider == TransferJobStore.Provider.PODCAST;
+                || job.provider == TransferJobStore.Provider.PODCAST
+                || job.provider == TransferJobStore.Provider.DIRECT;
     }
 
     private void pauseTransferFromDownloads(TransferJobStore.Job job) {
@@ -44351,6 +44627,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         } else if (job.provider == TransferJobStore.Provider.PODCAST
                 && job.id.equals(podcastStreamTransferJobId)) {
             pausePodcastBackgroundDownload();
+        } else if (job.provider == TransferJobStore.Provider.DIRECT) {
+            pauseDirectDownloadForResume(job);
         }
         TransferJobStore.Job refreshed = transferJobStore != null
                 ? transferJobStore.get(job.id) : null;
@@ -44358,6 +44636,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     }
 
     private void cancelTransferFromDownloads(TransferJobStore.Job job) {
+        if (job.provider == TransferJobStore.Provider.DIRECT) {
+            cancelDirectDownload(job);
+        }
         transitionTransferJob(job.id, TransferJobStore.State.CANCELED, "Canceled", "");
         if (job.provider == TransferJobStore.Provider.SOULSEEK
                 && job.id.equals(soulseekTransferJobId)) {
@@ -44391,6 +44672,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         if (job.provider == TransferJobStore.Provider.PODCAST) {
             resumePodcastTransferJob(job);
+            return;
+        }
+        if (job.provider == TransferJobStore.Provider.DIRECT) {
+            resumeDirectDownload(job);
             return;
         }
         Toast.makeText(this, getString(R.string.downloads_retry_unavailable),
@@ -44473,6 +44758,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private void removeTransferHistory(TransferJobStore.Job job) {
         if (transferJobStore == null || job == null) return;
         try {
+            if (job.state != TransferJobStore.State.COMPLETED) {
+                deleteDirectPartialForJob(job);
+            }
             transferJobStore.remove(job.id);
             downloadsDetailJobId = null;
             Toast.makeText(this, getString(R.string.downloads_removed),
@@ -54193,6 +54481,20 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             });
             containerBrowserItems.addView(localImport);
 
+            if (online) {
+                View directAudio = createGetMusicListRow(
+                        getString(R.string.get_music_direct_audio),
+                        getString(R.string.get_music_direct_audio_hint),
+                        new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        clickFeedback();
+                        openAuthorizedDirectDownloadKeyboard();
+                    }
+                });
+                containerBrowserItems.addView(directAudio);
+            }
+
             if (com.solar.launcher.youtube.YouTubeExperiment.isEnabled(prefs)) {
                 View youtube = createGetMusicListRow(
                         getString(R.string.get_music_youtube_discover),
@@ -61957,6 +62259,17 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     @Override
     protected void onDestroy() {
+        try {
+            DirectDownloadControl directControl = directDownloadControl;
+            if (directControl != null && transferJobStore != null) {
+                TransferJobStore.Job directJob = transferJobStore.get(directControl.jobId);
+                if (directJob != null && directJob.state.isRunning()) {
+                    pauseDirectDownloadForResume(directJob);
+                }
+            }
+        } catch (RuntimeException e) {
+            android.util.Log.w("Solar", "Could not pause direct download during shutdown", e);
+        }
         // 2026-07-20 — Clear MemoryRelease host so trim doesn’t touch a dead Activity.
         MemoryRelease.setHost(null);
         if (usbFocusHelper != null) usbFocusHelper.onDestroy();
