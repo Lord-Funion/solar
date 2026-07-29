@@ -88,7 +88,9 @@ The source tree already has extensive functionality and tests. In particular:
 - `SoulseekClient` and the Reach UI implement real Soulseek account, search,
   browse, queue, download, and history behavior.
 - `MusicLibraryStore` and related scanners implement local library persistence.
-- `SolarWheelKeyboardController` provides a wheel-controlled character ring.
+- `SolarWheelKeyboardController` provides a wheel-controlled character ring or
+  shorter grouped pages, backed by shared cursor/editing primitives. See
+  `docs/WHEEL-KEYBOARD.md` for the deterministic layout comparison.
 - The ROM builder supports separately named Y1 Type A and Type B inputs and
   also contains Y2/A5 paths.
 

@@ -174,6 +174,7 @@ public final class RowKeys {
     public static final String Y2_INTERNAL_MEDIA = "settings.y2_internal_media";
     /** Y2 only — long OK sleeps screen instead of opening quick menu (legacy behaviour). */
     public static final String Y2_HOLD_OK_TO_SLEEP = "settings.y2_hold_ok_to_sleep";
+    public static final String KEYBOARD_LAYOUT = "settings.keyboard_layout";
     /** 2026-07-11 — A5: face vs side buttons navigate menus. */
     public static final String A5_MENU_NAV = "settings.a5_menu_nav";
     /** 2026-07-11 — A5: portrait 240×320 vs landscape 240p-scaled. */
@@ -414,6 +415,7 @@ public final class RowKeys {
         if (STORAGE.equals(rowKey)) return R.string.settings_storage_info;
         if (Y2_INTERNAL_MEDIA.equals(rowKey)) return R.string.settings_y2_internal_media;
         if (Y2_HOLD_OK_TO_SLEEP.equals(rowKey)) return R.string.settings_y2_hold_ok_to_sleep;
+        if (KEYBOARD_LAYOUT.equals(rowKey)) return R.string.settings_keyboard_layout;
         if (A5_MENU_NAV.equals(rowKey)) return R.string.settings_a5_menu_nav;
         if (A5_ORIENTATION.equals(rowKey)) return R.string.settings_a5_orientation;
         if (Y2_PRIMARY_STORAGE.equals(rowKey)) return R.string.settings_y2_primary_storage;

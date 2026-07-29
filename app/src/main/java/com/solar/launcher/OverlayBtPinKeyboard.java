@@ -1,6 +1,7 @@
 package com.solar.launcher;
 
 import android.content.Context;
+import android.os.SystemClock;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -25,6 +26,7 @@ final class OverlayBtPinKeyboard {
     private String targetAddress;
     private String deviceName;
     private String prefill;
+    private long playPauseDownAt;
 
     OverlayBtPinKeyboard(Context context, ViewGroup parent, Runnable onDismissKeyboardOnly) {
         this.context = context.getApplicationContext();
@@ -43,6 +45,8 @@ final class OverlayBtPinKeyboard {
         deviceName = name != null && name.length() > 0 ? name : address;
         prefill = BluetoothAudioRepair.normalizePairingPin(pinPrefill);
         controller = new SolarWheelKeyboardController();
+        controller.setGroupedMode(WheelKeyboardLayout.isGrouped(context));
+        controller.setPasswordMode(true);
         controller.setDigitOnlyMode(true);
         if (prefill != null && prefill.length() > 0) {
             controller.setBuffer(prefill);
@@ -87,20 +91,35 @@ final class OverlayBtPinKeyboard {
             controller.wheelDown();
             return true;
         }
-        if (Y1InputKeys.isCenterKey(keyCode) || Y1InputKeys.isPlayPauseKey(keyCode)) {
+        if (Y1InputKeys.isCenterKey(keyCode)) {
             controller.centerPress();
+            return true;
+        }
+        if (Y1InputKeys.isPlayPauseKey(keyCode)) {
+            if (playPauseDownAt == 0L) playPauseDownAt = SystemClock.uptimeMillis();
             return true;
         }
         if (Y1InputKeys.isTrackPreviousKey(keyCode)) {
             controller.mediaDelete();
             return true;
         }
+        if (Y1InputKeys.isTrackNextKey(keyCode)) {
+            return true;
+        }
         return false;
     }
 
     boolean handleKeyUp(int keyCode) {
-        return isShowing() && (Y1InputKeys.isCenterKey(keyCode) || Y1InputKeys.isBackKey(keyCode)
-                || Y1InputKeys.isWheelKey(keyCode) || Y1InputKeys.isPlayPauseKey(keyCode));
+        if (!isShowing()) return false;
+        if (Y1InputKeys.isPlayPauseKey(keyCode)) {
+            playPauseDownAt = 0L;
+            controller.requestEnter();
+            return true;
+        }
+        return Y1InputKeys.isCenterKey(keyCode) || Y1InputKeys.isBackKey(keyCode)
+                || Y1InputKeys.isWheelKey(keyCode)
+                || Y1InputKeys.isTrackPreviousKey(keyCode)
+                || Y1InputKeys.isTrackNextKey(keyCode);
     }
 
     void dismiss() {
@@ -116,6 +135,7 @@ final class OverlayBtPinKeyboard {
         targetAddress = null;
         deviceName = null;
         prefill = null;
+        playPauseDownAt = 0L;
     }
 
     private void dismissKeyboardOnly() {
@@ -131,7 +151,7 @@ final class OverlayBtPinKeyboard {
         shellHost.applyShellTheme("", true);
         String buffer = controller.getBuffer();
         boolean empty = buffer == null || buffer.length() == 0;
-        String input = empty ? "0000" : buffer;
+        String input = empty ? "0000" : controller.renderBuffer(true);
         shellHost.getKeyboardUi().refresh(controller, null, input, empty);
     }
 }

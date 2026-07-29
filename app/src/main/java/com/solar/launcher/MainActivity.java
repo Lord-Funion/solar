@@ -2115,17 +2115,15 @@ public class MainActivity extends Activity {
     private TextView tvKeyboardSsid, tvKeyboardInput;
     private TextView tvKeyPprev, tvKeyPrev, tvKeyCurrent, tvKeyNext, tvKeyNnext;
 
-    private final String[] KEYBOARD_CHARS = {
-            "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u",
-            "v", "w", "x", "y", "z",
-            "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U",
-            "V", "W", "X", "Y", "Z",
-            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-            "!", "@", "#", "$", "%", "^", "&", "*", "-", "_", "+", "=", ".", "?",
-            "[SPC]", "[DEL]", "[CONN]"
-    };
+    private String[] keyboardChars = SolarWheelKeyboardController.CHARSET;
     private int keyboardIndex = 0;
+    private int keyboardCursor = 0;
     private boolean keyboardPpLongDoCase = true;
+    private boolean keyboardPasswordVisible = false;
+    private boolean keyboardGrouped = true;
+    private int keyboardPage = WheelKeyboardLayout.PAGE_LOWER;
+    private List<String> keyboardSuggestionCandidates = new ArrayList<String>();
+    private String keyboardSuggestion = "";
     private long keyboardMediaSkipDownAt = 0;
     private long keyboardPpDownAt = 0;
     private boolean keyboardPpLongHandled = false;
@@ -17233,8 +17231,15 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private void openKeyboard() {
         typedPassword = keyboardPrefill != null ? keyboardPrefill : "";
         keyboardPrefill = null;
+        keyboardGrouped = WheelKeyboardLayout.isGrouped(prefs);
+        keyboardPage = WheelKeyboardLayout.PAGE_LOWER;
+        keyboardSuggestionCandidates = loadKeyboardSuggestionCandidates();
+        refreshKeyboardSuggestion();
+        keyboardChars = keyboardCharsetForPurpose();
         keyboardIndex = 0;
+        keyboardCursor = typedPassword.length();
         keyboardPpLongDoCase = true;
+        keyboardPasswordVisible = false;
         // 2026-07-15 — Reset paint caches so first frame styles input + current key.
         keyboardLastInputShown = null;
         keyboardLastPlaceholder = !keyboardInputIsPlaceholder(); // force style once
@@ -17320,12 +17325,12 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
                     @Override
                     public int charsetLength() {
-                        return KEYBOARD_CHARS.length;
+                        return keyboardChars.length;
                     }
 
                     @Override
                     public void setIndex(int idx) {
-                        if (idx < 0 || idx >= KEYBOARD_CHARS.length) return;
+                        if (idx < 0 || idx >= keyboardChars.length) return;
                         keyboardIndex = idx;
                         // 2026-07-15 — Wheel only: letters strip, not full theme restyle.
                         updateKeyboardKeyStripTexts();
@@ -17338,7 +17343,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
                     @Override
                     public void wheelBy(int steps) {
-                        int len = KEYBOARD_CHARS.length;
+                        int len = keyboardChars.length;
                         if (len <= 0) return;
                         keyboardIndex = (keyboardIndex + steps % len + len) % len;
                         updateKeyboardKeyStripTexts();
@@ -17403,9 +17408,70 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 || keyboardPurpose == KEYBOARD_LALAL_KEY;
     }
 
+    private String[] keyboardCharsetForPurpose() {
+        String[] charset = WheelKeyboardLayout.charset(keyboardGrouped, keyboardPage,
+                keyboardIsSensitivePurpose(),
+                keyboardPurpose == KEYBOARD_BT_PAIRING_PIN);
+        return keyboardSupportsPrediction()
+                ? WheelKeyboardSuggestions.appendToken(charset) : charset;
+    }
+
+    private boolean keyboardIsSensitivePurpose() {
+        return keyboardPurpose == KEYBOARD_WIFI && !isTargetWifiOpen
+                || keyboardPurpose == KEYBOARD_SOULSEEK_PASS
+                || keyboardPurpose == KEYBOARD_BT_PAIRING_PIN
+                || keyboardPurpose == KEYBOARD_LALAL_KEY
+                || keyboardPurpose == NavidromeSettingsHost.KEYBOARD_PASS
+                || keyboardPurpose == PlexSettingsHost.KEYBOARD_TOKEN
+                || keyboardPurpose
+                        == com.solar.launcher.jellyfin.JellyfinSettingsHost.KEYBOARD_PASS
+                || keyboardPurpose
+                        == com.solar.launcher.scrobble.ScrobbleSettingsHost
+                        .KEYBOARD_LISTENBRAINZ_TOKEN;
+    }
+
+    private boolean keyboardSupportsPrediction() {
+        if (keyboardIsSensitivePurpose()) return false;
+        return keyboardPurpose == KEYBOARD_SOULSEEK_SEARCH
+                || keyboardPurpose == KEYBOARD_DEEZER_SEARCH
+                || keyboardPurpose == KEYBOARD_PODCAST_SEARCH
+                || keyboardPurpose == KEYBOARD_YOUTUBE_SEARCH
+                || keyboardPurpose == KEYBOARD_LIBRARY_SEARCH;
+    }
+
+    private List<String> loadKeyboardSuggestionCandidates() {
+        List<String> recent = new ArrayList<String>();
+        if (!keyboardSupportsPrediction()) return recent;
+        if (keyboardPurpose == KEYBOARD_SOULSEEK_SEARCH) {
+            recent.addAll(getMusicFromEntryPoint
+                    ? GetMusicSearchHistory.load(prefs)
+                    : SoulseekSearchHistory.load(prefs));
+        } else if (keyboardPurpose == KEYBOARD_DEEZER_SEARCH) {
+            recent.addAll(com.solar.launcher.deezer.DeezerSearchHistory.load(prefs));
+        } else if (keyboardPurpose == KEYBOARD_YOUTUBE_SEARCH) {
+            recent.addAll(com.solar.launcher.youtube.YouTubeRecentSearches.get(this));
+        } else if (keyboardPurpose == KEYBOARD_PODCAST_SEARCH) {
+            if (podcastLastQuery != null && !podcastLastQuery.trim().isEmpty()) {
+                recent.add(podcastLastQuery.trim());
+            }
+        } else if (keyboardPurpose == KEYBOARD_LIBRARY_SEARCH) {
+            if (librarySearchQuery != null && !librarySearchQuery.trim().isEmpty()) {
+                recent.add(librarySearchQuery.trim());
+            }
+        }
+        return recent;
+    }
+
+    private void refreshKeyboardSuggestion() {
+        keyboardSuggestion = keyboardSupportsPrediction()
+                ? WheelKeyboardSuggestions.bestCompletion(
+                        typedPassword, keyboardSuggestionCandidates)
+                : "";
+    }
+
     private String keyboardDisplayChar(String ch) {
-        if ("[CONN]".equals(ch)) return getString(R.string.keyboard_enter);
-        return ch;
+        return SolarWheelKeyboardController.displayChar(ch,
+                getString(R.string.keyboard_enter), keyboardPasswordVisible);
     }
 
     private void openPodcastSearchKeyboard() {
@@ -18159,7 +18225,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             return;
         }
         if (keyboardPurpose == KEYBOARD_WIFI && isTargetWifiOpen) {
-            keyboardIndex = KEYBOARD_CHARS.length - 1;
+            keyboardIndex = keyboardChars.length - 1;
         }
         updateKeyboardKeyStripTexts();
         updateKeyboardInputDisplay();
@@ -18174,14 +18240,14 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 || tvKeyNext == null || tvKeyNnext == null) {
             return;
         }
-        int len = KEYBOARD_CHARS.length;
+        int len = keyboardChars.length;
         if (len <= 0) return;
         int idx = keyboardIndex;
-        tvKeyPprev.setText(keyboardDisplayChar(KEYBOARD_CHARS[(idx - 2 + len) % len]));
-        tvKeyPrev.setText(keyboardDisplayChar(KEYBOARD_CHARS[(idx - 1 + len) % len]));
-        tvKeyCurrent.setText(keyboardDisplayChar(KEYBOARD_CHARS[idx]));
-        tvKeyNext.setText(keyboardDisplayChar(KEYBOARD_CHARS[(idx + 1) % len]));
-        tvKeyNnext.setText(keyboardDisplayChar(KEYBOARD_CHARS[(idx + 2) % len]));
+        tvKeyPprev.setText(keyboardDisplayChar(keyboardChars[(idx - 2 + len) % len]));
+        tvKeyPrev.setText(keyboardDisplayChar(keyboardChars[(idx - 1 + len) % len]));
+        tvKeyCurrent.setText(keyboardDisplayChar(keyboardChars[idx]));
+        tvKeyNext.setText(keyboardDisplayChar(keyboardChars[(idx + 1) % len]));
+        tvKeyNnext.setText(keyboardDisplayChar(keyboardChars[(idx + 2) % len]));
         // Restyle current-key chrome only when the focused letter changes.
         if (keyboardLastStyledIndex != idx) {
             styleKeyboardCurrentKey();
@@ -18220,7 +18286,12 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             return getString(R.string.wifi_open_network);
         }
         if (typedPassword.length() > 0) {
-            return typedPassword;
+            String rendered = WheelTextEditor.render(typedPassword, keyboardCursor,
+                    keyboardIsSensitivePurpose() && !keyboardPasswordVisible, true);
+            if (keyboardSuggestion != null && !keyboardSuggestion.isEmpty()) {
+                rendered += "  > " + keyboardSuggestion;
+            }
+            return rendered;
         }
         // 2026-07-20 — Only purposeful empty-field hints (no repeat of screen/status title).
         // Layman: blank box unless the hint actually helps type (password, optional note, PIN).
@@ -18267,46 +18338,93 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     }
 
     private void handleKeyboardInput() {
-        String selectedChar = KEYBOARD_CHARS[keyboardIndex];
+        String selectedChar = keyboardChars[keyboardIndex];
         // 2026-07-15 — Haptic already throttled (30ms) in clickFeedback — keep for key feel.
-        boolean isConn = selectedChar.equals("[CONN]");
+        boolean isConn = SolarWheelKeyboardController.TOKEN_CONN.equals(selectedChar);
         clickFeedback();
-        if (selectedChar.equals("[DEL]")) {
+        if (SolarWheelKeyboardController.TOKEN_DEL.equals(selectedChar)) {
             applySoulseekUsernameDel();
             updateKeyboardInputDisplay();
+            return;
+        }
+        if (SolarWheelKeyboardController.TOKEN_LEFT.equals(selectedChar)) {
+            applyKeyboardEdit(WheelTextEditor.moveCursor(
+                    typedPassword, keyboardCursor, -1));
+            return;
+        }
+        if (SolarWheelKeyboardController.TOKEN_RIGHT.equals(selectedChar)) {
+            applyKeyboardEdit(WheelTextEditor.moveCursor(
+                    typedPassword, keyboardCursor, 1));
+            return;
+        }
+        if (SolarWheelKeyboardController.TOKEN_WORD.equals(selectedChar)) {
+            applyKeyboardEdit(WheelTextEditor.deleteWordBeforeCursor(
+                    typedPassword, keyboardCursor));
+            return;
+        }
+        if (SolarWheelKeyboardController.TOKEN_VISIBILITY.equals(selectedChar)) {
+            keyboardPasswordVisible = !keyboardPasswordVisible;
+            updateKeyboardUI();
+            return;
+        }
+        if (WheelKeyboardSuggestions.TOKEN_SUGGEST.equals(selectedChar)) {
+            if (keyboardSuggestion != null && !keyboardSuggestion.isEmpty()) {
+                typedPassword = keyboardSuggestion;
+                keyboardCursor = typedPassword.length();
+                refreshKeyboardSuggestion();
+                updateKeyboardInputDisplay();
+            }
             return;
         }
         if (isConn) {
             handleKeyboardEnter();
             return;
         }
-        if (selectedChar.equals("[SPC]")) {
-            typedPassword += " ";
+        if (SolarWheelKeyboardController.TOKEN_SPC.equals(selectedChar)) {
+            applyKeyboardEdit(WheelTextEditor.insert(
+                    typedPassword, keyboardCursor, " "));
             if (keyboardPurpose == KEYBOARD_SOULSEEK_USER) soulseekUsernameAutoPhase = false;
-            updateKeyboardInputDisplay();
             return;
         }
-        typedPassword += selectedChar;
+        applyKeyboardEdit(WheelTextEditor.insert(
+                typedPassword, keyboardCursor, selectedChar));
         if (keyboardPurpose == KEYBOARD_SOULSEEK_USER) soulseekUsernameAutoPhase = false;
         if (selectedChar.length() == 1) {
             char ch = selectedChar.charAt(0);
             if (ch >= 'A' && ch <= 'Z') {
-                keyboardIndex = KeyboardCharset.lowercaseIndexForChar(ch);
+                int lowerIndex = KeyboardCharset.lowercaseIndexForChar(ch);
+                if (keyboardGrouped) {
+                    keyboardPage = WheelKeyboardLayout.PAGE_LOWER;
+                    keyboardChars = keyboardCharsetForPurpose();
+                }
+                keyboardIndex = Math.min(lowerIndex, keyboardChars.length - 1);
                 keyboardPpLongDoCase = true;
                 updateKeyboardKeyStripTexts();
             }
         }
-        updateKeyboardInputDisplay();
     }
 
     /** One DEL/prevtrack clears prefilled auto username; per-char delete after user types. */
     private void applySoulseekUsernameDel() {
         if (keyboardPurpose == KEYBOARD_SOULSEEK_USER && soulseekUsernameAutoPhase) {
             typedPassword = "";
+            keyboardCursor = 0;
             soulseekUsernameAutoPhase = false;
-        } else if (typedPassword.length() > 0) {
-            typedPassword = typedPassword.substring(0, typedPassword.length() - 1);
+        } else {
+            WheelTextEditor.State edit =
+                    WheelTextEditor.deleteBeforeCursor(typedPassword, keyboardCursor);
+            typedPassword = edit.text;
+            keyboardCursor = edit.cursor;
         }
+        refreshKeyboardSuggestion();
+    }
+
+    private void applyKeyboardEdit(WheelTextEditor.State edit) {
+        if (edit == null) return;
+        typedPassword = edit.text;
+        keyboardCursor = edit.cursor;
+        refreshKeyboardSuggestion();
+        updateKeyboardInputDisplay();
     }
 
     private void handleKeyboardMediaDel() {
@@ -18330,17 +18448,21 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (vibrate) clickFeedback();
         if (keyboardPurpose == KEYBOARD_SOULSEEK_USER) {
             applySoulseekUsernameDel();
-        } else if (typedPassword.length() > 0) {
-            typedPassword = typedPassword.substring(0, typedPassword.length() - 1);
+        } else {
+            WheelTextEditor.State edit =
+                    WheelTextEditor.deleteBeforeCursor(typedPassword, keyboardCursor);
+            typedPassword = edit.text;
+            keyboardCursor = edit.cursor;
         }
+        refreshKeyboardSuggestion();
         // 2026-07-15 — Input-only paint (was full strip restyle every delete).
         updateKeyboardInputDisplay();
     }
 
     private void handleKeyboardMediaSpace() {
         clickFeedback();
-        typedPassword += " ";
-        updateKeyboardInputDisplay();
+        applyKeyboardEdit(WheelTextEditor.insert(
+                typedPassword, keyboardCursor, " "));
     }
 
     private void handleKeyboardEnter() {
@@ -18430,6 +18552,17 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         } catch (Exception ignored) {}
         // #endregion
         clickFeedback();
+        if (keyboardPurpose == KEYBOARD_BT_PAIRING_PIN) return;
+        if (keyboardGrouped) {
+            String[] oldCharset = keyboardChars;
+            int oldPage = keyboardPage;
+            keyboardPage = WheelKeyboardLayout.nextPage(keyboardPage);
+            keyboardChars = keyboardCharsetForPurpose();
+            keyboardIndex = WheelKeyboardLayout.mapIndexToPage(
+                    oldCharset, keyboardIndex, oldPage, keyboardChars, keyboardPage);
+            updateKeyboardUI();
+            return;
+        }
         if (keyboardPpLongDoCase) {
             int flipped = keyboardFlipCaseIndex(keyboardIndex);
             keyboardIndex = flipped != keyboardIndex ? flipped : keyboardMapToNextCharset(keyboardIndex);
@@ -20955,6 +21088,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (RowKeys.BLUETOOTH_AUTO_RECONNECT.equals(rowKey)) {
             return stateOnOff(BluetoothAudioRepair.isAutoReconnectEnabled(this));
         }
+        if (RowKeys.KEYBOARD_LAYOUT.equals(rowKey)) {
+            return getString(WheelKeyboardLayout.labelRes(prefs));
+        }
         if (RowKeys.DEBUG_RADIO_EXPERIMENT.equals(rowKey)) {
             return stateOnOff(com.solar.launcher.radio.RadioExperiment.isEnabled(prefs));
         }
@@ -21950,8 +22086,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     private boolean isKeyboardDelSelected() {
         return currentScreenState == STATE_WIFI_KEYBOARD
-                && keyboardIndex >= 0 && keyboardIndex < KEYBOARD_CHARS.length
-                && "[DEL]".equals(KEYBOARD_CHARS[keyboardIndex]);
+                && keyboardIndex >= 0 && keyboardIndex < keyboardChars.length
+                && SolarWheelKeyboardController.TOKEN_DEL.equals(
+                        keyboardChars[keyboardIndex]);
     }
 
     /** Queue list rows — not quick bar / title / slider while queue tier is open. */
@@ -34591,6 +34728,19 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
         });
         containerSettingsItems.addView(btnVibrate);
+
+        final LinearLayout btnKeyboardLayout = createSettingsRow(
+                RowKeys.KEYBOARD_LAYOUT, R.string.settings_keyboard_layout, false);
+        btnKeyboardLayout.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                prefs.edit().putString(WheelKeyboardLayout.PREF_LAYOUT,
+                        WheelKeyboardLayout.toggledMode(prefs)).apply();
+                refreshSettingsPreview(RowKeys.KEYBOARD_LAYOUT);
+            }
+        });
+        containerSettingsItems.addView(btnKeyboardLayout);
 
         final LinearLayout btnScreenOffCtrl = createSettingsRow(RowKeys.SCREEN_OFF_CTRL,
                 R.string.settings_screen_off_control, false);
@@ -56127,6 +56277,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             SoulseekAccount.load(prefs, MainActivity.this);
             if (!soulseekKeyboardStashedAutoUser.isEmpty()) {
                 typedPassword = soulseekKeyboardStashedAutoUser;
+                keyboardCursor = typedPassword.length();
                 soulseekUsernameAutoPhase = true;
                 updateKeyboardUI();
             }
@@ -60189,14 +60340,15 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 return true;
             }
             if (Y1InputKeys.isWheelUp(keyCode)) {
-                keyboardIndex = (keyboardIndex - 1 + KEYBOARD_CHARS.length) % KEYBOARD_CHARS.length;
+                keyboardIndex = (keyboardIndex - 1 + keyboardChars.length)
+                        % keyboardChars.length;
                 // 2026-07-15 — Wheel: key strip only (Hallmark cut motion; was full restyle).
                 updateKeyboardKeyStripTexts();
                 clickFeedback();
                 return true;
             }
             if (Y1InputKeys.isWheelDown(keyCode)) {
-                keyboardIndex = (keyboardIndex + 1) % KEYBOARD_CHARS.length;
+                keyboardIndex = (keyboardIndex + 1) % keyboardChars.length;
                 updateKeyboardKeyStripTexts();
                 clickFeedback();
                 return true;

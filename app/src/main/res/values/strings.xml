@@ -493,6 +493,9 @@
     <string name="settings_bluetooth_setup">Bluetooth</string>
     <string name="settings_bluetooth_pairing_pin">Bluetooth pairing PIN</string>
     <string name="settings_bluetooth_auto_reconnect">Auto-reconnect Bluetooth audio</string>
+    <string name="settings_keyboard_layout">Wheel keyboard layout</string>
+    <string name="settings_keyboard_layout_grouped">Grouped pages</string>
+    <string name="settings_keyboard_layout_ring">Alphabet ring</string>
     <string name="settings_display_brightness">Brightness</string>
     <string name="settings_storage_info">Storage info</string>
     <string name="settings_y2_hold_ok_to_sleep">Hold OK to sleep</string>
@@ -663,8 +666,8 @@
     <string name="keyboard_soulseek_username">Soulseek Username</string>
     <string name="keyboard_soulseek_password">Reach Password</string>
     <!-- 2026-07-20 — Hold tip names Capitals/Symbols (was Aa/#). Reversal: restore Aa/#. -->
-    <string name="keyboard_hint">[prev] delete · [play] OK · [next] space\nhold [play] for Capitals and Symbols\n[back] cancel</string>
-    <string name="keyboard_hint_a5">Vol: space / delete · Back: Enter · Hold Back: Capitals and Symbols\nEdge flick: cancel</string>
+    <string name="keyboard_hint">[prev] delete · [play] OK · [next] space\nhold [play] for Capitals, Numbers, Symbols\n[back] cancel</string>
+    <string name="keyboard_hint_a5">Vol: space / delete · Back: Enter · Hold Back: Capitals, Numbers, Symbols\nEdge flick: cancel</string>
     <string name="solar_ime_label">Solar Keyboard</string>
     <string name="solar_ime_type_hint">Type here…</string>
     <string name="solar_ime_a11y_description">Solar typing helper. Pastes text when the wheel keyboard cannot reach a field directly.</string>
