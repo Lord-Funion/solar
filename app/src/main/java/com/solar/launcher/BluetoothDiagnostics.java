@@ -71,6 +71,8 @@ public final class BluetoothDiagnostics {
         BluetoothDevice device = null;
         try {
             device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+        } catch (SecurityException denied) {
+            device = null;
         } catch (Exception ignored) {}
         String address = safeAddress(device);
         String name = safeName(device);
@@ -185,6 +187,8 @@ public final class BluetoothDiagnostics {
         BluetoothAdapter adapter = null;
         try {
             adapter = BluetoothAdapter.getDefaultAdapter();
+        } catch (SecurityException denied) {
+            adapter = null;
         } catch (Exception ignored) {}
         boolean present = adapter != null;
         boolean enabled = false;
@@ -196,6 +200,10 @@ public final class BluetoothDiagnostics {
                 adapterState = adapter.getState();
                 a2dpState = adapter.getProfileConnectionState(BluetoothProfile.A2DP);
             }
+        } catch (SecurityException denied) {
+            enabled = false;
+            adapterState = BluetoothAdapter.ERROR;
+            a2dpState = BluetoothProfile.STATE_DISCONNECTED;
         } catch (Exception ignored) {}
 
         String lastAddress = connectedAddress;
@@ -322,6 +330,8 @@ public final class BluetoothDiagnostics {
             for (BluetoothDevice device : bonded) {
                 if (device != null && address.equals(safeAddress(device))) return device;
             }
+        } catch (SecurityException denied) {
+            return null;
         } catch (Exception ignored) {}
         return null;
     }
@@ -329,6 +339,8 @@ public final class BluetoothDiagnostics {
     private static int safeBondState(BluetoothDevice device) {
         try {
             return device != null ? device.getBondState() : BluetoothDevice.ERROR;
+        } catch (SecurityException denied) {
+            return BluetoothDevice.ERROR;
         } catch (Exception ignored) {
             return BluetoothDevice.ERROR;
         }
@@ -337,6 +349,8 @@ public final class BluetoothDiagnostics {
     private static String safeAddress(BluetoothDevice device) {
         try {
             return device != null ? device.getAddress() : null;
+        } catch (SecurityException denied) {
+            return null;
         } catch (Exception ignored) {
             return null;
         }
@@ -347,6 +361,8 @@ public final class BluetoothDiagnostics {
             if (device == null) return null;
             String name = device.getName();
             return name != null && !name.isEmpty() ? name : device.getAddress();
+        } catch (SecurityException denied) {
+            return safeAddress(device);
         } catch (Exception ignored) {
             return safeAddress(device);
         }

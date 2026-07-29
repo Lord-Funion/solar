@@ -133,6 +133,9 @@ public final class WifiConnector {
                                 open ? Security.OPEN : Security.WPA_PERSONAL,
                                 gen, authMonitor);
                     }
+                } catch (SecurityException denied) {
+                    SolarLog.e(TAG, "connectDetailed permission denied", denied);
+                    result = ConnectionResult.failure(Failure.SYSTEM_ERROR);
                 } catch (Exception e) {
                     SolarLog.e(TAG, "connect " + ssid, e);
                     com.solar.launcher.diag.SolarDiagFeatureLog.warn("wifi",
@@ -221,6 +224,9 @@ public final class WifiConnector {
                             }
                         }
                     }
+                } catch (SecurityException denied) {
+                    SolarLog.e(TAG, "connectSaved permission denied", denied);
+                    result = ConnectionResult.failure(Failure.SYSTEM_ERROR);
                 } catch (Exception e) {
                     SolarLog.e(TAG, "connectFromMenu " + ssid, e);
                     result = ConnectionResult.failure(Failure.SYSTEM_ERROR);
@@ -264,6 +270,9 @@ public final class WifiConnector {
                                     wm, netId, ssid, gen, authMonitor);
                         }
                     }
+                } catch (SecurityException denied) {
+                    SolarLog.e(TAG, "connectSaved permission denied", denied);
+                    result = ConnectionResult.failure(Failure.SYSTEM_ERROR);
                 } catch (Exception e) {
                     SolarLog.e(TAG, "connectSaved " + ssid, e);
                     result = ConnectionResult.failure(Failure.SYSTEM_ERROR);
@@ -301,6 +310,8 @@ public final class WifiConnector {
                             saveConfigurationQuiet(wm);
                         }
                     }
+                } catch (SecurityException denied) {
+                    SolarLog.e(TAG, "forget permission denied", denied);
                 } catch (Exception e) {
                     SolarLog.e(TAG, "forget " + ssid, e);
                 }
@@ -449,7 +460,12 @@ public final class WifiConnector {
         if (wm == null || !wm.isWifiEnabled()) {
             return ConnectionResult.failure(Failure.WIFI_UNAVAILABLE);
         }
-        int netId = findSavedNetId(wm.getConfiguredNetworks(), ssid);
+        int netId;
+        try {
+            netId = findSavedNetId(wm.getConfiguredNetworks(), ssid);
+        } catch (SecurityException denied) {
+            return ConnectionResult.failure(Failure.SYSTEM_ERROR);
+        }
         if (netId >= 0) {
             WifiConfiguration update = new WifiConfiguration();
             update.networkId = netId;

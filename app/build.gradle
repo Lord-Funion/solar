@@ -141,6 +141,10 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    lint {
+        // Freeze inherited findings so lint remains a regression gate for new work.
+        baseline = file("lint-baseline.xml")
+    }
     sourceSets {
         main {
             java.srcDirs += 'src/api21/java'

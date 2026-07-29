@@ -19469,13 +19469,23 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     private void retryBluetoothFromDiagnostics(String address) {
         BluetoothDevice device = bluetoothDeviceByAddress(address);
-        if (device == null || device.getBondState() != BluetoothDevice.BOND_BONDED) {
+        if (device == null) {
             Toast.makeText(this, getString(R.string.bluetooth_diagnostics_no_bond),
                     Toast.LENGTH_LONG).show();
             return;
         }
-        beginBtConnect(device);
-        connectBluetoothAudio(device, true);
+        try {
+            if (device.getBondState() != BluetoothDevice.BOND_BONDED) {
+                Toast.makeText(this, getString(R.string.bluetooth_diagnostics_no_bond),
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            beginBtConnect(device);
+            connectBluetoothAudio(device, true);
+        } catch (SecurityException denied) {
+            Toast.makeText(this, getString(R.string.bluetooth_diagnostics_no_bond),
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
     @android.annotation.SuppressLint("MissingPermission")
@@ -42868,7 +42878,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     static boolean prefersIjkLocalDecode(File track) {
         if (track == null) return false;
         if (MediaCompatibilityService.prefersIjk(track.getName())) return true;
-        String path = track.getAbsolutePath().toLowerCase(java.util.Locale.US);
+        String path = track.getAbsolutePath().replace('\\', '/')
+                .toLowerCase(java.util.Locale.US);
         // App-cache Play buffers — same AAC quirks as Music/YouTube saves. 2026-07-20
         String playDir = "/" + com.solar.launcher.youtube.YouTubePlayCache.DIR_NAME.toLowerCase(
                 java.util.Locale.US);
@@ -49738,6 +49749,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                     device.getName() != null ? device.getName() : device.getAddress()),
                     Toast.LENGTH_SHORT).show();
             if (currentScreenState == STATE_BLUETOOTH) startBluetoothScan();
+        } catch (SecurityException denied) {
+            Toast.makeText(this, getString(R.string.toast_bt_forget_failed),
+                    Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Toast.makeText(this, getString(R.string.toast_bt_forget_failed), Toast.LENGTH_SHORT).show();
         }
