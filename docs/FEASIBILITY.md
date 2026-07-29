@@ -1,6 +1,6 @@
 # Solar Classic feasibility and platform audit
 
-Status: implementation gate
+Status: host implementation verified; physical/release gates remain
 
 Audit date: 2026-07-28
 Target: Innioasis Y1 first; Y2 and A5 are out of scope unless explicitly stated
@@ -36,10 +36,12 @@ The following release gates remain:
 4. Exact RAM, negotiated Bluetooth behavior, decoder reliability, wheel timing,
    suspend/resume behavior, and safe media profiles still require physical Y1
    testing.
-5. The current environment can build neither the Linux loop-mounted ROM image
-   nor install to hardware as-is. It has no attached device, `adb`, JDK, or
-   Android SDK, and its Docker/WSL Linux runtime is unavailable. APK tooling can
-   be bootstrapped; a ROM build requires a privileged Linux host or CI runner.
+5. JDK and Android SDK tooling were bootstrapped outside the checkout. The
+   repository-wide unit tests, lint gate, debug APKs, platform-asset verifier,
+   and firmware-preflight tests now pass. There is still no attached physical
+   Y1, authorized platform signing material, audited local base archive, or
+   privileged Linux loop-mount runtime. A signed release/ROM therefore remains
+   correctly unavailable.
 
 ## Repository audit
 
