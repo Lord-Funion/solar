@@ -10383,7 +10383,10 @@ public class MainActivity extends Activity {
     private void triggerAutoReconnect() {
         try {
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-            if (wm != null && wm.isWifiEnabled()) {
+            boolean enabled = prefs == null
+                    || prefs.getBoolean(WifiAutoConnectPolicy.PREF_ENABLED, true);
+            if (wm != null && WifiAutoConnectPolicy.shouldRequestReconnect(
+                    enabled, wm.isWifiEnabled())) {
                 wm.reconnect();
             }
             BluetoothAdapter ba = BluetoothAdapter.getDefaultAdapter();
@@ -21792,6 +21795,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (RowKeys.WIFI_SLEEP_POWER_OFF.equals(rowKey)) {
             return stateOnOff(prefs != null && prefs.getBoolean(WifiSleepPolicy.PREF_ENABLED, true));
         }
+        if (RowKeys.WIFI_AUTO_CONNECT.equals(rowKey)) {
+            return stateOnOff(prefs == null
+                    || prefs.getBoolean(WifiAutoConnectPolicy.PREF_ENABLED, true));
+        }
         if (RowKeys.DOWNLOAD_AUTO_RESUME_WIFI.equals(rowKey)) {
             return stateOnOff(isDownloadAutoResumeWifiEnabled());
         }
@@ -22452,6 +22459,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         if (RowKeys.WIFI_SLEEP_POWER_OFF.equals(rowKey)) {
             stateText = getString(R.string.settings_preview_wifi_sleep_power_off) + "\n\n"
+                    + (stateText != null ? stateText : "");
+        }
+        if (RowKeys.WIFI_AUTO_CONNECT.equals(rowKey)) {
+            stateText = getString(R.string.settings_wifi_auto_connect_hint) + "\n\n"
                     + (stateText != null ? stateText : "");
         }
         if (RowKeys.DOWNLOAD_AUTO_RESUME_WIFI.equals(rowKey)) {
@@ -37651,6 +37662,24 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
         });
         containerSettingsItems.addView(btnWifiMenu);
+
+        LinearLayout btnWifiAutoConnect = createSettingsRow(
+                RowKeys.WIFI_AUTO_CONNECT,
+                R.string.settings_wifi_auto_connect,
+                false);
+        btnWifiAutoConnect.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                boolean enabled = prefs == null
+                        || prefs.getBoolean(WifiAutoConnectPolicy.PREF_ENABLED, true);
+                prefs.edit().putBoolean(
+                        WifiAutoConnectPolicy.PREF_ENABLED, !enabled).commit();
+                refreshSettingsPreview(RowKeys.WIFI_AUTO_CONNECT);
+                if (!enabled) triggerAutoReconnect();
+            }
+        });
+        containerSettingsItems.addView(btnWifiAutoConnect);
 
         if (ConnectivityHelper.shouldShowMenuItem(this, HomeMenuConfig.ID_PC_UPLOAD)) {
             LinearLayout btnServerMenu = createSettingsRow(RowKeys.WEB_SERVER, R.string.settings_web_server, true);

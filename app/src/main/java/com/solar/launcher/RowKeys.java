@@ -79,6 +79,7 @@ public final class RowKeys {
     public static final String WEB_SERVER = "settings.web_server";
     public static final String CONNECTIONS = "settings.connections";
     public static final String WIFI_SETUP = "settings.wifi_setup";
+    public static final String WIFI_AUTO_CONNECT = "settings.wifi_auto_connect";
     public static final String REACH = "settings.reach";
     public static final String SOULSEEK = "settings.soulseek";
     public static final String DEEZER = "settings.deezer";
@@ -354,6 +355,7 @@ public final class RowKeys {
         if (WEB_SERVER.equals(rowKey)) return R.string.settings_web_server;
         if (CONNECTIONS.equals(rowKey)) return R.string.settings_connections;
         if (WIFI_SETUP.equals(rowKey)) return R.string.settings_wifi_setup;
+        if (WIFI_AUTO_CONNECT.equals(rowKey)) return R.string.settings_wifi_auto_connect;
         if (REACH.equals(rowKey)) return R.string.settings_reach;
         if (SOULSEEK.equals(rowKey)) return R.string.settings_soulseek;
         if (DEEZER.equals(rowKey)) return R.string.settings_deezer;

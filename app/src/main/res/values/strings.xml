@@ -514,6 +514,8 @@
     <string name="settings_bluetooth_setup">Bluetooth</string>
     <string name="settings_bluetooth_pairing_pin">Bluetooth pairing PIN</string>
     <string name="settings_bluetooth_auto_reconnect">Auto-reconnect Bluetooth audio</string>
+    <string name="settings_wifi_auto_connect">Auto-connect saved Wi-Fi</string>
+    <string name="settings_wifi_auto_connect_hint">When enabled, Solar asks Android to reconnect a saved network at startup and after its idle Wi-Fi policy wakes. Turning this off does not disable Wi-Fi or forget networks.</string>
     <string name="settings_keyboard_layout">Wheel keyboard layout</string>
     <string name="settings_keyboard_layout_grouped">Grouped pages</string>
     <string name="settings_keyboard_layout_ring">Alphabet ring</string>
