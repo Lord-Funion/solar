@@ -122,17 +122,18 @@ public final class BluetoothPairingCoordinator {
         }
     }
 
-    /** Authentication failed: show a real PIN keyboard instead of retrying a guessed default. */
+    /**
+     * Authentication has already failed and the stack is no longer accepting pairing input.
+     *
+     * <p>Do not open a credential keyboard here: submitting PIN/passkey data after BOND_NONE
+     * cannot affect the dead attempt and makes Just Works headsets look like they require a PIN.
+     * Genuine credential prompts are owned by ACTION_PAIRING_REQUEST above.</p>
+     */
     @SuppressLint("MissingPermission")
     public static void onAuthFailure(Context context, BluetoothDevice device) {
-        if (context == null || device == null) return;
         String address = safeAddress(device);
-        if (address == null) return;
-        markSession(address);
-        Context app = context.getApplicationContext();
-        if (app == null) app = context;
-        showCredentialOverlay(app, address, safeName(device), MODE_PIN,
-                BluetoothAudioRepair.pairingPinForDevice(context, device));
+        Log.i(TAG, "authentication failed; discard expired pairing session addr=" + address);
+        clearSession();
     }
 
     /**
