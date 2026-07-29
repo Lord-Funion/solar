@@ -5967,6 +5967,9 @@ public final class MediaSuiteHost {
         host.stopMusicPlayback();
         host.stopNonFmPlayback();
         releaseVideoPlayer();
+        // stopNonFmPlayback() also tears down the shared video layer. Restore it only after
+        // that cleanup so the persistent progress/scrub controls remain visible for local files.
+        showVideoPlayerLayer(true);
         FrameLayout surfaceHost = host.findViewById(R.id.video_surface_host);
         if (surfaceHost == null) {
             Toast.makeText(host.context(), R.string.video_play_error, Toast.LENGTH_SHORT).show();
