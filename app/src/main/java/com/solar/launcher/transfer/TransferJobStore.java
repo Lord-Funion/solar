@@ -29,6 +29,8 @@ import java.util.UUID;
  * an operation without inventing a second worker.</p>
  */
 public final class TransferJobStore {
+    public static final String DETAIL_PAUSED_AFTER_RESTART = "Paused after restart";
+
     public enum Provider {
         SOULSEEK, PODCAST, DIRECT, IMPORT, CONVERSION, DEEZER
     }
@@ -399,7 +401,7 @@ public final class TransferJobStore {
         List<Job> snapshot = new ArrayList<Job>(jobs.values());
         for (Job job : snapshot) {
             if (!job.state.isRunning()) continue;
-            Job recovered = copy(job, State.PAUSED, "Paused after restart",
+            Job recovered = copy(job, State.PAUSED, DETAIL_PAUSED_AFTER_RESTART,
                     "Solar stopped before this transfer finished", job.doneBytes, job.totalBytes,
                     0L, -1L, job.attempt, now);
             jobs.put(job.id, recovered);

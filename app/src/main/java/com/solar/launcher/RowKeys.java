@@ -45,6 +45,8 @@ public final class RowKeys {
     public static final String DEVICE = "settings.device";
     public static final String LIBRARY = "settings.library";
     public static final String MEDIA = "settings.media";
+    public static final String DOWNLOAD_AUTO_RESUME_WIFI =
+            "settings.download_auto_resume_wifi";
     public static final String YOUTUBE_REGION = "settings.youtube.region";
     public static final String YOUTUBE_DISCOVER_DURATION =
             "settings.youtube.discover_duration";
@@ -325,6 +327,9 @@ public final class RowKeys {
         if (DEVICE.equals(rowKey)) return R.string.settings_device;
         if (LIBRARY.equals(rowKey)) return R.string.settings_library;
         if (MEDIA.equals(rowKey)) return R.string.settings_media;
+        if (DOWNLOAD_AUTO_RESUME_WIFI.equals(rowKey)) {
+            return R.string.settings_download_auto_resume_wifi;
+        }
         if (POWER.equals(rowKey)) return R.string.settings_power;
         if (USB.equals(rowKey)) return R.string.settings_usb;
         if (USB_AUTO_CONNECT.equals(rowKey)) return R.string.settings_usb_auto_connect;

@@ -123,6 +123,7 @@ import com.solar.launcher.podcast.PodcastPlayedStore;
 import com.solar.launcher.podcast.PodcastResumeStore;
 import com.solar.launcher.podcast.PodcastSubscriptions;
 import com.solar.launcher.transfer.TransferJobStore;
+import com.solar.launcher.transfer.TransferNetworkPolicy;
 
 import org.json.JSONObject;
 
@@ -884,6 +885,7 @@ public class MainActivity extends Activity {
         }
     }
     private volatile DirectDownloadControl directDownloadControl;
+    private volatile String directDownloadNetworkPausedJobId;
     private long downloadsLastUiRefreshMs;
     private final Runnable downloadsUiRefreshRunnable = new Runnable() {
         @Override
@@ -905,6 +907,7 @@ public class MainActivity extends Activity {
     private File podcastGrowingCacheFinal = null;
     private volatile boolean podcastDownloadInProgress = false;
     private volatile boolean podcastDownloadPaused = false;
+    private volatile boolean podcastPausedForNetworkLoss = false;
     private volatile long podcastDownloadBytesRead = 0;
     private volatile long podcastDownloadBytesTotal = 0;
     private long podcastGrowingPreparedBytes = 0;
@@ -3436,6 +3439,7 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 registerDeferredSystemReceivers();
+                onWifiConnectivityChanged();
                 triggerAutoReconnect();
                 if (consumePendingAlbumArtCacheRebuild()) {
                     if (!customLibrary.isEmpty()) {
@@ -3883,8 +3887,11 @@ public class MainActivity extends Activity {
 
     private void startAuthorizedDirectDownload(AuthorizedDirectDownload.Plan plan) {
         if (plan == null) return;
-        if (!ConnectivityHelper.isOnline(this)) {
-            Toast.makeText(this, getString(R.string.toast_internet_required),
+        if (TransferNetworkPolicy.shouldPause(
+                true,
+                ConnectivityHelper.isOnline(this),
+                ConnectivityHelper.isWifiAssociated(this))) {
+            Toast.makeText(this, getString(R.string.toast_wifi_unavailable),
                     Toast.LENGTH_LONG).show();
             return;
         }
@@ -3902,6 +3909,7 @@ public class MainActivity extends Activity {
                     Toast.LENGTH_LONG).show();
             return;
         }
+        directDownloadNetworkPausedJobId = null;
         DirectDownloadControl control = new DirectDownloadControl(transferId, plan);
         directDownloadControl = control;
         Toast.makeText(this,
@@ -3972,6 +3980,14 @@ public class MainActivity extends Activity {
                         directDownloadControl = null;
                     }
                     scheduleDownloadsUiRefresh();
+                    if (control.jobId.equals(directDownloadNetworkPausedJobId)) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                maybeResumeDirectDownloadAfterNetworkLoss();
+                            }
+                        });
+                    }
                 }
             }
         }, "SolarDirectAudio").start();
@@ -3993,12 +4009,14 @@ public class MainActivity extends Activity {
     private void pauseDirectDownloadForResume(TransferJobStore.Job job) {
         DirectDownloadControl control = directDownloadControl;
         if (control == null || job == null || !job.id.equals(control.jobId)) return;
+        clearDirectDownloadNetworkPause(job.id);
         control.pauseRequested = true;
         control.cancel.set(true);
         transitionTransferJob(job.id, TransferJobStore.State.PAUSED, "Paused", "");
     }
 
     private void cancelDirectDownload(TransferJobStore.Job job) {
+        if (job != null) clearDirectDownloadNetworkPause(job.id);
         DirectDownloadControl control = directDownloadControl;
         if (control != null && job != null && job.id.equals(control.jobId)) {
             control.pauseRequested = false;
@@ -4012,6 +4030,14 @@ public class MainActivity extends Activity {
 
     private void resumeDirectDownload(final TransferJobStore.Job original) {
         if (original == null || transferJobStore == null) return;
+        if (TransferNetworkPolicy.shouldPause(
+                original.wifiOnly,
+                ConnectivityHelper.isOnline(this),
+                ConnectivityHelper.isWifiAssociated(this))) {
+            Toast.makeText(this, getString(R.string.toast_wifi_unavailable),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         if (directDownloadControl != null) {
             Toast.makeText(this, getString(R.string.get_music_direct_audio_busy),
                     Toast.LENGTH_LONG).show();
@@ -4039,10 +4065,81 @@ public class MainActivity extends Activity {
                     Toast.LENGTH_LONG).show();
             return;
         }
+        clearDirectDownloadNetworkPause(original.id);
         DirectDownloadControl control = new DirectDownloadControl(original.id, plan);
         directDownloadControl = control;
-        buildDownloadJobDetailUI(transferJobStore.get(original.id));
+        if (currentScreenState == STATE_DOWNLOADS) {
+            TransferJobStore.Job resumed = transferJobStore.get(original.id);
+            if (resumed != null && original.id.equals(downloadsDetailJobId)) {
+                buildDownloadJobDetailUI(resumed);
+            } else {
+                scheduleDownloadsUiRefresh();
+            }
+        }
         runAuthorizedDirectDownload(control);
+    }
+
+    private void clearDirectDownloadNetworkPause(String jobId) {
+        if (jobId != null && jobId.equals(directDownloadNetworkPausedJobId)) {
+            directDownloadNetworkPausedJobId = null;
+        }
+    }
+
+    private boolean isDownloadAutoResumeWifiEnabled() {
+        return prefs == null || prefs.getBoolean(
+                TransferNetworkPolicy.PREF_AUTO_RESUME_WIFI, true);
+    }
+
+    private void pauseDirectDownloadForNetworkLoss(
+            boolean internetAvailable, boolean wifiAssociated) {
+        DirectDownloadControl control = directDownloadControl;
+        if (control == null || transferJobStore == null) return;
+        TransferJobStore.Job job = transferJobStore.get(control.jobId);
+        if (job == null || job.provider != TransferJobStore.Provider.DIRECT
+                || !job.state.isRunning()
+                || !TransferNetworkPolicy.shouldPause(
+                        job.wifiOnly, internetAvailable, wifiAssociated)
+                || !TransferJobStore.canTransition(
+                        job.state, TransferJobStore.State.PAUSED)) {
+            return;
+        }
+        directDownloadNetworkPausedJobId = job.id;
+        control.pauseRequested = true;
+        control.cancel.set(true);
+        transitionTransferJob(
+                job.id,
+                TransferJobStore.State.PAUSED,
+                "Paused - Wi-Fi unavailable",
+                "");
+    }
+
+    private void maybeResumeDirectDownloadAfterNetworkLoss() {
+        String jobId = directDownloadNetworkPausedJobId;
+        if (jobId == null || directDownloadControl != null || transferJobStore == null) return;
+        TransferJobStore.Job job = transferJobStore.get(jobId);
+        if (job == null || job.provider != TransferJobStore.Provider.DIRECT
+                || job.state != TransferJobStore.State.PAUSED) {
+            clearDirectDownloadNetworkPause(jobId);
+            return;
+        }
+        if (!TransferNetworkPolicy.shouldAutoResume(
+                isDownloadAutoResumeWifiEnabled(),
+                job.wifiOnly,
+                ConnectivityHelper.isOnline(this),
+                ConnectivityHelper.isWifiAssociated(this))) {
+            return;
+        }
+        clearDirectDownloadNetworkPause(jobId);
+        resumeDirectDownload(job);
+    }
+
+    private void armRecoveredDirectDownloadAutoResume() {
+        if (transferJobStore == null || directDownloadNetworkPausedJobId != null) return;
+        for (TransferJobStore.Job job : transferJobStore.list()) {
+            if (!TransferNetworkPolicy.isSafeRestartAutoResumeCandidate(job)) continue;
+            directDownloadNetworkPausedJobId = job.id;
+            return;
+        }
     }
 
     private void deleteDirectPartialForJob(TransferJobStore.Job job) {
@@ -4601,6 +4698,7 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         try {
             transferJobStore = TransferJobStore.get(this);
+            armRecoveredDirectDownloadAutoResume();
         } catch (RuntimeException e) {
             android.util.Log.w("Solar", "Transfer journal unavailable", e);
             transferJobStore = null;
@@ -10153,12 +10251,17 @@ public class MainActivity extends Activity {
     /** NTP / geo / Reach probes — disk+network; must not run mid-scroll. */
     private void runDeferredInternetAvailabilityHooks() {
         boolean internetAvailable = hasInternetConnection();
-        if (!internetAvailable) {
-            pausePodcastBackgroundDownload();
+        boolean wifiAssociated = ConnectivityHelper.isWifiAssociated(this);
+        boolean transferNetworkUnavailable = TransferNetworkPolicy.shouldPause(
+                true, internetAvailable, wifiAssociated);
+        if (transferNetworkUnavailable) {
+            pausePodcastBackgroundDownload(true);
             pauseSoulseekDownloadForNetworkLoss();
+            pauseDirectDownloadForNetworkLoss(internetAvailable, wifiAssociated);
         } else {
             maybeResumePodcastDownload();
             maybeResumeSoulseekDownloadAfterNetworkLoss();
+            maybeResumeDirectDownloadAfterNetworkLoss();
         }
         if (internetAvailable && soulseekReachEnabled) {
             SolarDiagnosticReporter.onReachInternetAvailable(this, prefs);
@@ -21689,6 +21792,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (RowKeys.WIFI_SLEEP_POWER_OFF.equals(rowKey)) {
             return stateOnOff(prefs != null && prefs.getBoolean(WifiSleepPolicy.PREF_ENABLED, true));
         }
+        if (RowKeys.DOWNLOAD_AUTO_RESUME_WIFI.equals(rowKey)) {
+            return stateOnOff(isDownloadAutoResumeWifiEnabled());
+        }
         if (RowKeys.FULL_WIDTH.equals(rowKey)) return stateOnOff(isFullWidthMenus);
         if (RowKeys.MENU_ITEM_PADDING.equals(rowKey)) {
             return stateOnOff(ThemeManager.isMenuItemPaddingEnabled(prefs, false));
@@ -22346,6 +22452,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         if (RowKeys.WIFI_SLEEP_POWER_OFF.equals(rowKey)) {
             stateText = getString(R.string.settings_preview_wifi_sleep_power_off) + "\n\n"
+                    + (stateText != null ? stateText : "");
+        }
+        if (RowKeys.DOWNLOAD_AUTO_RESUME_WIFI.equals(rowKey)) {
+            stateText = getString(R.string.settings_download_auto_resume_wifi_hint) + "\n\n"
                     + (stateText != null ? stateText : "");
         }
         if (RowKeys.USB_TURN_ON.equals(rowKey)) {
@@ -35862,6 +35972,27 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         });
         containerSettingsItems.addView(btnVideo);
 
+        LinearLayout btnDownloadAutoResume = createSettingsRow(
+                RowKeys.DOWNLOAD_AUTO_RESUME_WIFI,
+                R.string.settings_download_auto_resume_wifi,
+                false);
+        btnDownloadAutoResume.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                boolean enabled = !isDownloadAutoResumeWifiEnabled();
+                prefs.edit().putBoolean(
+                        TransferNetworkPolicy.PREF_AUTO_RESUME_WIFI, enabled).commit();
+                refreshSettingsPreview(RowKeys.DOWNLOAD_AUTO_RESUME_WIFI);
+                if (enabled) {
+                    maybeResumePodcastDownload();
+                    maybeResumeSoulseekDownloadAfterNetworkLoss();
+                    maybeResumeDirectDownloadAfterNetworkLoss();
+                }
+            }
+        });
+        containerSettingsItems.addView(btnDownloadAutoResume);
+
         LinearLayout btnYouTubeRegion = createSettingsRow(
                 RowKeys.YOUTUBE_REGION, R.string.settings_youtube_region, false);
         btnYouTubeRegion.setOnClickListener(new View.OnClickListener() {
@@ -44661,12 +44792,16 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     }
 
     private void resumeTransferJob(TransferJobStore.Job job) {
-        if (!ConnectivityHelper.isOnline(this)) {
-            Toast.makeText(this, getString(R.string.toast_internet_required),
+        if (job == null || TransferNetworkPolicy.shouldPause(
+                job.wifiOnly,
+                ConnectivityHelper.isOnline(this),
+                ConnectivityHelper.isWifiAssociated(this))) {
+            Toast.makeText(this, getString(R.string.toast_wifi_unavailable),
                     Toast.LENGTH_LONG).show();
             return;
         }
         if (job.provider == TransferJobStore.Provider.SOULSEEK) {
+            soulseekPausedForNetworkLoss = false;
             SoulseekClient.Result result = new SoulseekClient.Result(
                     job.sourceName, job.remoteId, job.totalBytes, 0, 0,
                     true, false, 0, 0);
@@ -44679,6 +44814,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             return;
         }
         if (job.provider == TransferJobStore.Provider.PODCAST) {
+            podcastPausedForNetworkLoss = false;
             resumePodcastTransferJob(job);
             return;
         }
@@ -55997,6 +56133,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private void maybeResumeSoulseekDownloadAfterNetworkLoss() {
         if (!soulseekPausedForNetworkLoss || soulseekActiveDownload == null
                 || soulseekClient == null || !hasInternetConnection()
+                || !ConnectivityHelper.isWifiAssociated(this)
+                || !isDownloadAutoResumeWifiEnabled()
                 || !soulseekClient.isLoggedIn() || soulseekClient.isTransferActive()) return;
         File dest = soulseekPendingAction == SOULSEEK_ACTION_SAVE
                 ? rootFolder : reachCacheDir();
@@ -56857,13 +56995,20 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     }
 
     private void pausePodcastBackgroundDownload() {
+        pausePodcastBackgroundDownload(false);
+    }
+
+    private void pausePodcastBackgroundDownload(boolean networkLoss) {
         if (!podcastDownloadInProgress && !podcastPartialPlaybackStarted) return;
         if (podcastDownloadInProgress) {
             transitionTransferJob(podcastStreamTransferJobId,
-                    TransferJobStore.State.PAUSED, "Paused", "");
+                    TransferJobStore.State.PAUSED,
+                    networkLoss ? "Paused - Wi-Fi unavailable" : "Paused",
+                    "");
             podcastDownloadCancel.set(true);
             podcastDownloadInProgress = false;
             podcastDownloadPaused = true;
+            podcastPausedForNetworkLoss = networkLoss;
             if (podcastGrowingCacheFile == null && playback.isPodcastActive()
                     && playback.podcastIndex() >= 0
                     && playback.podcastIndex() < playback.podcastQueue().size()) {
@@ -56892,6 +57037,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         podcastDownloadCancel = new java.util.concurrent.atomic.AtomicBoolean(false);
         podcastDownloadInProgress = false;
         podcastDownloadPaused = false;
+        podcastPausedForNetworkLoss = false;
         podcastPartialPlaybackStarted = false;
         podcastRecoveryInFlight = false;
         progressHandler.removeCallbacks(podcastGrowingEdgePoll);
@@ -56902,11 +57048,14 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private void maybeResumePodcastDownload() {
         if (!podcastDownloadPaused || podcastDownloadInProgress || !playback.isPodcastActive()) return;
         if (!ConnectivityHelper.isOnline(this)) return;
+        if (!ConnectivityHelper.isWifiAssociated(this)) return;
+        if (podcastPausedForNetworkLoss && !isDownloadAutoResumeWifiEnabled()) return;
         if (podcastGrowingCacheFile == null || !podcastGrowingCacheFile.isFile()) return;
         if (podcastGrowingCacheFinal != null && podcastGrowingCacheFinal.isFile()) return;
         long partial = podcastGrowingCacheFile.length();
         if (podcastDownloadBytesTotal > 0 && partial >= podcastDownloadBytesTotal) return;
         podcastDownloadPaused = false;
+        podcastPausedForNetworkLoss = false;
         podcastDownloadCancel = new java.util.concurrent.atomic.AtomicBoolean(false);
         resumePodcastDownload(playback.podcastIndex(),
                 playback.podcastQueue().get(playback.podcastIndex()), podcastLoadGeneration);
@@ -57516,6 +57665,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         podcastGrowingSeekMs = 0;
         podcastGrowingReprepareInFlight = false;
         podcastDownloadPaused = false;
+        podcastPausedForNetworkLoss = false;
         podcastDownloadRetryCount = 0;
         podcastRecoveryInFlight = false;
         podcastDownloadLastProgressMs = 0;
@@ -57692,6 +57842,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 journalTarget.getAbsolutePath(), PODCAST_DOWNLOAD_MAX_RETRIES + 1);
         final String streamTransferJobId = podcastStreamTransferJobId;
         podcastDownloadPaused = false;
+        podcastPausedForNetworkLoss = false;
         if (!resume) {
             updatePodcastLoadUi(gen, getString(R.string.podcasts_downloading), 0);
         } else {

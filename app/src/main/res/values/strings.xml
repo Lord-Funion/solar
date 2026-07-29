@@ -433,6 +433,8 @@
     <string name="settings_sub_library">Settings: Library</string>
     <string name="settings_media">Media</string>
     <string name="settings_sub_media">Settings: Media</string>
+    <string name="settings_download_auto_resume_wifi">Resume downloads on Wi-Fi</string>
+    <string name="settings_download_auto_resume_wifi_hint">Automatically resumes a download only when Solar paused it because Wi-Fi was lost. Manually paused downloads stay paused.</string>
     <string name="settings_youtube_region">YouTube metadata region</string>
     <string name="settings_youtube_region_auto">Auto (%1$s)</string>
     <string name="settings_youtube_discover_duration">Discover video length</string>
