@@ -267,6 +267,8 @@ public class MainActivity extends Activity {
     static final int STATE_MIX = 34;
     static final int STATE_DOWNLOADS = 35;
     private static final int REQUEST_MEDIA_IMPORT = 0x5349;
+    private static final String PREF_SOULSEEK_USE_NOTICE =
+            "soulseek_authorized_use_notice_v1";
     private static final int KEYBOARD_WIFI = 0;
     private static final int KEYBOARD_SOULSEEK_USER = 1;
     private static final int KEYBOARD_SOULSEEK_PASS = 2;
@@ -17780,6 +17782,34 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
         }
         changeScreen(STATE_SOULSEEK);
+    }
+
+    /**
+     * First-use acknowledgement required before a Soulseek search or transfer.
+     * Browsing settings/account state remains available without accepting it.
+     */
+    private boolean ensureSoulseekUseNotice(final Runnable continueAfterAcceptance) {
+        if (prefs != null && prefs.getBoolean(PREF_SOULSEEK_USE_NOTICE, false)) {
+            return true;
+        }
+        showThemedConfirm(
+                getString(R.string.soulseek_use_notice_title),
+                getString(R.string.soulseek_use_notice_message),
+                getString(R.string.soulseek_use_notice_accept),
+                getString(R.string.common_cancel),
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        if (prefs != null) {
+                            prefs.edit().putBoolean(PREF_SOULSEEK_USE_NOTICE, true).commit();
+                        }
+                        if (continueAfterAcceptance != null) {
+                            continueAfterAcceptance.run();
+                        }
+                    }
+                },
+                null);
+        return false;
     }
 
     private void openSoulseekScreen() {
@@ -53159,6 +53189,15 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private void fetchGetMusicResults(final String query) {
         if (query == null || query.trim().isEmpty()) return;
         if (!requireInternet(R.string.toast_internet_required)) return;
+        if (getMusicReachSearchActive()
+                && !ensureSoulseekUseNotice(new Runnable() {
+                    @Override
+                    public void run() {
+                        fetchGetMusicResults(query);
+                    }
+                })) {
+            return;
+        }
         soulseekLastQuery = query.trim();
         GetMusicSearchHistory.remember(prefs, soulseekLastQuery);
         getMusicSearchGen++;
@@ -54101,6 +54140,14 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             return;
         }
         if (!requireInternet(R.string.soulseek_wifi_required)) return;
+        if (!ensureSoulseekUseNotice(new Runnable() {
+            @Override
+            public void run() {
+                fetchSoulseekResults(query);
+            }
+        })) {
+            return;
+        }
         if (!requireReachPeerConnectivity()) return;
         soulseekLastQuery = query.trim();
         SoulseekSearchHistory.remember(prefs, soulseekLastQuery);
@@ -54748,6 +54795,15 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     /** Library browse save: stay on browse list; failures are silent (no crash, no failure UI). */
     private void startSoulseekBrowseBackgroundSave(final SoulseekClient.Result r, final boolean thankAfter) {
+        if (r == null) return;
+        if (!ensureSoulseekUseNotice(new Runnable() {
+            @Override
+            public void run() {
+                startSoulseekBrowseBackgroundSave(r, thankAfter);
+            }
+        })) {
+            return;
+        }
         if (!requireInternet(R.string.soulseek_wifi_required)) return;
         if (!requireReachPeerConnectivity()) return;
         stopSoulseekActionRefresh();
@@ -54941,6 +54997,15 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     }
 
     private void startSoulseekTransfer(final SoulseekClient.Result r, final int action) {
+        if (r == null) return;
+        if (!ensureSoulseekUseNotice(new Runnable() {
+            @Override
+            public void run() {
+                startSoulseekTransfer(r, action);
+            }
+        })) {
+            return;
+        }
         if (!requireInternet(R.string.soulseek_wifi_required)) return;
         if (!requireReachPeerConnectivity()) return;
         stopSoulseekActionRefresh();
