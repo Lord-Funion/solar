@@ -107,6 +107,7 @@ import com.solar.launcher.ui.UiBusy;
 import com.solar.launcher.media.FlowHoldHintPolicy;
 import com.solar.launcher.media.MediaSuiteHost;
 import com.solar.launcher.media.MediaSuiteHostAdapter;
+import com.solar.launcher.media.MediaCompatibilityService;
 import com.solar.launcher.media.MediaTransportBar;
 import com.solar.launcher.media.NowPlayingTipPolicy;
 import com.solar.launcher.media.StreamSeekBuffer;
@@ -42007,15 +42008,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
     }
     static boolean isAudioFile(File f) {
-        if (f == null || !f.isFile())
-            return false;
-        String name = f.getName().toLowerCase();
-        // 2026-07-15 — Include opus/webm so Piped YouTube saves still index into Songs.
-        // Had: only mp3/m4a/… — .opus under Music/YouTube never appeared for play.
-        return name.endsWith(".mp3") || name.endsWith(".flac") || name.endsWith(".wav") || name.endsWith(".ogg")
-                || name.endsWith(".m4a") || name.endsWith(".m4b") || name.endsWith(".aac")
-                || name.endsWith(".ape") || name.endsWith(".wma")
-                || name.endsWith(".opus") || name.endsWith(".webm");
+        return f != null && f.isFile()
+                && MediaCompatibilityService.isSupportedAudioName(f.getName());
     }
 
     /**
@@ -42026,8 +42020,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
      */
     static boolean prefersIjkLocalDecode(File track) {
         if (track == null) return false;
-        String name = track.getName().toLowerCase(java.util.Locale.US);
-        if (name.endsWith(".opus") || name.endsWith(".webm")) return true;
+        if (MediaCompatibilityService.prefersIjk(track.getName())) return true;
         String path = track.getAbsolutePath().toLowerCase(java.util.Locale.US);
         // App-cache Play buffers — same AAC quirks as Music/YouTube saves. 2026-07-20
         String playDir = "/" + com.solar.launcher.youtube.YouTubePlayCache.DIR_NAME.toLowerCase(
@@ -65289,7 +65282,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         markAudioSourceNetwork(false);
         com.solar.launcher.audio.SolarTransport.get().playFile(
-                track, seek, /*preferIjk*/ false, !isPausedByHand);
+                track, seek, prefersIjkLocalDecode(track), !isPausedByHand);
         return true;
     }
 
