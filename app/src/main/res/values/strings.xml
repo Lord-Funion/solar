@@ -492,6 +492,7 @@
     <string name="about_update_unavailable">Updates unavailable. Check Wi‑Fi connection</string>
     <string name="settings_bluetooth_setup">Bluetooth</string>
     <string name="settings_bluetooth_pairing_pin">Bluetooth pairing PIN</string>
+    <string name="settings_bluetooth_auto_reconnect">Auto-reconnect Bluetooth audio</string>
     <string name="settings_display_brightness">Brightness</string>
     <string name="settings_storage_info">Storage info</string>
     <string name="settings_y2_hold_ok_to_sleep">Hold OK to sleep</string>
@@ -653,6 +654,12 @@
     <string name="bt_pairing_consent_body">Allow %1$s to connect to this player?</string>
     <string name="bt_pairing_pair">Pair</string>
     <string name="bt_status_connecting">Connecting…</string>
+    <string name="bluetooth_diagnostics">Connection details</string>
+    <string name="bluetooth_diagnostics_title">Bluetooth details</string>
+    <string name="bluetooth_diagnostics_body">Adapter: %1$s\nDevice: %2$s\nBond: %3$s\nAudio profile: %4$s\nActive route: %5$s\nProfiles: %6$s\nCodec: %7$s\nLast disconnect: %8$s\nReconnect attempts: %9$s\nLast event: %10$s</string>
+    <string name="bluetooth_diagnostics_reconnect">Reconnect last device</string>
+    <string name="bluetooth_diagnostics_refresh">Refresh</string>
+    <string name="bluetooth_diagnostics_no_bond">The last Bluetooth device is no longer bonded.</string>
     <string name="keyboard_soulseek_username">Soulseek Username</string>
     <string name="keyboard_soulseek_password">Reach Password</string>
     <!-- 2026-07-20 — Hold tip names Capitals/Symbols (was Aa/#). Reversal: restore Aa/#. -->

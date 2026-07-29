@@ -2667,6 +2667,8 @@ public class MainActivity extends Activity {
     private List<String> foundWifiNetworks = new ArrayList<String>();
     private String pairingDeviceAddress;
     private BluetoothA2dp bluetoothA2dp;
+    private boolean a2dpProfileRequested;
+    private boolean a2dpProfileClosing;
     private BluetoothDevice pendingA2dpDevice;
     private String connectedA2dpAddress;
     /** User tapped Connect on a paired device — start queue on A2DP when link comes up. */
@@ -2685,6 +2687,7 @@ public class MainActivity extends Activity {
             // 2026-07-19 — Escalate silent PIN to overlay if still negotiating this address.
             String addr = btConnectingAddress;
             if (addr != null) {
+                BluetoothDiagnostics.recordConnectionTimeout(MainActivity.this, addr);
                 BluetoothPairingCoordinator.onNegotiationTimeout(MainActivity.this, addr);
             }
             endBtConnect();
@@ -2713,6 +2716,7 @@ public class MainActivity extends Activity {
         @Override
         public void onServiceConnected(int profile, BluetoothProfile proxy) {
             if (profile != BluetoothProfile.A2DP) return;
+            a2dpProfileRequested = false;
             bluetoothA2dp = (BluetoothA2dp) proxy;
             if (pendingA2dpDevice != null) {
                 connectA2dpNow(pendingA2dpDevice);
@@ -2724,7 +2728,18 @@ public class MainActivity extends Activity {
 
         @Override
         public void onServiceDisconnected(int profile) {
-            if (profile == BluetoothProfile.A2DP) bluetoothA2dp = null;
+            if (profile != BluetoothProfile.A2DP) return;
+            bluetoothA2dp = null;
+            a2dpProfileRequested = false;
+            if (a2dpProfileClosing || isFinishing()) return;
+            BluetoothDiagnostics.recordProfileFailure(MainActivity.this);
+            BluetoothAudioRepair.requestAutoRepair(MainActivity.this, pendingA2dpDevice);
+            progressHandler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (!a2dpProfileClosing && !isFinishing()) ensureA2dpProfile();
+                }
+            }, 750L);
         }
     };
 
@@ -18621,6 +18636,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
         }
 
+        addBluetoothDiagnosticsRow();
+
         if (!isOn) {
             restoreBluetoothListFocus(restoreFocusAddress, requestFocus);
             updateNetworkRescanLoop();
@@ -18644,6 +18661,61 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
         triggerBluetoothDiscovery(false);
         updateNetworkRescanLoop();
+    }
+
+    private void addBluetoothDiagnosticsRow() {
+        Button details = createListButton(getString(R.string.bluetooth_diagnostics));
+        details.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                showBluetoothDiagnostics();
+            }
+        });
+        containerBtItems.addView(details);
+    }
+
+    private void showBluetoothDiagnostics() {
+        final BluetoothDiagnostics.Snapshot snapshot =
+                BluetoothDiagnostics.capture(this, connectedA2dpAddress);
+        String body = getString(R.string.bluetooth_diagnostics_body,
+                snapshot.adapterState,
+                snapshot.deviceName,
+                snapshot.bondState,
+                snapshot.a2dpState,
+                snapshot.activeRoute,
+                snapshot.supportedProfiles,
+                snapshot.codec,
+                snapshot.lastDisconnect,
+                snapshot.reconnectSummary,
+                snapshot.lastEvent);
+        boolean canRetry = snapshot.lastAddress != null && !snapshot.lastAddress.isEmpty();
+        showThemedConfirm(getString(R.string.bluetooth_diagnostics_title), body,
+                getString(canRetry
+                        ? R.string.bluetooth_diagnostics_reconnect
+                        : R.string.bluetooth_diagnostics_refresh),
+                getString(R.string.wifi_diagnostics_close),
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        if (snapshot.lastAddress == null || snapshot.lastAddress.isEmpty()) {
+                            showBluetoothDiagnostics();
+                        } else {
+                            retryBluetoothFromDiagnostics(snapshot.lastAddress);
+                        }
+                    }
+                });
+    }
+
+    private void retryBluetoothFromDiagnostics(String address) {
+        BluetoothDevice device = bluetoothDeviceByAddress(address);
+        if (device == null || device.getBondState() != BluetoothDevice.BOND_BONDED) {
+            Toast.makeText(this, getString(R.string.bluetooth_diagnostics_no_bond),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        beginBtConnect(device);
+        connectBluetoothAudio(device, true);
     }
 
     @android.annotation.SuppressLint("MissingPermission")
@@ -18975,14 +19047,21 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     @android.annotation.SuppressLint("MissingPermission")
     private void ensureA2dpProfile() {
-        if (bluetoothA2dp != null) return;
+        if (bluetoothA2dp != null || a2dpProfileRequested || a2dpProfileClosing) return;
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
         if (adapter == null || !adapter.isEnabled()) return;
-        adapter.getProfileProxy(this, a2dpProfileListener, BluetoothProfile.A2DP);
+        try {
+            a2dpProfileRequested =
+                    adapter.getProfileProxy(this, a2dpProfileListener, BluetoothProfile.A2DP);
+        } catch (Exception e) {
+            a2dpProfileRequested = false;
+            BluetoothDiagnostics.recordProfileFailure(this);
+        }
     }
 
     @android.annotation.SuppressLint("MissingPermission")
     private void reconnectLastBluetoothAudio() {
+        if (!BluetoothAudioRepair.isAutoReconnectEnabled(this)) return;
         String addr = prefs.getString(PREF_LAST_BT_AUDIO, null);
         if (addr == null) return;
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
@@ -19077,6 +19156,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private void connectA2dpNow(BluetoothDevice device) {
         try {
             boolean ok = BluetoothAudioRepair.connectA2dp(this, bluetoothA2dp, device, true);
+            BluetoothDiagnostics.recordReconnectAttempt(this, device, 1, ok,
+                    BluetoothAudioRepair.isA2dpConnected(bluetoothA2dp, device));
             // #region agent log
             try {
                 org.json.JSONObject d = new org.json.JSONObject();
@@ -19346,10 +19427,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
         }
 
+        addWifiDiagnosticsRow();
+
         if (!isOn)
             return;
-
-        addWifiDiagnosticsRow();
 
         if (results != null) {
             applyWifiScanCache(results);
@@ -20870,6 +20951,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         if (RowKeys.BLUETOOTH_PAIRING_PIN.equals(rowKey)) {
             return BluetoothAudioRepair.pairingPinForAddress(this, null);
+        }
+        if (RowKeys.BLUETOOTH_AUTO_RECONNECT.equals(rowKey)) {
+            return stateOnOff(BluetoothAudioRepair.isAutoReconnectEnabled(this));
         }
         if (RowKeys.DEBUG_RADIO_EXPERIMENT.equals(rowKey)) {
             return stateOnOff(com.solar.launcher.radio.RadioExperiment.isEnabled(prefs));
@@ -24236,18 +24320,16 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
         });
 
-        if (isWifiContextExpanded()) {
-            headers.add(Boolean.FALSE);
-            labels.add(getString(R.string.wifi_diagnostics));
-            states.add(null);
-            iconKeys.add(null);
-            actions.add(new Runnable() {
-                @Override
-                public void run() {
-                    showWifiDiagnostics();
-                }
-            });
-        }
+        headers.add(Boolean.FALSE);
+        labels.add(getString(R.string.wifi_diagnostics));
+        states.add(null);
+        iconKeys.add(null);
+        actions.add(new Runnable() {
+            @Override
+            public void run() {
+                showWifiDiagnostics();
+            }
+        });
 
         if (isWifiContextExpanded() && connected.isEmpty() && scanned.isEmpty()
                 && (isWifiPowerOn() || wifiContextPendingEnable) && !wifiContextScanActive) {
@@ -24604,6 +24686,17 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
         });
 
+        headers.add(Boolean.FALSE);
+        labels.add(getString(R.string.bluetooth_diagnostics));
+        states.add(null);
+        iconKeys.add(null);
+        actions.add(new Runnable() {
+            @Override
+            public void run() {
+                showBluetoothDiagnostics();
+            }
+        });
+
         final BluetoothDevice focused = bluetoothContextDeviceFromLabel(focusLabel);
         if (focused != null && focused.getBondState() == BluetoothDevice.BOND_BONDED) {
             headers.add(Boolean.FALSE);
@@ -24797,6 +24890,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (label.equals(getString(R.string.context_action_forget_bluetooth))) return null;
         if (label.equals(getString(R.string.context_bluetooth_scanning))) return null;
         if (label.equals(getString(R.string.status_bluetooth_scan))) return null;
+        if (label.equals(getString(R.string.bluetooth_diagnostics))) return null;
         for (String addr : foundBtDevices) {
             BluetoothDevice d = bluetoothDeviceByAddress(addr);
             if (d == null) continue;
@@ -36614,6 +36708,24 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
         });
         containerSettingsItems.addView(btnBtMenu);
+
+        LinearLayout btnBtAutoReconnect = createSettingsRow(
+                RowKeys.BLUETOOTH_AUTO_RECONNECT,
+                R.string.settings_bluetooth_auto_reconnect, false);
+        btnBtAutoReconnect.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                boolean enabled = !BluetoothAudioRepair.isAutoReconnectEnabled(
+                        MainActivity.this);
+                prefs.edit()
+                        .putBoolean(BluetoothAudioRepair.PREF_AUTO_RECONNECT, enabled)
+                        .apply();
+                refreshSettingsPreview(RowKeys.BLUETOOTH_AUTO_RECONNECT);
+                if (enabled) reconnectLastBluetoothAudio();
+            }
+        });
+        containerSettingsItems.addView(btnBtAutoReconnect);
 
         if (DeviceFeatures.isY1()) {
             LinearLayout btnBtPin = createSettingsRow(RowKeys.BLUETOOTH_PAIRING_PIN, R.string.settings_bluetooth_pairing_pin, false);
@@ -48567,7 +48679,18 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         try {
             if (device.getBondState() != BluetoothDevice.BOND_BONDED) return;
             Method removeBond = device.getClass().getMethod("removeBond");
-            removeBond.invoke(device);
+            Object result = removeBond.invoke(device);
+            boolean accepted = !(result instanceof Boolean) || (Boolean) result;
+            if (!accepted) {
+                Toast.makeText(this, getString(R.string.toast_bt_forget_failed),
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String address = device.getAddress();
+            BluetoothAudioRepair.clearRememberedDevice(this, address);
+            if (address != null && address.equals(connectedA2dpAddress)) {
+                connectedA2dpAddress = null;
+            }
             Toast.makeText(this, getString(R.string.toast_bt_forgotten,
                     device.getName() != null ? device.getName() : device.getAddress()),
                     Toast.LENGTH_SHORT).show();
@@ -61174,6 +61297,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             unregisterReceiver(contextHoldThrobberReceiver);
         } catch (Exception ignored) {}
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        a2dpProfileClosing = true;
+        a2dpProfileRequested = false;
         if (adapter != null && bluetoothA2dp != null) {
             adapter.closeProfileProxy(BluetoothProfile.A2DP, bluetoothA2dp);
             bluetoothA2dp = null;

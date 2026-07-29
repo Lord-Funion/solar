@@ -167,6 +167,7 @@ public final class RowKeys {
     public static final String SYSTEM_UPDATE = "settings.system_update";
     public static final String BLUETOOTH_SETUP = "settings.bluetooth_setup";
     public static final String BLUETOOTH_PAIRING_PIN = "settings.bluetooth_pairing_pin";
+    public static final String BLUETOOTH_AUTO_RECONNECT = "settings.bluetooth_auto_reconnect";
     public static final String BRIGHTNESS = "settings.brightness";
     public static final String STORAGE = "settings.storage";
     /** Legacy — prefer Y2_PRIMARY_STORAGE; scans always include every mounted volume. */
@@ -408,6 +409,7 @@ public final class RowKeys {
         if (SYSTEM_UPDATE.equals(rowKey)) return R.string.settings_app_version;
         if (BLUETOOTH_SETUP.equals(rowKey)) return R.string.settings_bluetooth_setup;
         if (BLUETOOTH_PAIRING_PIN.equals(rowKey)) return R.string.settings_bluetooth_pairing_pin;
+        if (BLUETOOTH_AUTO_RECONNECT.equals(rowKey)) return R.string.settings_bluetooth_auto_reconnect;
         if (BRIGHTNESS.equals(rowKey)) return R.string.settings_display_brightness;
         if (STORAGE.equals(rowKey)) return R.string.settings_storage_info;
         if (Y2_INTERNAL_MEDIA.equals(rowKey)) return R.string.settings_y2_internal_media;
