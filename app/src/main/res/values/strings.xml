@@ -1965,6 +1965,8 @@ Press Back to cancel and restore the original order.</string>
     <string name="youtube_discover_reason_more_like">More like a choice you made</string>
     <string name="youtube_discover_reason_subscribed">From a channel you subscribe to</string>
     <string name="youtube_discover_reason_liked">From your liked videos</string>
+    <string name="youtube_discover_reason_local_artist">Similar to %1$s in your music library</string>
+    <string name="youtube_discover_reason_local_genre">Matches the %1$s genre in your music library</string>
     <string name="youtube_discover_reason_search">Similar to “%1$s”</string>
     <string name="youtube_discover_reason_research">Similar to your research list</string>
     <string name="youtube_discover_reason_popular">Popular in your region</string>

@@ -62,6 +62,7 @@ import com.solar.launcher.youtube.YouTubeDownloader;
 import com.solar.launcher.youtube.YouTubeAcquisitionPolicy;
 import com.solar.launcher.youtube.YouTubeBookmarks;
 import com.solar.launcher.youtube.YouTubeDiscoverFeedback;
+import com.solar.launcher.youtube.YouTubeLocalLibrarySignals;
 import com.solar.launcher.youtube.YouTubeDiscoverRanker;
 import com.solar.launcher.youtube.YouTubeDiscoverSignals;
 import com.solar.launcher.youtube.YouTubeProgressiveCache;
@@ -371,12 +372,15 @@ public final class MediaSuiteHost {
     /** True when visible official metadata came from an expired offline cache entry. */
     private boolean youtubeMetadataStale;
     private boolean youtubeDiscoverSignalsLoading;
+    private boolean youtubeDiscoverLocalSignalsLoading;
     private boolean youtubeDiscoverPopularStale;
     private final List<YouTubeVideo> youtubeDiscoverPopular =
             new ArrayList<YouTubeVideo>();
     private final List<String> youtubeDiscoverReasons = new ArrayList<String>();
     private YouTubeDiscoverSignals youtubeDiscoverSignals =
             new YouTubeDiscoverSignals(null, null, false, false);
+    private YouTubeLocalLibrarySignals youtubeLocalLibrarySignals =
+            YouTubeLocalLibrarySignals.empty();
     private String youtubeNowPlayingTitle;
     private String youtubeNowPlayingId;
     /**
@@ -3975,9 +3979,13 @@ public final class MediaSuiteHost {
         } else {
             virtualLabels.add(host.getString(R.string.youtube_results_header));
         }
-        if (youtubeShowingDiscover && youtubeDiscoverSignalsLoading) {
+        if (youtubeShowingDiscover
+                && (youtubeDiscoverSignalsLoading
+                        || youtubeDiscoverLocalSignalsLoading)) {
             virtualSubtitles.add(host.getString(R.string.youtube_discover_personalizing));
-        } else if (youtubeShowingDiscover && youtubeDiscoverSignals.partial) {
+        } else if (youtubeShowingDiscover
+                && (youtubeDiscoverSignals.partial
+                        || youtubeLocalLibrarySignals.partial)) {
             virtualSubtitles.add(host.getString(R.string.youtube_discover_partial));
         } else {
             virtualSubtitles.add(youtubeMetadataStale
@@ -4548,6 +4556,8 @@ public final class MediaSuiteHost {
         youtubeAppending = false;
         youtubeLoading = true;
         youtubeDiscoverSignalsLoading = true;
+        youtubeDiscoverLocalSignalsLoading = true;
+        youtubeLocalLibrarySignals = YouTubeLocalLibrarySignals.empty();
         youtubeMetadataStale = false;
         youtubeDiscoverPopularStale = false;
         youtubeDiscoverPopular.clear();
@@ -4621,6 +4631,31 @@ public final class MediaSuiteHost {
                 applyYouTubeDiscoverRanking();
             }
         });
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                } catch (RuntimeException ignored) {}
+                final YouTubeLocalLibrarySignals local =
+                        YouTubeLocalLibrarySignals.load(host.context());
+                host.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (gen != youtubeLoadGen
+                                || host.getCurrentScreenState()
+                                        != STATE_YOUTUBE_BROWSE) {
+                            return;
+                        }
+                        youtubeDiscoverLocalSignalsLoading = false;
+                        youtubeLocalLibrarySignals = local;
+                        applyYouTubeDiscoverRanking();
+                    }
+                });
+            }
+        }, "YouTubeLocalSignals").start();
     }
 
     private void applyYouTubeDiscoverRanking() {
@@ -4635,6 +4670,8 @@ public final class MediaSuiteHost {
                         youtubeDiscoverSignals.likedVideos,
                         youtubeDiscoverSignals.subscribedChannels,
                         YouTubeRecentSearches.get(host.context()),
+                        youtubeLocalLibrarySignals.artists,
+                        youtubeLocalLibrarySignals.genres,
                         youtubeDiscoverFeedback().snapshot(),
                         minSeconds,
                         maxSeconds);
@@ -4668,6 +4705,14 @@ public final class MediaSuiteHost {
                 return host.getString(R.string.youtube_discover_reason_subscribed);
             case LIKED_VIDEO:
                 return host.getString(R.string.youtube_discover_reason_liked);
+            case LOCAL_LIBRARY_ARTIST:
+                return host.getString(
+                        R.string.youtube_discover_reason_local_artist,
+                        item.detail);
+            case LOCAL_LIBRARY_GENRE:
+                return host.getString(
+                        R.string.youtube_discover_reason_local_genre,
+                        item.detail);
             case RECENT_SEARCH:
                 return item.detail.length() > 0
                         ? host.getString(R.string.youtube_discover_reason_search,

@@ -84,6 +84,41 @@ public class YouTubeDiscoverRankerTest {
     }
 
     @Test
+    public void localLibraryArtistsAndGenresRankWithAnExplainableReason() {
+        YouTubeVideo matchingArtist = video("local01",
+                "Boards of Canada studio session", "Archive Channel", "12:00");
+        YouTubeVideo matchingGenre = video("local02",
+                "Ambient essentials", "Compilation Channel", "9:00");
+        YouTubeVideo unrelated = video("other01",
+                "Daily news briefing", "News Channel", "6:00");
+        YouTubeDiscoverRanker.Signals signals =
+                new YouTubeDiscoverRanker.Signals(
+                        null, null, null, null,
+                        Arrays.asList("Boards of Canada"),
+                        Arrays.asList("Ambient"),
+                        YouTubeDiscoverRanker.Feedback.empty(), 0, 0);
+
+        List<YouTubeDiscoverRanker.Recommendation> ranked =
+                YouTubeDiscoverRanker.rank(
+                        Arrays.asList(unrelated, matchingGenre, matchingArtist),
+                        signals, 10);
+
+        assertEquals(matchingArtist.id, ranked.get(0).video.id);
+        assertEquals(YouTubeDiscoverRanker.Reason.LOCAL_LIBRARY_ARTIST,
+                ranked.get(0).reason);
+        assertEquals("Boards of Canada", ranked.get(0).detail);
+        boolean foundGenreReason = false;
+        for (YouTubeDiscoverRanker.Recommendation item : ranked) {
+            if (matchingGenre.id.equals(item.video.id)) {
+                foundGenreReason =
+                        item.reason == YouTubeDiscoverRanker.Reason.LOCAL_LIBRARY_GENRE;
+                assertEquals("Ambient", item.detail);
+            }
+        }
+        assertTrue(foundGenreReason);
+    }
+
+    @Test
     public void appliesDurationFilterAndChannelDiversity() {
         List<YouTubeVideo> popular = new ArrayList<YouTubeVideo>();
         popular.add(video("a00001", "A one", "Same", "0:30"));

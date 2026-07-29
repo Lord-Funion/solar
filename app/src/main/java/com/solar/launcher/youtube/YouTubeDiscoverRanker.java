@@ -29,6 +29,8 @@ public final class YouTubeDiscoverRanker {
         MORE_LIKE,
         SUBSCRIBED_CHANNEL,
         LIKED_VIDEO,
+        LOCAL_LIBRARY_ARTIST,
+        LOCAL_LIBRARY_GENRE,
         RECENT_SEARCH,
         RESEARCH_LIST,
         POPULAR_REGION
@@ -60,6 +62,8 @@ public final class YouTubeDiscoverRanker {
         public final List<YouTubeVideo> liked;
         public final List<String> subscribedChannels;
         public final List<String> recentSearches;
+        public final List<String> localArtists;
+        public final List<String> localGenres;
         public final Feedback feedback;
         public final int minDurationSeconds;
         public final int maxDurationSeconds;
@@ -67,10 +71,20 @@ public final class YouTubeDiscoverRanker {
         public Signals(List<YouTubeVideo> research, List<YouTubeVideo> liked,
                 List<String> subscribedChannels, List<String> recentSearches,
                 Feedback feedback, int minDurationSeconds, int maxDurationSeconds) {
+            this(research, liked, subscribedChannels, recentSearches, null, null,
+                    feedback, minDurationSeconds, maxDurationSeconds);
+        }
+
+        public Signals(List<YouTubeVideo> research, List<YouTubeVideo> liked,
+                List<String> subscribedChannels, List<String> recentSearches,
+                List<String> localArtists, List<String> localGenres,
+                Feedback feedback, int minDurationSeconds, int maxDurationSeconds) {
             this.research = copyVideos(research);
             this.liked = copyVideos(liked);
             this.subscribedChannels = copyStrings(subscribedChannels);
             this.recentSearches = copyStrings(recentSearches);
+            this.localArtists = copyStrings(localArtists);
+            this.localGenres = copyStrings(localGenres);
             this.feedback = feedback != null ? feedback : Feedback.empty();
             this.minDurationSeconds = Math.max(0, minDurationSeconds);
             this.maxDurationSeconds = Math.max(0, maxDurationSeconds);
@@ -183,6 +197,54 @@ public final class YouTubeDiscoverRanker {
                     reasonWeight = 30;
                 }
             }
+
+            int localArtistWeight = 0;
+            String localArtistDetail = "";
+            for (String artist : safe.localArtists) {
+                String artistKey = normalizeKey(artist);
+                if (artistKey.length() == 0) continue;
+                int weight = 0;
+                if (channel.equals(artistKey)) {
+                    weight = 55;
+                } else {
+                    int artistOverlap = overlap(titleTerms, terms(artist));
+                    if (artistOverlap > 0) {
+                        weight = Math.min(45, artistOverlap * 18);
+                    }
+                }
+                if (weight > localArtistWeight) {
+                    localArtistWeight = weight;
+                    localArtistDetail = artist;
+                }
+            }
+            if (localArtistWeight > 0) {
+                score += localArtistWeight;
+                if (reasonWeight < localArtistWeight) {
+                    reason = Reason.LOCAL_LIBRARY_ARTIST;
+                    detail = localArtistDetail;
+                    reasonWeight = localArtistWeight;
+                }
+            }
+
+            int localGenreWeight = 0;
+            String localGenreDetail = "";
+            for (String genre : safe.localGenres) {
+                int genreOverlap = overlap(titleTerms, terms(genre));
+                int weight = Math.min(24, genreOverlap * 12);
+                if (weight > localGenreWeight) {
+                    localGenreWeight = weight;
+                    localGenreDetail = genre;
+                }
+            }
+            if (localGenreWeight > 0) {
+                score += localGenreWeight;
+                if (reasonWeight < localGenreWeight) {
+                    reason = Reason.LOCAL_LIBRARY_GENRE;
+                    detail = localGenreDetail;
+                    reasonWeight = localGenreWeight;
+                }
+            }
+
             for (String query : safe.recentSearches) {
                 int queryOverlap = overlap(titleTerms, terms(query));
                 if (queryOverlap > 0) {
