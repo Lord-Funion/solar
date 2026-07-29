@@ -349,10 +349,22 @@ public final class SolarHttp {
 
     /** HEAD then tiny ranged GET — true if any URL variant is reachable (TLS/HTTP). */
     public static boolean probeAnyReachable(String[] urls) {
+        return probeAnyReachableQuick(urls, 5, 8);
+    }
+
+    /**
+     * Bounded endpoint probe for an explicit diagnostics action. Callers choose short limits;
+     * normal download/read clients keep their existing timeouts.
+     */
+    public static boolean probeAnyReachableQuick(String[] urls,
+            int connectTimeoutSeconds, int readTimeoutSeconds) {
         if (urls == null || urls.length == 0) return false;
+        int connectSeconds = Math.max(1, connectTimeoutSeconds);
+        int readSeconds = Math.max(1, readTimeoutSeconds);
         OkHttpClient probe = TlsHelper.client().newBuilder()
-                .connectTimeout(5, TimeUnit.SECONDS)
-                .readTimeout(8, TimeUnit.SECONDS)
+                .connectTimeout(connectSeconds, TimeUnit.SECONDS)
+                .readTimeout(readSeconds, TimeUnit.SECONDS)
+                .writeTimeout(connectSeconds, TimeUnit.SECONDS)
                 .followRedirects(true)
                 .build();
         for (String url : urls) {

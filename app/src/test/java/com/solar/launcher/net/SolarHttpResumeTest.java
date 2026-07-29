@@ -113,6 +113,18 @@ public class SolarHttpResumeTest {
         assertTrue(SolarHttp.parseContentRange("garbage") == null);
     }
 
+    @Test
+    public void quickProbeAcceptsSuccessfulHeadResponse() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(204));
+
+        assertTrue(SolarHttp.probeAnyReachableQuick(
+                new String[] {server.url("/health").toString()}, 1, 1));
+
+        RecordedRequest request = server.takeRequest();
+        assertEquals("HEAD", request.getMethod());
+        assertEquals("/health", request.getPath());
+    }
+
     private File partial(String value) throws Exception {
         File file = temporary.newFile("track.part");
         FileOutputStream out = new FileOutputStream(file);

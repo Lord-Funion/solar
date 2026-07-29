@@ -4,6 +4,7 @@ import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Toast;
 
 import com.solar.launcher.theme.ThemeManager;
 
@@ -51,11 +52,21 @@ final class OverlayWifiPasswordKeyboard {
             public void onEnterRequested() {
                 String password = controller.getBuffer();
                 if (password == null) password = "";
-                WifiConnector.connect(context, targetSsid, password, false,
-                        new WifiConnector.Callback() {
+                WifiConnector.connectDetailed(context, targetSsid, password, false,
+                        new WifiConnector.DetailedCallback() {
                             @Override
-                            public void onComplete(boolean success) {
-                                dismissKeyboardOnly();
+                            public void onComplete(WifiConnector.ConnectionResult result) {
+                                if (result != null && result.success) {
+                                    dismissKeyboardOnly();
+                                    return;
+                                }
+                                if (result != null
+                                        && result.failure != WifiConnector.Failure.CANCELED) {
+                                    Toast.makeText(context,
+                                            context.getString(WifiConnector.failureMessageResId(
+                                                    result.failure)),
+                                            Toast.LENGTH_LONG).show();
+                                }
                             }
                         });
             }

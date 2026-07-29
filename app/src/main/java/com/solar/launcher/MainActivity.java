@@ -17333,7 +17333,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     private void openWifiKeyboard(String ssid) {
         keyboardPurpose = KEYBOARD_WIFI;
-        keyboardReturnState = STATE_WIFI;
+        keyboardReturnState = currentScreenState != STATE_WIFI_KEYBOARD
+                ? currentScreenState : STATE_WIFI;
         targetWifiSsid = ssid;
         changeScreen(STATE_WIFI_KEYBOARD);
     }
@@ -18430,14 +18431,12 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         final boolean open = isTargetWifiOpen;
         Toast.makeText(this, getString(R.string.toast_wifi_connecting, ssid), Toast.LENGTH_SHORT).show();
         beginWifiConnect();
-        WifiConnector.connect(this, ssid, password, open, new WifiConnector.Callback() {
+        WifiConnector.connectDetailed(this, ssid, password, open,
+                new WifiConnector.DetailedCallback() {
             @Override
-            public void onComplete(boolean success) {
+            public void onComplete(WifiConnector.ConnectionResult result) {
                 endWifiConnect();
-                if (!success) {
-                    Toast.makeText(MainActivity.this, getString(R.string.toast_wifi_connect_failed),
-                            Toast.LENGTH_SHORT).show();
-                }
+                showWifiConnectionFailure(result);
                 prefetchWifiConfiguredNetworksAsync();
                 changeScreen(STATE_WIFI);
             }
@@ -18447,7 +18446,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private void performWifiConnection(String ssid, String password, boolean open) {
         Toast.makeText(this, getString(R.string.toast_wifi_connecting, ssid), Toast.LENGTH_SHORT).show();
         beginWifiConnect();
-        WifiConnector.connect(this, ssid, password, open, wrapWifiConnectCallback(wifiConnectResultCallback()));
+        WifiConnector.connectDetailed(this, ssid, password, open,
+                wrapWifiConnectCallback(wifiConnectResultCallback()));
     }
 
     private void beginWifiConnect() {
@@ -18477,22 +18477,21 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         // #endregion
     }
 
-    private WifiConnector.Callback wrapWifiConnectCallback(final WifiConnector.Callback inner) {
-        return new WifiConnector.Callback() {
+    private WifiConnector.DetailedCallback wrapWifiConnectCallback(
+            final WifiConnector.DetailedCallback inner) {
+        return new WifiConnector.DetailedCallback() {
             @Override
-            public void onComplete(boolean success) {
+            public void onComplete(WifiConnector.ConnectionResult result) {
                 endWifiConnect();
                 prefetchWifiConfiguredNetworksAsync();
-                if (inner != null) inner.onComplete(success);
+                if (inner != null) inner.onComplete(result);
             }
         };
     }
 
     private boolean isWifiNetworkOpen(String capabilities) {
-        if (capabilities == null || capabilities.isEmpty()) return true;
-        String caps = capabilities.toUpperCase(Locale.US);
-        return !caps.contains("WPA") && !caps.contains("WEP") && !caps.contains("PSK")
-                && !caps.contains("EAP");
+        return WifiConnector.securityForCapabilities(capabilities)
+                == WifiConnector.Security.OPEN;
     }
 
     private boolean isWifiSsidConnected(String ssid) {
@@ -18500,7 +18499,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         try {
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
             WifiInfo info = wm != null ? wm.getConnectionInfo() : null;
-            String connected = info != null && info.getSSID() != null ? info.getSSID().replace("\"", "") : "";
+            String connected = info != null
+                    ? WifiScanFilter.displayableConnectedSsid(info.getSSID()) : "";
             return ssid.equals(connected);
         } catch (Exception ignored) {
             return false;
@@ -19349,6 +19349,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (!isOn)
             return;
 
+        addWifiDiagnosticsRow();
+
         if (results != null) {
             applyWifiScanCache(results);
             foundWifiNetworks.clear();
@@ -19356,7 +19358,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             WifiInfo wifiInfo = manager.getConnectionInfo();
             String connectedSSID = "";
             if (wifiInfo != null && wifiInfo.getSSID() != null) {
-                connectedSSID = wifiInfo.getSSID().replace("\"", "");
+                connectedSSID = WifiScanFilter.displayableConnectedSsid(wifiInfo.getSSID());
             }
 
             // 🚀 1순위: 현재 연결된 와이파이를 가장 먼저 찾아서 최상단에 배치!
@@ -19383,15 +19385,90 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
     }
 
+    private void addWifiDiagnosticsRow() {
+        Button details = createListButton(getString(R.string.wifi_diagnostics));
+        details.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clickFeedback();
+                showWifiDiagnostics();
+            }
+        });
+        containerWifiItems.addView(details);
+    }
+
+    private void showWifiDiagnostics() {
+        WifiDiagnostics.Snapshot snapshot = WifiDiagnostics.capture(this);
+        String state = getString(snapshot.associated
+                ? R.string.wifi_diagnostics_connected
+                : R.string.wifi_diagnostics_not_connected);
+        String link = snapshot.linkSpeedMbps >= 0
+                ? getString(R.string.wifi_diagnostics_link_speed, snapshot.linkSpeedMbps)
+                : "—";
+        String dns = getString(R.string.wifi_diagnostics_dns_pair,
+                snapshot.dns1, snapshot.dns2);
+        String body = getString(R.string.wifi_diagnostics_body,
+                state,
+                snapshot.ssid,
+                snapshot.supplicant,
+                WifiDiagnostics.signalLabel(snapshot.rssi),
+                snapshot.rssi,
+                link,
+                snapshot.ip,
+                snapshot.gateway,
+                dns,
+                WifiDiagnostics.leaseLabel(snapshot.leaseSeconds));
+        showThemedConfirm(getString(R.string.wifi_diagnostics_title), body,
+                getString(R.string.wifi_diagnostics_test),
+                getString(R.string.wifi_diagnostics_close),
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        runWifiConnectionTest();
+                    }
+                });
+    }
+
+    private void runWifiConnectionTest() {
+        showPleaseWaitOverlay(getString(R.string.wifi_diagnostics_testing));
+        WifiDiagnostics.runConnectionTest(this, new WifiDiagnostics.Callback() {
+            @Override
+            public void onComplete(final WifiDiagnostics.TestResult result) {
+                dismissPleaseWaitOverlay();
+                String ok = getString(R.string.wifi_test_ok);
+                String failed = getString(R.string.wifi_test_failed);
+                String body = getString(R.string.wifi_test_body,
+                        result.associated ? ok : failed,
+                        result.internetReachable ? ok : failed,
+                        result.solarServiceReachable ? ok : failed,
+                        result.googleApiReachable ? ok : failed,
+                        String.format(Locale.US, "%.1fs", result.elapsedMs / 1000f));
+                showThemedConfirm(getString(R.string.wifi_test_title), body,
+                        getString(R.string.wifi_test_run_again),
+                        getString(R.string.wifi_diagnostics_close),
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                runWifiConnectionTest();
+                            }
+                        });
+            }
+        });
+    }
+
     // 💡 연결 상태(isConnected)를 파라미터로 직접 전달받도록 개조된 함수
-    private void addWifiItemToUI(final String ssid, String capabilities, final boolean isConnected) {
-        final boolean isOpen = !capabilities.contains("WPA") && !capabilities.contains("WEP");
+    private void addWifiItemToUI(final String ssid, final String capabilities,
+            final boolean isConnected) {
+        final boolean isOpen = isWifiNetworkOpen(capabilities);
+        final boolean isSaved = isWifiNetworkSaved(ssid);
         String lockIcon = isOpen ? "📶 " : "🔒 ";
 
         // 연결된 기기 앞에는 투박한 글씨 대신 애플처럼 예쁜 체크마크(✔) 부여!
         String prefix = isConnected ? "✔ " : "";
+        String suffix = !isConnected && isSaved
+                ? " · " + getString(R.string.wifi_saved_state) : "";
 
-        Button btnWifi = createListButton(prefix + lockIcon + ssid);
+        Button btnWifi = createListButton(prefix + lockIcon + ssid + suffix);
 
         if (isConnected) {
             btnWifi.setTextColor(0xFF00FF00); // 눈에 확 띄는 초록색!
@@ -19411,8 +19488,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 Toast.makeText(MainActivity.this, getString(R.string.toast_wifi_connecting, ssid),
                         Toast.LENGTH_SHORT).show();
                 beginWifiConnect();
-                WifiConnector.connectFromMenu(MainActivity.this, ssid, isOpen, null,
-                        new WifiConnector.MenuCallback() {
+                WifiConnector.connectFromMenuDetailed(MainActivity.this, ssid, capabilities, null,
+                        new WifiConnector.DetailedMenuCallback() {
                             @Override
                             public void onNeedPassword() {
                                 endWifiConnect();
@@ -19421,8 +19498,11 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                             }
 
                             @Override
-                            public void onComplete(boolean success) {
-                                wrapWifiConnectCallback(wifiConnectResultCallback()).onComplete(success);
+                            public void onComplete(WifiConnector.ConnectionResult result) {
+                                if (openWifiPasswordAfterAuthenticationFailure(
+                                        ssid, result, false)) return;
+                                wrapWifiConnectCallback(wifiConnectResultCallback())
+                                        .onComplete(result);
                             }
                         });
             }
@@ -24156,6 +24236,19 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
         });
 
+        if (isWifiContextExpanded()) {
+            headers.add(Boolean.FALSE);
+            labels.add(getString(R.string.wifi_diagnostics));
+            states.add(null);
+            iconKeys.add(null);
+            actions.add(new Runnable() {
+                @Override
+                public void run() {
+                    showWifiDiagnostics();
+                }
+            });
+        }
+
         if (isWifiContextExpanded() && connected.isEmpty() && scanned.isEmpty()
                 && (isWifiPowerOn() || wifiContextPendingEnable) && !wifiContextScanActive) {
             headers.add(Boolean.FALSE);
@@ -24264,15 +24357,16 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (label.equals(getString(R.string.context_wifi_connected))) return null;
         if (label.equals(getString(R.string.context_action_forget_wifi))) return null;
         if (label.equals(getString(R.string.context_wifi_scanning))) return null;
+        if (label.equals(getString(R.string.wifi_diagnostics))) return null;
         return label;
     }
 
     private void connectWifiFromContextMenu(final String ssid) {
         final String caps = wifiCapabilitiesForSsid(ssid);
-        final boolean open = isWifiNetworkOpen(caps);
         Toast.makeText(this, getString(R.string.toast_wifi_connecting, ssid), Toast.LENGTH_SHORT).show();
         beginWifiConnect();
-        WifiConnector.connectFromMenu(this, ssid, open, null, new WifiConnector.MenuCallback() {
+        WifiConnector.connectFromMenuDetailed(this, ssid, caps, null,
+                new WifiConnector.DetailedMenuCallback() {
             @Override
             public void onNeedPassword() {
                 endWifiConnect();
@@ -24283,8 +24377,9 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             }
 
             @Override
-            public void onComplete(boolean success) {
-                wrapWifiConnectCallback(wifiConnectResultCallback()).onComplete(success);
+            public void onComplete(WifiConnector.ConnectionResult result) {
+                if (openWifiPasswordAfterAuthenticationFailure(ssid, result, true)) return;
+                wrapWifiConnectCallback(wifiConnectResultCallback()).onComplete(result);
             }
         });
     }
@@ -24316,20 +24411,45 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         return wifiConfiguredNetworksCache;
     }
 
-    private WifiConnector.Callback wifiConnectResultCallback() {
-        return new WifiConnector.Callback() {
+    private WifiConnector.DetailedCallback wifiConnectResultCallback() {
+        return new WifiConnector.DetailedCallback() {
             @Override
-            public void onComplete(boolean success) {
-                if (!success) {
-                    Toast.makeText(MainActivity.this, getString(R.string.toast_wifi_connect_failed),
-                            Toast.LENGTH_SHORT).show();
-                }
+            public void onComplete(WifiConnector.ConnectionResult result) {
+                showWifiConnectionFailure(result);
                 if (currentScreenState == STATE_WIFI) {
                     startWifiScan();
                 }
                 scheduleContextWifiRefresh(false);
             }
         };
+    }
+
+    private void showWifiConnectionFailure(WifiConnector.ConnectionResult result) {
+        if (result == null || result.success
+                || result.failure == WifiConnector.Failure.CANCELED) {
+            return;
+        }
+        Toast.makeText(this, getString(WifiConnector.failureMessageResId(result.failure)),
+                Toast.LENGTH_LONG).show();
+    }
+
+    /**
+     * An explicit supplicant auth error means the saved key is stale. Keep the scan context,
+     * return to the existing wheel password keyboard, and let the user replace it in-place.
+     */
+    private boolean openWifiPasswordAfterAuthenticationFailure(String ssid,
+            WifiConnector.ConnectionResult result, boolean dismissContext) {
+        if (result == null
+                || result.failure != WifiConnector.Failure.AUTHENTICATION_FAILED) {
+            return false;
+        }
+        endWifiConnect();
+        showWifiConnectionFailure(result);
+        if (dismissContext) dismissThemedContextMenu();
+        isTargetWifiOpen = false;
+        keyboardReturnState = currentScreenState;
+        openWifiKeyboard(ssid);
+        return true;
     }
 
     @android.annotation.SuppressLint("MissingPermission")
@@ -24346,7 +24466,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             WifiInfo wifiInfo = wm.getConnectionInfo();
             String connectedSSID = "";
             if (wifiInfo != null && wifiInfo.getSSID() != null) {
-                connectedSSID = wifiInfo.getSSID().replace("\"", "");
+                connectedSSID = WifiScanFilter.displayableConnectedSsid(wifiInfo.getSSID());
             }
             java.util.TreeSet<String> connectedSet = new java.util.TreeSet<String>(
                     String.CASE_INSENSITIVE_ORDER);
@@ -28035,9 +28155,11 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         try {
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
             WifiInfo info = wm != null ? wm.getConnectionInfo() : null;
-            String connected = info != null && info.getSSID() != null ? info.getSSID().replace("\"", "") : "";
+            String connected = info != null
+                    ? WifiScanFilter.displayableConnectedSsid(info.getSSID()) : "";
             if (ssid != null && ssid.equals(connected)) return "ON";
         } catch (Exception ignored) {}
+        if (isWifiNetworkSaved(ssid)) return getString(R.string.wifi_saved_state);
         return "";
     }
 
@@ -30692,6 +30814,19 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             });
             final String wifiSsid = wifiFocusedSsid();
             if (wifiSsid != null && isWifiNetworkSaved(wifiSsid)) {
+                final String wifiCapabilities = wifiCapabilitiesForSsid(wifiSsid);
+                if (WifiConnector.securityForCapabilities(wifiCapabilities)
+                        == WifiConnector.Security.WPA_PERSONAL) {
+                    addContextAction(getString(R.string.context_action_update_wifi_password),
+                            new Runnable() {
+                        @Override
+                        public void run() {
+                            dismissThemedContextMenu();
+                            isTargetWifiOpen = false;
+                            openWifiKeyboard(wifiSsid);
+                        }
+                    });
+                }
                 addContextAction(getString(R.string.context_action_forget_wifi), new Runnable() {
                     @Override
                     public void run() {
