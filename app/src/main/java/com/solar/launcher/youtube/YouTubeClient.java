@@ -413,6 +413,7 @@ public final class YouTubeClient {
             item.put("title", nonNull(video.title));
             item.put("author", nonNull(video.author));
             item.put("length", nonNull(video.duration));
+            item.put("description", nonNull(video.description));
             array.put(item);
         }
         return array;

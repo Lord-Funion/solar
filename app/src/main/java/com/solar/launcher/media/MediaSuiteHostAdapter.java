@@ -76,6 +76,10 @@ public final class MediaSuiteHostAdapter implements MediaSuiteHost.Host {
         act.mediaSearchSoulseekForYouTube(video);
     }
 
+    @Override public void openAuthorizedDirectAudioUrl(String url) {
+        act.mediaOpenAuthorizedDirectAudioUrl(url);
+    }
+
     @Override public void playAudioFileInNowPlaying(java.io.File file) {
         act.mediaPlayAudioFileInNowPlaying(file, null, null);
     }

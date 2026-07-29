@@ -30,7 +30,8 @@ public final class YouTubeResultJson {
                     o.optString("id", ""),
                     o.optString("title", ""),
                     o.optString("author", ""),
-                    o.optString("length", "")));
+                    o.optString("length", ""),
+                    o.optString("description", "")));
         }
         return out;
     }

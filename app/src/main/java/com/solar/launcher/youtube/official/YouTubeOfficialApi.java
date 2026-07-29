@@ -151,9 +151,12 @@ public final class YouTubeOfficialApi {
                 if (id.length() == 0 || snippet == null) continue;
                 String title = decodeEntities(snippet.optString("title", ""));
                 String channel = decodeEntities(snippet.optString("channelTitle", ""));
+                String description = decodeEntities(
+                        snippet.optString("description", ""));
                 String duration = formatIsoDuration(details != null
                         ? details.optString("duration", "") : "");
-                byId.put(id, new YouTubeVideo(id, title, channel, duration));
+                byId.put(id, new YouTubeVideo(
+                        id, title, channel, duration, description));
             }
         }
         List<YouTubeVideo> out = new ArrayList<YouTubeVideo>();

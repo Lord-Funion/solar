@@ -55,7 +55,8 @@ public final class YouTubeDiscoverSignals {
                 liked.add(new YouTubeVideo(id,
                         item.optString("title", ""),
                         item.optString("author", ""),
-                        item.optString("length", "")));
+                        item.optString("length", ""),
+                        item.optString("description", "")));
             }
         }
         return new YouTubeDiscoverSignals(channels, liked,

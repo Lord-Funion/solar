@@ -58,6 +58,7 @@ import com.solar.launcher.video.VideoLibrary;
 import com.solar.launcher.video.VideoPlayerController;
 import com.solar.launcher.youtube.YouTubeClient;
 import com.solar.launcher.youtube.YouTubeComment;
+import com.solar.launcher.youtube.CreatorDownloadLinkExtractor;
 import com.solar.launcher.youtube.YouTubeDownloader;
 import com.solar.launcher.youtube.YouTubeAcquisitionPolicy;
 import com.solar.launcher.youtube.YouTubeBookmarks;
@@ -236,6 +237,9 @@ public final class MediaSuiteHost {
 
         /** Search the existing authorized Soulseek provider using YouTube metadata. */
         void searchSoulseekForYouTube(YouTubeVideo video);
+
+        /** Hand a validated creator-provided direct audio URL to the separate download provider. */
+        void openAuthorizedDirectAudioUrl(String url);
 
         /**
          * 2026-07-15 — Play a local audio file in music Now Playing (YouTube Audio path).
@@ -483,17 +487,28 @@ public final class MediaSuiteHost {
         static final int KIND_NOT_INTERESTED = 10;
         static final int KIND_MORE_LIKE = 11;
         static final int KIND_LESS_FROM_CHANNEL = 12;
+        static final int KIND_CREATOR_DOWNLOAD = 13;
 
         final int kind;
         final int commentIndex;
+        final String directUrl;
 
         YoutubeDetailRow(int kind) {
-            this(kind, -1);
+            this(kind, -1, null);
         }
 
         YoutubeDetailRow(int kind, int commentIndex) {
+            this(kind, commentIndex, null);
+        }
+
+        YoutubeDetailRow(int kind, String directUrl) {
+            this(kind, -1, directUrl);
+        }
+
+        YoutubeDetailRow(int kind, int commentIndex, String directUrl) {
             this.kind = kind;
             this.commentIndex = commentIndex;
+            this.directUrl = directUrl;
         }
     }
 
@@ -4391,6 +4406,20 @@ public final class MediaSuiteHost {
             virtualSubtitles.add(YouTubeAcquisitionPolicy.canonicalUrl(youtubeDetailVideo));
             youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_COPY_LINK));
 
+            List<CreatorDownloadLinkExtractor.Link> creatorLinks =
+                    CreatorDownloadLinkExtractor.extract(
+                            youtubeDetailVideo.description);
+            for (CreatorDownloadLinkExtractor.Link link : creatorLinks) {
+                virtualLabels.add(host.getString(
+                        R.string.youtube_detail_creator_download,
+                        link.displayName));
+                virtualSubtitles.add(host.getString(
+                        R.string.youtube_detail_creator_download_sub,
+                        link.host));
+                youtubeDetailRows.add(new YoutubeDetailRow(
+                        YoutubeDetailRow.KIND_CREATOR_DOWNLOAD, link.url));
+            }
+
             if (youtubeShowingDiscover) {
                 virtualLabels.add(host.getString(R.string.youtube_discover_more_like));
                 virtualSubtitles.add(host.getString(
@@ -4466,6 +4495,11 @@ public final class MediaSuiteHost {
             case YoutubeDetailRow.KIND_COPY_LINK:
                 if (youtubeDetailVideo != null) {
                     copyYouTubeLink(youtubeDetailVideo);
+                }
+                break;
+            case YoutubeDetailRow.KIND_CREATOR_DOWNLOAD:
+                if (row.directUrl != null && row.directUrl.length() > 0) {
+                    host.openAuthorizedDirectAudioUrl(row.directUrl);
                 }
                 break;
             case YoutubeDetailRow.KIND_MORE_LIKE:

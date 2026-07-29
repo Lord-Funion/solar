@@ -20,13 +20,16 @@ public class YouTubeOfficialApiTest {
                 + "\"channelTitle\":\"Channel 2\"},"
                 + "\"contentDetails\":{\"duration\":\"PT1H2M3S\"}},"
                 + "{\"id\":\"first\",\"snippet\":{\"title\":\"First\","
-                + "\"channelTitle\":\"Channel 1\"},"
+                + "\"channelTitle\":\"Channel 1\","
+                + "\"description\":\"Direct: https://artist.example/first.mp3\"},"
                 + "\"contentDetails\":{\"duration\":\"PT59S\"}}]}");
         List<YouTubeVideo> videos = YouTubeOfficialApi.parseVideoDetails(
                 response, Arrays.asList("first", "second"));
         assertEquals(2, videos.size());
         assertEquals("first", videos.get(0).id);
         assertEquals("0:59", videos.get(0).duration);
+        assertEquals("Direct: https://artist.example/first.mp3",
+                videos.get(0).description);
         assertEquals("B & C", videos.get(1).title);
         assertEquals("62:03", videos.get(1).duration);
     }

@@ -79,7 +79,8 @@ public final class YouTubeBookmarks {
                         id,
                         item.optString("title", ""),
                         item.optString("author", ""),
-                        item.optString("duration", "")),
+                        item.optString("duration", ""),
+                        item.optString("description", "")),
                         item.optLong("savedAt", 0L)));
             }
         } catch (Exception ignored) {
@@ -106,6 +107,9 @@ public final class YouTubeBookmarks {
                 item.put("title", entry.video.title);
                 item.put("author", entry.video.author);
                 item.put("duration", entry.video.duration);
+                item.put("description",
+                        CreatorDownloadLinkExtractor.compactForBookmark(
+                                entry.video.description));
                 item.put("savedAt", entry.savedAt);
                 array.put(item);
             } catch (Exception ignored) {}

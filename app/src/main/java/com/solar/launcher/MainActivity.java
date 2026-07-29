@@ -3840,6 +3840,10 @@ public class MainActivity extends Activity {
     private void finishAuthorizedDirectDownloadUrlEntry() {
         final String suppliedUrl = typedPassword != null ? typedPassword.trim() : "";
         changeScreen(STATE_SOULSEEK);
+        offerAuthorizedDirectDownload(suppliedUrl);
+    }
+
+    private void offerAuthorizedDirectDownload(String suppliedUrl) {
         if (!requireInternet(R.string.toast_internet_required)) return;
         if (directDownloadControl != null) {
             Toast.makeText(this, getString(R.string.get_music_direct_audio_busy),
@@ -3871,6 +3875,10 @@ public class MainActivity extends Activity {
                     }
                 },
                 null);
+    }
+
+    public void mediaOpenAuthorizedDirectAudioUrl(String url) {
+        offerAuthorizedDirectDownload(url);
     }
 
     private void startAuthorizedDirectDownload(AuthorizedDirectDownload.Plan plan) {

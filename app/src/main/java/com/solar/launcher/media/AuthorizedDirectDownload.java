@@ -26,6 +26,19 @@ public final class AuthorizedDirectDownload {
     private static final int MAX_URL_CHARS = 8000;
     private static final int MAX_DUPLICATE_CANDIDATES = 256;
 
+    /** Validated URL metadata with no filesystem or network side effects. */
+    public static final class Source {
+        public final String url;
+        public final String host;
+        public final String displayName;
+
+        Source(String url, String host, String displayName) {
+            this.url = url;
+            this.host = host;
+            this.displayName = displayName;
+        }
+    }
+
     public static final class Plan {
         public final String url;
         public final String host;
@@ -86,6 +99,12 @@ public final class AuthorizedDirectDownload {
         ensureCapacity(downloadDirectory, 0L);
         File target = nextAvailableDestination(downloadDirectory, parsed.displayName);
         return plan(parsed, downloadDirectory, target, false);
+    }
+
+    /** Validates a direct playable-audio URL without creating folders or making a request. */
+    public static Source inspect(String suppliedUrl) throws IOException {
+        ParsedUrl parsed = parse(suppliedUrl);
+        return new Source(parsed.url, parsed.host, parsed.displayName);
     }
 
     /**

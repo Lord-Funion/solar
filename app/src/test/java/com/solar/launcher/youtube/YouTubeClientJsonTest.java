@@ -12,7 +12,8 @@ public class YouTubeClientJsonTest {
     @Test
     public void videosJsonRoundTrip() throws Exception {
         List<YouTubeVideo> vids = new ArrayList<YouTubeVideo>();
-        vids.add(new YouTubeVideo("abc", "Title", "Author", "3:45"));
+        vids.add(new YouTubeVideo("abc", "Title", "Author", "3:45",
+                "Download: https://artist.example/song.mp3"));
         String json = YouTubeClient.videosToJson(vids);
         List<YouTubeVideo> parsed = YouTubeResultJson.parseVideos(json);
         if (parsed.size() != 1 || !"abc".equals(parsed.get(0).id)) {
@@ -20,6 +21,9 @@ public class YouTubeClientJsonTest {
         }
         if (!"3:45".equals(parsed.get(0).duration)) {
             throw new AssertionError("duration lost: " + parsed.get(0).duration);
+        }
+        if (!parsed.get(0).description.contains("artist.example")) {
+            throw new AssertionError("description lost");
         }
     }
 

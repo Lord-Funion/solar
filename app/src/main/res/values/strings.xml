@@ -2051,6 +2051,8 @@ Press Back to cancel and restore the original order.</string>
     <string name="youtube_detail_search_soulseek">Search title on Soulseek</string>
     <string name="youtube_detail_search_soulseek_sub">Uses the existing authorized Soulseek provider</string>
     <string name="youtube_detail_copy_link">Copy YouTube URL</string>
+    <string name="youtube_detail_creator_download">Download %1$s</string>
+    <string name="youtube_detail_creator_download_sub">Creator-provided direct audio from %1$s · permission required</string>
     <string name="youtube_discover_more_like">More like this</string>
     <string name="youtube_discover_more_like_sub">Boost similar titles and this channel locally</string>
     <string name="youtube_discover_less_channel">Less from this channel</string>
