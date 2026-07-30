@@ -34,16 +34,21 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Package device-test files
+      - name: Run Android Lint
+        run: gradle --no-daemon --stacktrace :app:lintDebug
+
+      - name: Package hardware-test files
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk dist/RockboxSolar-v0.3-debug.apk
           cp README.md LICENSE install-y1.sh uninstall-y1.sh dist/
+          cp docs/FEATURE-MATRIX.md docs/Y1-HARDWARE-VALIDATION.md dist/
+          cp app/build/reports/lint-results-debug.html dist/
           (cd dist && sha256sum RockboxSolar-v0.3-debug.apk > SHA256SUMS.txt)
           chmod +x dist/install-y1.sh dist/uninstall-y1.sh
-          (cd dist && zip -9 RockboxSolar-v0.3-package.zip RockboxSolar-v0.3-debug.apk README.md LICENSE install-y1.sh uninstall-y1.sh SHA256SUMS.txt)
+          (cd dist && zip -9 RockboxSolar-v0.3-package.zip RockboxSolar-v0.3-debug.apk README.md LICENSE FEATURE-MATRIX.md Y1-HARDWARE-VALIDATION.md lint-results-debug.html install-y1.sh uninstall-y1.sh SHA256SUMS.txt)
 
       - name: Upload APK package
         uses: actions/upload-artifact@v4
