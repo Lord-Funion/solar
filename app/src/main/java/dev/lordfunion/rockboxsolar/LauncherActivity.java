@@ -2,73 +2,41 @@ package dev.lordfunion.rockboxsolar;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.graphics.Typeface;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.View;
-import android.view.Window;
-import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
-import android.widget.LinearLayout;
-import android.widget.ListView;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.Arrays;
 
 public final class LauncherActivity extends Activity {
+    private static final String[] ITEMS = {
+            "Rockbox Player", "Reach / Soulseek", "Deezer", "Stem Player", "YouTube Metadata",
+            "Remote SSH + SCP", "Plugins & Games", "DSP / Recording / FM", "Y1 Theme Translator",
+            "Wi-Fi Manager", "Bluetooth Manager", "Updates & ROM Manager", "Y1 Hardware Validation",
+            "Open Original Solar", "Android Settings"
+    };
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
-
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(12);
-        root.setPadding(pad, pad, pad, pad);
-
-        TextView title = new TextView(this);
-        title.setText("Rockbox Solar 0.2");
-        title.setTextSize(26f);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(title, new LinearLayout.LayoutParams(-1, -2));
-
-        TextView subtitle = new TextView(this);
-        subtitle.setText("Player, YouTube metadata, remote SSH commands, and SCP retrieval");
-        subtitle.setTextSize(15f);
-        subtitle.setPadding(0, dp(4), 0, dp(8));
-        root.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
-
-        ListView menu = new ListView(this);
-        menu.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_list_item_activated_1,
-                Arrays.asList("Rockbox Player", "YouTube Search", "Remote SSH + SCP", "Open Solar Reach", "Wi-Fi", "Bluetooth", "Android Settings")));
-        menu.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
-        menu.setSelection(0);
-        menu.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+        AppUi.Screen ui = AppUi.screen(this, "Rockbox Solar 0.3", "Unified wheel-first media, network, remote-compute, and device-management shell");
+        ui.list.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_list_item_activated_1, Arrays.asList(ITEMS)));
+        ui.list.setChoiceMode(android.widget.ListView.CHOICE_MODE_SINGLE); ui.list.setSelection(0);
+        ui.list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 try {
-                    if (position == 0) startActivity(new Intent(LauncherActivity.this, MainActivity.class));
-                    else if (position == 1) startActivity(new Intent(LauncherActivity.this, YouTubeActivity.class));
-                    else if (position == 2) startActivity(new Intent(LauncherActivity.this, SshActivity.class));
-                    else if (position == 3) {
-                        if (!SolarBridge.open(LauncherActivity.this, "reach")) {
-                            Toast.makeText(LauncherActivity.this, "Solar is not installed", Toast.LENGTH_LONG).show();
-                        }
-                    } else if (position == 4) startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS));
-                    else if (position == 5) startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
-                    else if (position == 6) startActivity(new Intent(Settings.ACTION_SETTINGS));
-                } catch (Exception e) {
-                    Toast.makeText(LauncherActivity.this, "That feature is unavailable on this firmware", Toast.LENGTH_LONG).show();
-                }
+                    Class<?> target = null;
+                    if(position==0)target=MainActivity.class;else if(position==1)target=ReachActivity.class;else if(position==2)target=DeezerActivity.class;
+                    else if(position==3)target=StemActivity.class;else if(position==4)target=YouTubeActivity.class;else if(position==5)target=SshActivity.class;
+                    else if(position==6)target=PluginsActivity.class;else if(position==7)target=AudioToolsActivity.class;else if(position==8)target=ThemeImportActivity.class;
+                    else if(position==9)target=WifiActivity.class;else if(position==10)target=BluetoothActivity.class;else if(position==11)target=UpdateActivity.class;
+                    else if(position==12)target=HardwareTestActivity.class;
+                    if(target!=null)startActivity(new Intent(LauncherActivity.this,target));
+                    else if(position==13){if(!SolarBridge.open(LauncherActivity.this,"home"))Toast.makeText(LauncherActivity.this,"Original Solar is not installed",Toast.LENGTH_LONG).show();}
+                    else startActivity(new Intent(Settings.ACTION_SETTINGS));
+                } catch (Exception e) { Toast.makeText(LauncherActivity.this,"Feature unavailable: "+e.getMessage(),Toast.LENGTH_LONG).show(); }
             }
         });
-        root.addView(menu, new LinearLayout.LayoutParams(-1, 0, 1f));
-        setContentView(root);
-        menu.requestFocus();
-    }
-
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 }
