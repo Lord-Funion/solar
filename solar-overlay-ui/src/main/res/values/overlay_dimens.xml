@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 2026-07-08 — Menu row metrics for ChipContextMenu (from app dimens_y1). -->
-<resources>
-    <dimen name="y1_menu_item_height">45dp</dimen>
-    <dimen name="y1_menu_text_size">22sp</dimen>
-    <dimen name="y1_menu_text_pad_left">5dp</dimen>
-    <dimen name="y1_arrow_margin_end">6dp</dimen>
-</resources>

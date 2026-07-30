@@ -1,5 +1,0 @@
-Xposed Dalvik framework (rovo89 XposedInstaller bin v58)
-app_process: assets/arm/app_process_xposed_sdk16 (SDK 16-19 unified binary)
-XposedBridge.jar: assets/VERSION=54, binary reports v58
-Source commit: rovo89/XposedInstaller 4cd1038
-Regenerate: solar-rom/scripts/extract-xposed-vendor.sh

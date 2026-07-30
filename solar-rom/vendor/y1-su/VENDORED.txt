@@ -1,3 +1,0 @@
-Y1 rockbox type-A permissive su (setuid /system/xbin/su, no Superuser.apk)
-Source: rockbox-y1 type-a-base rom.zip (75364 bytes, MD5 c2d5c3f94c41024eedb4569779597cf6)
-Regenerate: solar-rom/scripts/extract-y1-su-vendor.sh

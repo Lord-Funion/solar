@@ -1,16 +1,11 @@
 pluginManagement {
     repositories {
-        google {
-            content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
-                includeGroupByRegex("androidx.*")
-            }
-        }
+        google()
         mavenCentral()
         gradlePluginPortal()
     }
 }
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
@@ -19,10 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Solar"
+rootProject.name = 'RockboxSolar'
 include ':app'
-include ':launcher-helper'
-include ':global-context-modal'
-include ':solar-overlay-ui'
-include ':solar-ota-lib'
-include ':solar-updater'

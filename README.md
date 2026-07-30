@@ -1,108 +1,96 @@
-<p align="center">
-  <img src="app/src/main/assets/logo/square_full_logo_colour.png" alt="Solar logo" width="160">
-</p>
+# Rockbox Solar (clean-room Android shell)
 
-# Solar
+Rockbox Solar is an unofficial, wheel-first Android launcher and music player for the Innioasis Y1/Y2 family. It is a new implementation: it does **not** copy Solar source code or Rockbox firmware code.
 
-Custom firmware and launcher for the **Innioasis Y1** and **Y2** — a full interface replacement with podcast downloads, a global quick menu, **Reach** (Deezer + Soulseek), **Stem Player** (stem separation powered by [Lalal.ai](https://www.lalal.ai)), Y1 theme support, and **Rockbox-Y1** on the same ROM (switch without reboot).
+## Implemented in the first APK
 
-**Full usage and developer guides:** [docs/README.md](docs/README.md)
+- Rockbox-style full-screen, hardware-key-first interface
+- Local file browser and recursive music database scan
+- MP3/FLAC/OGG/WAV/M4A/AAC/Opus/WMA/APE handoff to Android `MediaPlayer`
+- Now Playing, queue, seek, next/previous and a global quick menu
+- JSON themes stored at `/sdcard/RockboxSolar/themes`
+- Podcast RSS/Atom loading and enclosure downloads
+- Resumable authorized direct-file downloads to `/sdcard/Music/RockboxSolar`
+- Wi-Fi, Bluetooth and sound settings shortcuts
+- Optional launch bridge into separately installed Solar for Reach, Deezer and Soulseek
+- Android 4.2.2 / API 17 compatibility target
 
-## Features
+## Important boundary
 
-- **Stem Player** — Gen1-style vocal / drums / bass / melody mixing with the scroll wheel; separate local library tracks via **Lalal.ai** stem separation, cache stems on device, and mash up one to three songs
-- **Reach** — search, play and download music from Deezer and Soulseek
-- **Podcasts** — search and download episodes to your Y1 over the internet
-- **Quick menu** — global context menu for playback, queue, Wi‑Fi, Bluetooth, and more from any screen
-- **Y1 themes** — install and apply themes from the original Y1 firmware
-- **Rockbox-Y1** — co-installed; switch launchers from Settings (unified keymap, no reboot)
+This project does not contain a Deezer media extractor, ARL-cookie handler, DRM circumvention, or copied Solar implementation. The Deezer/Reach/Soulseek entries only open a separately installed Solar application. Use services and downloads only where you have authorization and in accordance with their terms.
 
-## Screenshots
+## Build
 
-| | |
-|:---:|:---:|
-| ![About Solar](screenshots/About%20Solar.png) | ![Reach search](screenshots/Reach.png) |
-| **About Solar** — version, attribution, and OTA update check | **Reach search** — unified Deezer + Soulseek results |
-| ![Reach browse](screenshots/Reach%202.png) | ![Get Music search](screenshots/Search%20for%20Music.png) |
-| **Reach browse** — peer library and download actions | **Get Music** — combined Deezer and Reach search |
-| ![Soulseek messaging](screenshots/Soulseek%20Messaging.png) | ![Podcasts](screenshots/Podcasts.png) |
-| **Soulseek messaging** | **Podcasts** — subscribe and browse shows |
-| ![Podcast episodes](screenshots/Podcasts%202.png) | ![Artists view](screenshots/Artists%20View.png) |
-| **Podcast episodes** — episode list and downloads | **Artists view** — music library by artist > album |
-| ![Quick controls](screenshots/Quick%20Controls.png) | ![ACmp3 theme](screenshots/ACmp3%20theme%20%20on%20Solar.png) |
-| **Quick controls** — global context menu (playback, queue, Wi‑Fi) | **ACmp3 theme** — Y1 custom theme applied in Solar |
+```bash
+gradle :app:assembleDebug
+```
 
-## Deezer account setup in Reach
-A Demo Account is included for testers, please configure your own to ensure reliable playback and downloads, please do not submit issues about failed downloads / streams if still using the demo account as a Deezer account will offer a single playback slot to an account at one time.
+APK:
 
-**Reach** can search, stream, and download from [Deezer](https://www.deezer.com) using your account’s **`arl` session cookie** (the same method used by other Deezer download tools). You need a free or Premium Deezer account and a PC on the **same Wi‑Fi** as the Y1.
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
 
-### On the Y1 
+## Install without flashing (recommended)
 
-1. Open **Settings → Deezer**.
-2. Select **Set up on PC**. Solar starts a small setup server and shows a URL like `http://192.168.x.x:8080/deezer`.
+Enable USB debugging, connect the Y1, then:
 
-### On your PC
+```bash
+adb devices
+adb install -r RockboxSolar-v0.1-debug.apk
+```
 
-1. In a browser, open the URL shown on the Y1 (**use the Y1’s IP** — not `localhost`).
-2. In another tab, log in at [deezer.com/login](https://www.deezer.com/login) if you are not already signed in.
-3. Copy your **`arl` cookie** from the browser:
-   - **Chrome:** `F12` → **Application** → **Cookies** → `https://www.deezer.com` → copy the **arl** value (long hex string).
-   - **Firefox:** `F12` → **Storage** → **Cookies** → `https://www.deezer.com` → **arl**.
-4. On the Solar setup page, paste **arl**, choose **MP3** or **FLAC (Premium)**, and tap **Save & Test**.
-5. Wait for **Deezer login verified** before closing the page.
+Press Home and select **Rockbox Solar**. Do not select “Always” until the hardware keys and Back behavior have been tested.
 
-### Back on the Y1
+## Install as a system app on a rooted Y1
 
-1. Press **Back** to leave the setup screen (confirm **I'm finished** if asked).
-2. Try **Get Music** from the home menu, or **Settings → Deezer → Search**, and download or queue a track.
+An APK is installed, not normally “flashed.” To place it in the read-only system image without touching boot-critical partitions:
 
-### Notes
+```bash
+adb push RockboxSolar-v0.1-debug.apk /data/local/tmp/RockboxSolar.apk
+adb shell su -c 'mount -o remount,rw /system'
+adb shell su -c 'cp /data/local/tmp/RockboxSolar.apk /system/app/RockboxSolar.apk'
+adb shell su -c 'chmod 0644 /system/app/RockboxSolar.apk'
+adb shell su -c 'sync'
+adb reboot
+```
 
-- Treat **arl** like a password — only paste it on the setup page on your home network.
-- If **arl** is missing in DevTools, refresh deezer.com while logged in, or sign out and back in.
-- Some test builds ship with a shared demo account; paste your own **arl** to replace it.
-- To switch accounts or quality later: **Settings → Deezer → Set up on PC** again.
-- **FLAC** requires Deezer Premium; free accounts should use **MP3**.
+Some Y1 images use a different `su` implementation or mount command. Verify `/system` is writable before copying. This APK requests no platform-signature permissions.
 
-# How to get started with Solar
+## Recovery
 
-Head to the [Solar GitHub repository](https://github.com/thesolarproject/solar) and download a copy of the ROM from the [Releases](https://github.com/thesolarproject/solar) tab.
+Before choosing it as the permanent Home app, verify that ADB works. To remove it:
 
-### Install in Innioasis updater app:
+```bash
+adb uninstall dev.lordfunion.rockboxsolar
+```
 
-[1.Download](https://github.com/thesolarproject/solar/releases/latest/download/rom.zip) the [rom.zip](https://github.com/thesolarproject/solar/releases/latest/download/rom.zip) file
+For a system-app install:
 
-2. click "Browse Files" in the updater app and select the [rom.zip](https://github.com/thesolarproject/solar/releases/latest/download/rom.zip) file
+```bash
+adb shell su -c 'mount -o remount,rw /system'
+adb shell su -c 'rm -f /system/app/RockboxSolar.apk'
+adb reboot
+```
 
-3. Installation will begin
+If the launcher loops, use ADB to start Android settings or uninstall the package. Do **not** flash `preloader`, `lk`, `boot`, or `recovery` merely to install this APK. Y1 Type A and Type B boot-critical images are not interchangeable.
 
-### Install with SP Flash Tool 5.1924:
+## Theme format
 
-Extract [rom.zip](https://github.com/thesolarproject/solar/releases/latest/download/rom.zip) contents and [apply these instructions to the files](https://support.innioasis.com/download/flashing_tutorial/Flashing_tutorial-Y1_EN%20v2.0.7-20241021.pdf) extracted from the zip
+Create a JSON file in `/sdcard/RockboxSolar/themes`, for example:
 
-### Install with MTKClient
+```json
+{
+  "name": "Purple Parlor",
+  "background": "#120A1F",
+  "foreground": "#F5ECFF",
+  "accent": "#C68CFF",
+  "selected": "#3C205B",
+  "muted": "#A68DBD",
+  "fontScale": 1.0
+}
+```
 
-1. Install [MTKClient](https://github.com/bkerler/mtkclient)
-2. Identify the device as Y1 Type A or Type B from a verified partition backup,
-   then download only the matching firmware. **Do not try one variant and then
-   the other.** Their Android properties look alike but their boot-critical
-   images differ. Follow [the backup and recovery preflight](docs/RECOVERY.md)
-   before writing any partition.
-3. Unpack the archive:mkdir rom && cd rom unzip ../rom.zip
-4. Turn of the device, disconnect from the PC
-5. Start the flashing process:cd rom python ../mtk.py w logo,uboot,bootimg,recovery,android,usrdata logo.bin,lk.bin,boot.img,recovery.img,system.img,userdata.img
-6. Connect the device via USB
-7. Unplug the device when the process has finished
-8. Power on the device
+## Status
 
-# How to leave feedback and report issues.
-
-Please leave your feedback and issue reports in the [Issues Tracker](https://github.com/thesolarproject/solar/issues)
-
-## Developers
-
-Local **Solar Designer** (1:1 GUI simulator / agent bridge) lives at `solar-designer/` and is gitignored — clone the tree or create it locally, then `cd solar-designer && npm install && npm start`. See `solar-designer/README.md` when present.
-
-# solar-os
-# solar-os
+This is a first device-test build. It has not been verified on a physical Y1 in this build environment. Use ADB installation first and keep a recovery path.

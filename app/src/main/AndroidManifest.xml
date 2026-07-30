@@ -1,308 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
-    <uses-permission android:name="android.permission.GET_TASKS" />
-    <uses-permission android:name="android.permission.SHUTDOWN" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.DEVICE_POWER" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.REORDER_TASKS" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-    <uses-permission android:name="android.permission.SET_TIME" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission android:name="android.permission.BLUETOOTH_PRIVILEGED" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.SET_WALLPAPER" />
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.INJECT_EVENTS" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <uses-permission android:name="android.permission.BROADCAST_STICKY" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.ACCESS_FM_RADIO" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.CAPTURE_AUDIO_OUTPUT" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.SET_PREFERRED_APPLICATIONS" tools:ignore="ProtectedPermissions" />
-    <permission
-        android:name="com.solar.launcher.permission.OVERLAY_TRIGGER"
-        android:protectionLevel="signatureOrSystem" />
-    <!-- API 17 adb backup cannot selectively exclude OAuth/Soulseek credentials. -->
+
     <application
-        android:name=".SolarApplication"
         android:allowBackup="false"
-        android:usesCleartextTraffic="true"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/ic_launcher"
+        android:hardwareAccelerated="false"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.Solar"
-        tools:targetApi="31">
-        <!-- 2026-07-08 — Voluntary OverlayMenuClient opt-in (hooks still work without this). -->
-        <meta-data
-            android:name="com.solar.launcher.overlay_opt_in"
-            android:value="true" />
+        android:theme="@style/Theme.RockboxSolar"
+        android:usesCleartextTraffic="true">
         <activity
-            android:name=".SolarLaunchActivity"
+            android:name=".MainActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="true"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
-            android:screenOrientation="sensor"
-            android:noHistory="true"
-            android:excludeFromRecents="true">
-            <!-- 2026-07-14 — Tiny MAIN/LAUNCHER: portrait lock before MainActivity class load.
-                 Was: MAIN on MainActivity (huge; MT6572 stalls → stuck landscape).
-                 Reversal: delete this activity; restore MAIN filter on MainActivity. -->
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:screenOrientation="sensor"
-            android:configChanges="keyboardHidden">
-            <!-- 2026-07-14 — No longer LAUNCHER; entered via SolarLaunchActivity.
-                 Reversal: restore MAIN/LAUNCHER intent-filter here. -->
-        </activity>
-        <!-- 2026-07-20 — sensor + LandscapeOrientationGuard (chrome portrait / Y1 landscape).
-             Was: hardcoded landscape — phones spun during rooted prep wizard. -->
-        <activity
-            android:name=".platform.PlatformPrepWizardActivity"
-            android:exported="false"
-            android:launchMode="singleTop"
-            android:noHistory="true"
-            android:screenOrientation="sensor"
-            android:theme="@style/Theme.Solar" />
-        <activity
-            android:name=".EmergencyRecoveryActivity"
-            android:exported="false"
-            android:launchMode="singleTop"
-            android:screenOrientation="landscape"
-            android:theme="@style/Theme.Solar" />
-        <activity
-            android:name=".PackageLauncherActivity"
-            android:exported="false"
-            android:screenOrientation="landscape"
-            android:theme="@style/Theme.Solar" />
-        <receiver android:name=".BootReceiver" android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
-        <receiver android:name=".UsbHostWakeReceiver" android:exported="true">
-            <intent-filter>
-                <action android:name="android.hardware.usb.action.USB_STATE" />
-            </intent-filter>
-        </receiver>
-        <receiver android:name=".SolarRestartReceiver" android:exported="false">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.RESTART_SOLAR" />
-            </intent-filter>
-        </receiver>
-        <receiver android:name=".ScanTriggerReceiver" android:exported="false">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.START_LIBRARY_SCAN" />
-            </intent-filter>
-        </receiver>
-        <receiver android:name=".BluetoothAudioRepairReceiver" android:exported="true">
-            <intent-filter android:priority="1000">
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.bluetooth.adapter.action.STATE_CHANGED" />
-                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
-                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
-                <action android:name="android.bluetooth.device.action.BOND_STATE_CHANGED" />
-                <action android:name="android.bluetooth.device.action.PAIRING_REQUEST" />
-                <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
-            </intent-filter>
-        </receiver>
-        <service android:name=".BluetoothAudioRepairService" android:exported="false" />
-        <service
-            android:name=".SolarHandoffService"
-            android:exported="false" />
-        <receiver android:name=".JjHandoffReceiver" android:exported="false">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.ARM_JJ_HANDOFF" />
-            </intent-filter>
-        </receiver>
-        <!-- No signature permission — system_server starts this when GlobalActions is hooked. -->
-        <service
-            android:name=".SolarOverlayService"
-            android:exported="true"
-            android:process=":overlay" />
-        <!-- 2026-07-06 — :watchdog enforces JJ/Rockbox HOME when user chose alternate launcher. -->
-        <service
-            android:name=".LauncherWatchdogService"
-            android:exported="false"
-            android:process=":watchdog" />
-        <!-- Process management service to kill background apps -->
-        <service android:name=".service.ProcessManagerService" android:exported="false" android:process=":overlay" />
-        <!-- 2026-07-08 — IPC in main process so MainActivity solar_home_* dispatch reaches companion.
-             Was: :overlay process — registerActionHandler in MainActivity never saw binder calls.
-             Reversal: restore android:process=":overlay" if sessions must live with SolarOverlayService. -->
-        <service
-            android:name=".SolarOverlayStateService"
-            android:exported="true"
-            android:permission="com.solar.launcher.permission.OVERLAY_TRIGGER" />
-        <receiver
-            android:name=".LauncherHomeReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.SET_PREFERRED_HOME" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".OverlayPlaybackReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.OVERLAY_QUEUE_PLAY" />
-                <action android:name="com.solar.launcher.action.OVERLAY_QUEUE_MOVE" />
-                <action android:name="com.solar.launcher.action.OVERLAY_TRANSPORT" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".PowerOverlayOpenReceiver"
-            android:exported="true"
-            android:process=":overlay">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_POWER" />
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_VOLUME" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".AppMenuOverlayReceiver"
-            android:exported="true"
-            android:process=":overlay">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_APP_MENU" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".NativeDialogOverlayReceiver"
-            android:exported="true"
-            android:process=":overlay">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_NATIVE_DIALOG" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".UsbStorageOverlayReceiver"
-            android:exported="true"
-            android:process=":overlay">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_USB_STORAGE" />
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_USB_STORAGE_LOCK" />
-            </intent-filter>
-        </receiver>
-        <!-- 2026-07-08 — Companion lock ↔ main suspend; main process only (never starts Home). -->
-        <receiver
-            android:name=".UsbStorageLockSuspendReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.USB_STORAGE_LOCKED" />
-                <action android:name="com.solar.launcher.action.USB_STORAGE_UNLOCKED" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".BluetoothPairingOverlayReceiver"
-            android:exported="true"
-            android:process=":overlay">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_BT_PAIRING" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".LauncherPickerOverlayReceiver"
-            android:exported="true"
-            android:process=":overlay">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_LAUNCHER_PICKER" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".LauncherRecoveryOverlayReceiver"
-            android:exported="true"
-            android:process=":overlay">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_LAUNCHER_RECOVERY" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".OverlayKeyReceiver"
-            android:exported="true"
-            android:process=":overlay">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.OVERLAY_KEY" />
-            </intent-filter>
-        </receiver>
-        <receiver
-            android:name=".OverlayTriggerReceiver"
-            android:exported="true"
-            android:process=":overlay"
-            android:permission="com.solar.launcher.permission.OVERLAY_TRIGGER">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_POWER" />
-                <action android:name="com.solar.launcher.action.SHOW_OVERLAY_VOLUME" />
-            </intent-filter>
-        </receiver>
-        <!-- Main process — :overlay broadcasts here to re-arm wheel inject after modal dismiss. -->
-        <receiver android:name=".OverlayHandoffRestoreReceiver" android:exported="false">
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.OVERLAY_DISMISSED" />
-                <action android:name="com.solar.launcher.action.OVERLAY_ARMED" />
-            </intent-filter>
-        </receiver>
-        <service
-            android:name=".SolarInputMethodService"
-            android:label="@string/solar_ime_label"
-            android:permission="android.permission.BIND_INPUT_METHOD"
-            android:exported="true"
-            android:process=":overlay">
-            <intent-filter>
-                <action android:name="android.view.InputMethod" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.IME_KEY" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="com.solar.launcher.action.IME_DISMISS" />
-            </intent-filter>
-            <meta-data
-                android:name="android.view.im"
-                android:resource="@xml/solar_ime_method" />
-        </service>
-        <service
-            android:name=".SolarImeAccessibilityService"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/solar_ime_accessibility" />
-        </service>
-        <receiver android:name=".MainActivity$MediaBtnReceiver" android:exported="true">
-            <intent-filter android:priority="999">
-                <action android:name="android.intent.action.MEDIA_BUTTON" />
-            </intent-filter>
-        </receiver>
     </application>
-
 </manifest>

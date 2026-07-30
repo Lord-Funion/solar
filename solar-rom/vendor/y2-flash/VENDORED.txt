@@ -1,6 +1,0 @@
-# 2026-07-06 — Y2 MTK / SP Flash reference artifacts (flashing tools).
-# EBR2 — optional SP Flash Tool file (512 B); missing from some Y2 ATA base zips.
-#        Bundled into rom_y2.zip by build-rom.sh when absent. Not a shifted partition.
-# MT6582_Android_scatter.txt — stock ATA Y2 partition map (ANDROID @ 0x6500000).
-# 2026-07-16 — Restored stock scatter after a bad “EBR2 insert” revision shifted system/
-# userdata by 0x80000 and caused bootloops on remote-built rom_y2.zip.
