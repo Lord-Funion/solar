@@ -34,10 +34,17 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Run Android Lint
-        run: gradle --no-daemon --stacktrace :app:lintDebug
+      - name: Run Android Lint and preserve status
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace :app:lintDebug
+          status=$?
+          echo "$status" > /tmp/rockbox-solar-lint-status
+          exit 0
 
-      - name: Package hardware-test files
+      - name: Package hardware-test files and Lint report
+        if: always()
         shell: bash
         run: |
           set -euxo pipefail
@@ -45,15 +52,24 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk dist/RockboxSolar-v0.3-debug.apk
           cp README.md LICENSE install-y1.sh uninstall-y1.sh dist/
           cp docs/FEATURE-MATRIX.md docs/Y1-HARDWARE-VALIDATION.md dist/
-          cp app/build/reports/lint-results-debug.html dist/
+          test -f app/build/reports/lint-results-debug.html && cp app/build/reports/lint-results-debug.html dist/ || true
+          test -f app/build/reports/lint-results-debug.txt && cp app/build/reports/lint-results-debug.txt dist/ || true
           (cd dist && sha256sum RockboxSolar-v0.3-debug.apk > SHA256SUMS.txt)
           chmod +x dist/install-y1.sh dist/uninstall-y1.sh
-          (cd dist && zip -9 RockboxSolar-v0.3-package.zip RockboxSolar-v0.3-debug.apk README.md LICENSE FEATURE-MATRIX.md Y1-HARDWARE-VALIDATION.md lint-results-debug.html install-y1.sh uninstall-y1.sh SHA256SUMS.txt)
+          (cd dist && zip -9 RockboxSolar-v0.3-package.zip ./*)
 
-      - name: Upload APK package
+      - name: Upload APK and Lint package
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rockbox-solar-v0.3-apk
           path: dist/
           if-no-files-found: error
           retention-days: 14
+
+      - name: Enforce Lint gate
+        if: always()
+        shell: bash
+        run: |
+          status="$(cat /tmp/rockbox-solar-lint-status)"
+          test "$status" -eq 0
