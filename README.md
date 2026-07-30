@@ -1,142 +1,70 @@
-# Rockbox Solar (clean-room Android shell)
+# Rockbox Solar 0.3
 
-Rockbox Solar is an unofficial, wheel-first Android launcher and music player for the Innioasis Y1/Y2 family. It is a new implementation and does **not** copy Solar source code or Rockbox firmware code.
+Rockbox Solar is a clean-room, wheel-first Android launcher and media shell for the Innioasis Y1/Y2 family. It does not copy Rockbox firmware code or Solar source code.
 
-## Implemented in v0.2
+## Implemented
 
-- Unified HOME launcher for Rockbox Player, YouTube Search, Remote SSH + SCP, Solar Reach, Wi-Fi, Bluetooth, and Android settings
-- Rockbox-style local file browser, recursive music scan, Now Playing, playlist, seeking, hardware media keys, quick controls, and JSON themes
-- Podcast RSS/Atom browsing and enclosure downloads
-- Resumable authorized direct-file downloads
-- Public YouTube Data API v3 metadata search for title, channel, IDs, URL, duration, views, publication date, description, and thumbnail URL
-- Copy or open a YouTube result URL
-- Pass a selected result into an SSH command template
-- Saved SSH profiles using password or private-key authentication
-- Strict host-key verification with first-use fingerprint confirmation and a persistent local `known_hosts` file
-- Arbitrary user-entered SSH commands with stdout, stderr, exit status, progress, timeout, and command history
-- Run a command and then retrieve a specified remote output file using the SCP protocol
-- SCP-only retrieval to `/sdcard/Music/RockboxSolar/Remote`
-- YouTube-to-SSH placeholders: `{url}`, `{videoId}`, `{title}`, and `{channel}`; each value is shell-quoted before insertion
-- Optional bridge into a separately installed Solar build for Reach, Deezer, and Soulseek
-- Android 4.2.2 / API 17 compatibility target
+- Rockbox-style local music browser, recursive library scan, playback queue, seeking, media keys, podcasts, authorized direct downloads, and JSON themes
+- DSP presets, bass boost, virtualizer, microphone recording, and FM application/hardware probing
+- Reach/Soulseek inside the APK:
+  - experimental direct Soulseek login/search/download protocol client
+  - slskd-compatible search and queued downloads for the more reliable full-network path
+- Deezer public catalog search and official Deezer-provided preview playback
+- LALAL.AI stem separation, local stem caching, and synchronized two-stem mixing
+- Original-Y1 theme archive translator for colors, static backgrounds, XML/properties palettes, and scale hints
+- Built-in wheel-friendly plugins: Snake, stopwatch, calculator, dice roller, starfield, and system information
+- Official YouTube Data API metadata search
+- Saved SSH hosts, verified host keys, arbitrary command execution, command history, and SCP retrieval
+- YouTube/Deezer URL-to-SSH command templates with shell-quoted placeholders
+- Replacement Wi-Fi interface: enable/disable, scan, connect, disconnect, forget, signal/security details
+- Replacement Bluetooth interface: enable/disable, discovery, pairing, unpairing, A2DP connect/disconnect where firmware permits it
+- Checksum-verified APK updates and Type-A/Type-B-gated ROM package staging
+- Physical-Y1 validation suite with key/scan-code capture, storage, audio, Wi-Fi, Bluetooth, microphone/FM, root probes, and JSON report export
 
-## YouTube setup
+## Important boundaries
 
-The app uses the official YouTube Data API v3 for public metadata only.
-
-1. Create a Google Cloud project.
-2. Enable **YouTube Data API v3**.
-3. Create an API key.
-4. Open **YouTube Search → API Key** on the player and paste it.
-
-The key is stored in this app's private preferences. The YouTube feature does not download video or audio. It can hand a selected public URL to a command on a computer you control.
-
-## SSH and SCP setup
-
-Open **Remote SSH + SCP → Add SSH host** and enter a display name, hostname/IP, port, username, and either password or private-key authentication.
-
-Example private-key path:
-
-```text
-/sdcard/RockboxSolar/ssh/id_ed25519
-```
-
-Passwords and key passphrases are requested per connection and are not saved. On the first connection, compare the displayed host-key fingerprint with the fingerprint on the computer before accepting it.
-
-The SSH menu supports:
-
-- run command
-- run command, then SCP a remote file back
-- SCP a remote file without running a command
-- edit/delete hosts
-- command history
-
-Received files are placed in:
-
-```text
-/sdcard/Music/RockboxSolar/Remote
-```
-
-For a YouTube result, select **Run SSH command with URL**. A command template may contain:
-
-```text
-{url} {videoId} {title} {channel}
-```
-
-After entering the command, optionally provide the exact remote output path to copy back after the command exits.
-
-## Boundaries
-
-This project does not contain a Deezer media extractor, ARL-cookie handler, DRM circumvention, copied Solar implementation, or built-in YouTube media downloader. The Deezer/Reach/Soulseek entries only open a separately installed Solar application. You control the remote command and are responsible for using it only with systems and content you are authorized to access or process.
+- Deezer integration uses the public catalog and previews exposed by Deezer. It does not include ARL-cookie extraction, private download endpoints, DRM removal, or subscription-track downloading.
+- Soulseek must be used only for files you are authorized to obtain. Direct protocol mode is experimental and requires a reachable peer-listener port; slskd mode is the reliable fallback.
+- LALAL.AI requires the user's own license key and may consume paid processing minutes.
+- Theme translation cannot execute vendor scripts, proprietary fonts/widgets, or device-specific binaries.
+- The plugin menu contains Android-native equivalents. It is not a binary port of every upstream Rockbox C plugin or codec.
+- The ROM manager verifies and stages packages only. It never automatically flashes preloader, LK, boot, recovery, or other boot-critical partitions.
+- A successful CI build is not physical Y1 validation. Run the Hardware Validation screen on the actual player and keep ADB recovery available.
 
 ## Build
 
-```bash
+Requirements: JDK 21, Android SDK 35, and Gradle 8.9.
+
+```sh
 gradle --no-daemon :app:assembleDebug
 ```
 
-APK:
+The APK is produced at `app/build/outputs/apk/debug/app-debug.apk`.
 
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
+## Install on a Y1
 
-## Install without flashing
+First test as a normal APK:
 
-```bash
+```sh
 adb devices
-adb install -r RockboxSolar-v0.2-debug.apk
+adb install -r RockboxSolar-v0.3-debug.apk
 ```
 
-Press Home and select **Rockbox Solar**. Test the wheel, Select, Back, playback, YouTube entry, and SSH entry before choosing **Always**.
+Press Home, select Rockbox Solar, and choose **Just once** until wheel, Select, Back, playback, Wi-Fi, Bluetooth, and ADB recovery have been tested. Do not flash boot-critical partitions merely to install this APK.
 
-## Optional rooted system-app installation
+Uninstall:
 
-An APK is installed, not normally flashed:
-
-```bash
-adb push RockboxSolar-v0.2-debug.apk /data/local/tmp/RockboxSolar.apk
-adb shell su -c 'mount -o remount,rw /system'
-adb shell su -c 'cp /data/local/tmp/RockboxSolar.apk /system/app/RockboxSolar.apk'
-adb shell su -c 'chmod 0644 /system/app/RockboxSolar.apk'
-adb shell su -c 'sync'
-adb reboot
-```
-
-Some Y1 images use different root/remount commands. Verify `/system` is writable first.
-
-## Recovery
-
-```bash
+```sh
 adb uninstall dev.lordfunion.rockboxsolar
 ```
 
-For a system-app installation:
+## Storage
 
-```bash
-adb shell su -c 'mount -o remount,rw /system'
-adb shell su -c 'rm -f /system/app/RockboxSolar.apk'
-adb reboot
-```
-
-Do **not** flash `preloader`, `lk`, `boot`, or `recovery` merely to install this APK. Y1 Type A and Type B boot-critical images are not interchangeable.
-
-## Theme format
-
-Create JSON files under `/sdcard/RockboxSolar/themes`:
-
-```json
-{
-  "name": "Purple Parlor",
-  "background": "#120A1F",
-  "foreground": "#F5ECFF",
-  "accent": "#C68CFF",
-  "selected": "#3C205B",
-  "muted": "#A68DBD",
-  "fontScale": 1.0
-}
-```
-
-## Status
-
-This is a development build. Compilation and packaging are checked in GitHub Actions. Physical Y1 networking, host-key prompts, SSH algorithm negotiation, SCP interoperability, storage permissions, and long-running remote commands still require device testing before a final release.
+- Music/downloads: `/sdcard/Music/RockboxSolar`
+- SSH/SCP files: `/sdcard/Music/RockboxSolar/Remote`
+- Reach downloads: `/sdcard/Music/RockboxSolar/Reach`
+- Stems: `/sdcard/Music/RockboxSolar/Stems`
+- Recordings: `/sdcard/Music/RockboxSolar/Recordings`
+- Themes: `/sdcard/RockboxSolar/themes`
+- Updates: `/sdcard/RockboxSolar/Updates`
+- Validation reports: `/sdcard/RockboxSolar/Diagnostics`
