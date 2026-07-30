@@ -17,7 +17,22 @@
         android:theme="@style/Theme.RockboxSolar"
         android:usesCleartextTraffic="true">
         <activity
+            android:name=".YouTubeActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity
+            android:name=".SshActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity
             android:name=".MainActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity
+            android:name=".LauncherActivity"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="true"
             android:launchMode="singleTask"
