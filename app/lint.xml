@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- HardwareTestActivity intentionally probes Bluetooth state and catches SecurityException.
+         Normal Bluetooth operations use explicit Android 12 runtime permission gates. -->
+    <issue id="MissingPermission">
+        <ignore path="src/main/java/dev/lordfunion/rockboxsolar/HardwareTestActivity.java" />
+    </issue>
+</lint>
