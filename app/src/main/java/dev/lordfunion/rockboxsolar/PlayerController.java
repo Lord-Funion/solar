@@ -17,6 +17,7 @@ final class PlayerController implements MediaPlayer.OnCompletionListener, MediaP
     private final Listener listener;
     private final ArrayList<File> queue = new ArrayList<File>();
     private MediaPlayer player;
+    private final AudioEffects effects = new AudioEffects();
     private int index = -1;
     private String title = "Nothing playing";
     private String artist = "";
@@ -62,6 +63,7 @@ final class PlayerController implements MediaPlayer.OnCompletionListener, MediaP
             player.setOnErrorListener(this);
             player.setDataSource(file.getAbsolutePath());
             player.prepare();
+            effects.attach(context, player.getAudioSessionId());
             player.start();
         } catch (Exception e) {
             title = "Playback failed: " + file.getName();
@@ -126,6 +128,7 @@ final class PlayerController implements MediaPlayer.OnCompletionListener, MediaP
     private void releasePlayer() {
         if (player != null) {
             try { player.stop(); } catch (Exception ignored) { }
+            effects.release();
             player.release();
             player = null;
         }
