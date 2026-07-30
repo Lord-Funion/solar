@@ -1,0 +1,62 @@
+name: Build Rockbox Solar v0.3 Strict
+
+on:
+  push:
+    branches:
+      - agent/rockbox-solar-cleanroom
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Apply documented API-17 compatibility patch
+        run: bash ci/apply-v03-api17-fixes.sh
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Assemble APK
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Run Android Lint
+        run: gradle --no-daemon --stacktrace :app:lintDebug
+
+      - name: Package hardware-test build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/RockboxSolar-v0.3-strict-debug.apk
+          cp README.md LICENSE install-y1.sh uninstall-y1.sh dist/
+          cp docs/FEATURE-MATRIX.md docs/Y1-HARDWARE-VALIDATION.md dist/
+          cp ci/apply-v03-api17-fixes.sh dist/
+          cp app/lint.xml dist/
+          cp app/build/reports/lint-results-debug.html dist/
+          cp app/build/reports/lint-results-debug.txt dist/
+          (cd dist && sha256sum RockboxSolar-v0.3-strict-debug.apk > SHA256SUMS.txt)
+          chmod +x dist/install-y1.sh dist/uninstall-y1.sh dist/apply-v03-api17-fixes.sh
+          (cd dist && zip -9 RockboxSolar-v0.3-strict-package.zip ./*)
+
+      - name: Upload strict APK package
+        uses: actions/upload-artifact@v4
+        with:
+          name: rockbox-solar-v0.3-strict-apk
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
