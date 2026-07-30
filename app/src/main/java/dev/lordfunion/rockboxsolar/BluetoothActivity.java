@@ -1,6 +1,7 @@
 package dev.lordfunion.rockboxsolar;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
@@ -26,6 +27,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Set;
 
+@SuppressLint("MissingPermission")
 public final class BluetoothActivity extends Activity {
     private BluetoothAdapter bluetooth;
     private AppUi.Screen ui;
@@ -93,9 +95,20 @@ public final class BluetoothActivity extends Activity {
 
     @Override protected void onPause() { if (receiverRegistered) { unregisterReceiver(receiver); receiverRegistered = false; } super.onPause(); }
 
+    private boolean hasConnectPermission() {
+        return Build.VERSION.SDK_INT < 31
+                || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasScanPermission() {
+        return Build.VERSION.SDK_INT < 31
+                || checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
+    }
+
     private void reload() {
         adapter.clear(); devices.clear(); seen.clear();
         if (bluetooth == null) { adapter.add("This device has no Bluetooth adapter"); adapter.notifyDataSetChanged(); return; }
+        if (!hasConnectPermission()) { adapter.add("Grant Bluetooth permission"); adapter.notifyDataSetChanged(); return; }
         adapter.add((bluetooth.isEnabled() ? "Disable" : "Enable") + " Bluetooth");
         adapter.add(bluetooth.isDiscovering() ? "Discovery running…" : "Scan for devices");
         adapter.add("Make player discoverable");
@@ -114,13 +127,13 @@ public final class BluetoothActivity extends Activity {
     }
 
     private void toggle() {
-        if (bluetooth == null) return;
+        if (bluetooth == null || !hasConnectPermission()) { requestPermissionsIfNeeded(); return; }
         try { if (bluetooth.isEnabled()) bluetooth.disable(); else bluetooth.enable(); }
         catch (SecurityException e) { Toast.makeText(this, "Firmware denied Bluetooth control", Toast.LENGTH_LONG).show(); }
     }
 
     private void discover() {
-        if (bluetooth == null) return;
+        if (bluetooth == null || !hasConnectPermission() || !hasScanPermission()) { requestPermissionsIfNeeded(); return; }
         try {
             if (!bluetooth.isEnabled()) bluetooth.enable();
             if (bluetooth.isDiscovering()) bluetooth.cancelDiscovery();
@@ -136,6 +149,7 @@ public final class BluetoothActivity extends Activity {
     }
 
     private void showDevice(final BluetoothDevice device) {
+        if (!hasConnectPermission()) { requestPermissionsIfNeeded(); return; }
         String[] actions = device.getBondState() == BluetoothDevice.BOND_BONDED
                 ? new String[]{"Connect audio", "Disconnect audio", "Unpair", "Details"}
                 : new String[]{"Pair", "Details"};
