@@ -17,36 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Check out source carrier
+      - name: Check out source
         uses: actions/checkout@v4
-
-      - name: Reconstruct and verify v0.3 source
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cat \
-            v03-parts/part-00.b64 \
-            v03-parts/part-01.b64 \
-            v03-parts/part-02.b64 \
-            v03-parts/part-03.b64 \
-            v03-parts/part-04.b64 \
-            v03-parts/part-05.b64 \
-            v03-remainder/part-00.b64 \
-            v03-remainder/part-01.b64 \
-            v03-remainder/part-02.b64 \
-            v03-remainder/part-03.b64 \
-            v03-remainder/part-04.b64 \
-            v03-remainder/part-05.b64 \
-            v03-remainder/part-06.b64 \
-            > /tmp/RockboxSolar-v0.3-source-upload.zip.b64
-          echo "c36ebbcc5699a720dcf2abda46d13afd42b729d6dd42a4015c59058eaa9a8b2e  /tmp/RockboxSolar-v0.3-source-upload.zip.b64" | sha256sum -c -
-          base64 --decode /tmp/RockboxSolar-v0.3-source-upload.zip.b64 > /tmp/RockboxSolar-v0.3-source.zip
-          echo "5b9489a53ae70101cd53de00cd5cf34ed988b7222eb2e4b9a50f8978eeb22739  /tmp/RockboxSolar-v0.3-source.zip" | sha256sum -c -
-          rm -rf build-v03
-          mkdir build-v03
-          unzip -q /tmp/RockboxSolar-v0.3-source.zip -d build-v03
-          test -f build-v03/rockbox-solar/settings.gradle
-          test -f build-v03/rockbox-solar/app/build.gradle
 
       - name: Set up Java 21
         uses: actions/setup-java@v4
@@ -60,30 +32,23 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build debug APK
-        working-directory: build-v03/rockbox-solar
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Package hardware-test build
+      - name: Package device-test files
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p dist
-          cp build-v03/rockbox-solar/app/build/outputs/apk/debug/app-debug.apk dist/RockboxSolar-v0.3-debug.apk
-          cp build-v03/rockbox-solar/README.md dist/
-          cp build-v03/rockbox-solar/LICENSE dist/
-          cp build-v03/rockbox-solar/install-y1.sh dist/
-          cp build-v03/rockbox-solar/uninstall-y1.sh dist/
-          cp build-v03/rockbox-solar/docs/FEATURE-MATRIX.md dist/
-          cp build-v03/rockbox-solar/docs/Y1-HARDWARE-VALIDATION.md dist/
-          cp /tmp/RockboxSolar-v0.3-source.zip dist/
+          cp app/build/outputs/apk/debug/app-debug.apk dist/RockboxSolar-v0.3-debug.apk
+          cp README.md LICENSE install-y1.sh uninstall-y1.sh dist/
+          (cd dist && sha256sum RockboxSolar-v0.3-debug.apk > SHA256SUMS.txt)
           chmod +x dist/install-y1.sh dist/uninstall-y1.sh
-          (cd dist && sha256sum RockboxSolar-v0.3-debug.apk RockboxSolar-v0.3-source.zip > SHA256SUMS.txt)
-          (cd dist && zip -9 RockboxSolar-v0.3-package.zip RockboxSolar-v0.3-debug.apk RockboxSolar-v0.3-source.zip README.md LICENSE FEATURE-MATRIX.md Y1-HARDWARE-VALIDATION.md install-y1.sh uninstall-y1.sh SHA256SUMS.txt)
+          (cd dist && zip -9 RockboxSolar-v0.3-package.zip RockboxSolar-v0.3-debug.apk README.md LICENSE install-y1.sh uninstall-y1.sh SHA256SUMS.txt)
 
       - name: Upload APK package
         uses: actions/upload-artifact@v4
         with:
-          name: rockbox-solar-v03-apk
+          name: rockbox-solar-v0.3-apk
           path: dist/
           if-no-files-found: error
           retention-days: 14
