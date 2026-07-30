@@ -78,7 +78,7 @@ final class DownloadEngine {
         jobs.add(0, job);
         listener.onDownloadsChanged();
         executor.execute(new Runnable() {
-            @Override public void run() { run(job); }
+            @Override public void run() { DownloadEngine.this.run(job); }
         });
         return job;
     }
