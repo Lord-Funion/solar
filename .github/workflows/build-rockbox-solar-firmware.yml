@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/rockbox-solar-firmware
+  pull_request:
+    branches:
+      - agent/rockbox-solar-cleanroom
   workflow_dispatch:
 
 permissions:
