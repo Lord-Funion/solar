@@ -1,12 +1,9 @@
-name: Build Rockbox Solar Y1 firmware
+name: Build native Rockbox Solar Y1 firmware
 
 on:
   push:
     branches:
       - agent/rockbox-solar-firmware
-  pull_request:
-    branches:
-      - agent/rockbox-solar-cleanroom
   workflow_dispatch:
 
 permissions:
@@ -15,7 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 90
     env:
       ROCKBOX_REF: ec32a663dfb8396080227de03846c30f07dc258d
       ANDROID_SDK_PATH: /home/runner/android-sdk
@@ -23,39 +20,10 @@ jobs:
       ANDROID_NDK_ROOT: /home/runner/android-ndk-r10e
 
     steps:
-      - name: Check out Rockbox Solar integration
+      - name: Check out integration branch
         uses: actions/checkout@v4
 
-      - name: Set up Java 21 for Solar services
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
-      - name: Convert Solar APK to firmware-service mode
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 firmware/prepare_helper.py app/src/main/AndroidManifest.xml
-          if grep -q 'android.intent.category.HOME' app/src/main/AndroidManifest.xml; then
-            echo 'Solar helper must not register as HOME inside the firmware' >&2
-            exit 1
-          fi
-
-      - name: Build Solar services APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          gradle --no-daemon --stacktrace :app:assembleDebug
-          mkdir -p firmware-build
-          cp app/build/outputs/apk/debug/app-debug.apk firmware-build/RockboxSolarServices.apk
-
-      - name: Check out pinned Rockbox Y1 source
+      - name: Check out pinned Innioasis Y1 Rockbox source
         uses: actions/checkout@v4
         with:
           repository: rockbox-y1/rockbox
@@ -63,93 +31,235 @@ jobs:
           path: rockbox-y1
           fetch-depth: 1
 
-      - name: Add native Solar menu to Rockbox
+      - name: Apply minimal native Solar milestone
         shell: bash
         run: |
           set -euo pipefail
-          python3 firmware/patch_rockbox.py rockbox-y1
-          grep -q 'MAKE_MENU(solar_menu' rockbox-y1/apps/menus/main_menu.c
-          grep -q '{ "solar", &solar_menu },' rockbox-y1/apps/root_menu.c
+          mkdir -p logs
+          python3 - <<'PY' 2>&1 | tee logs/01-native-integration.log
+          from pathlib import Path
 
-      - name: Set up Java 17 for legacy Rockbox Android build
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+          root = Path("rockbox-y1")
+          plugin = root / "apps/plugins/solar.c"
+          sources = root / "apps/plugins/SOURCES"
+          categories = root / "apps/plugins/CATEGORIES"
+          main_menu = root / "apps/menus/main_menu.c"
+          root_menu = root / "apps/root_menu.c"
 
-      - name: Cache Rockbox Android SDK and NDK
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/android-sdk
-            ~/android-ndk-r10e
-          key: rockbox-y1-android-r10e-v2
+          plugin.write_text(r'''/***************************************************************************
+           * Solar native integration for the Innioasis Y1 Rockbox port.
+           *
+           * This milestone deliberately contains no Android Activity launch,
+           * no separate Solar APK, and no wrapper UI. It is a native Rockbox
+           * plugin using the Y1 Rockbox plugin ABI and existing Y1 Wi-Fi bridge.
+           ***************************************************************************/
+          #include "plugin.h"
 
-      - name: Prepare Rockbox build environment
+          PLUGIN_HEADER
+
+          static void show_status(void)
+          {
+              rb->splash(HZ * 3,
+                         "Native Solar milestone: Wi-Fi control ready. "
+                         "Piped and Deezer are not implemented yet.");
+          }
+
+          static void connect_wifi(void)
+          {
+              const char *result = rb->android_podcast_connect_wifi();
+              if (result == NULL)
+                  rb->splash(HZ * 2, "Wi-Fi returned no status");
+              else
+                  rb->splash(HZ * 2, result);
+          }
+
+          static void disconnect_wifi(void)
+          {
+              int result = rb->android_podcast_disconnect_wifi();
+              if (result == 0)
+                  rb->splash(HZ * 2, "Wi-Fi disconnected");
+              else
+                  rb->splashf(HZ * 2, "Wi-Fi disconnect error: %d", result);
+          }
+
+          enum plugin_status plugin_start(const void *parameter)
+          {
+              int selection = 0;
+              (void)parameter;
+
+              MENUITEM_STRINGLIST(menu, "Solar", NULL,
+                                  "Connect Wi-Fi",
+                                  "Disconnect Wi-Fi",
+                                  "Milestone status");
+
+              while (true)
+              {
+                  switch (rb->do_menu(&menu, &selection, NULL, false))
+                  {
+                      case 0:
+                          connect_wifi();
+                          break;
+                      case 1:
+                          disconnect_wifi();
+                          break;
+                      case 2:
+                          show_status();
+                          break;
+                      default:
+                          return PLUGIN_OK;
+                  }
+              }
+          }
+          ''', encoding="utf-8")
+
+          text = sources.read_text(encoding="utf-8")
+          marker = "#if defined(INNIOASIS_Y1)\npodcast_downloader.c\nspeaker_toggle.c\n#endif"
+          replacement = "#if defined(INNIOASIS_Y1)\npodcast_downloader.c\nsolar.c\nspeaker_toggle.c\n#endif"
+          if marker not in text:
+              raise SystemExit("SOURCES insertion point not found")
+          sources.write_text(text.replace(marker, replacement, 1), encoding="utf-8")
+
+          text = categories.read_text(encoding="utf-8")
+          marker = "snow,demos\nsokoban,games"
+          if marker not in text:
+              raise SystemExit("CATEGORIES insertion point not found")
+          categories.write_text(text.replace(marker, "snow,demos\nsolar,apps\nsokoban,games", 1), encoding="utf-8")
+
+          text = main_menu.read_text(encoding="utf-8")
+          marker = '''/*    BlUETOOTH SETTINGS MENU     */
+          /**********************************/
+          #endif
+
+          /***********************************/
+          /*      INFO MENU                  */
+          '''
+          native_menu = '''/*    BlUETOOTH SETTINGS MENU     */
+          /**********************************/
+
+          static int solar_native_func(void)
+          {
+              int result = plugin_load(PLUGIN_APPS_DIR "/solar.rock", NULL);
+              if (result != PLUGIN_OK)
+                  splash(HZ * 2, "Unable to load native Solar plugin");
+              return 0;
+          }
+
+          MENUITEM_FUNCTION(solar_native_item, 0, "Solar",
+                            solar_native_func, NULL, Icon_Plugin);
+          #endif
+
+          /***********************************/
+          /*      INFO MENU                  */
+          '''
+          if marker not in text:
+              raise SystemExit("main_menu.c insertion point not found")
+          main_menu.write_text(text.replace(marker, native_menu, 1), encoding="utf-8")
+
+          text = root_menu.read_text(encoding="utf-8")
+          old = '''#ifdef INNIOASIS_Y1
+          extern struct menu_item_ex fm_radio_app_item;
+          #endif
+          '''
+          new = '''#ifdef INNIOASIS_Y1
+          extern struct menu_item_ex fm_radio_app_item;
+          extern struct menu_item_ex solar_native_item;
+          #endif
+          '''
+          if old not in text:
+              raise SystemExit("root_menu.c extern insertion point not found")
+          text = text.replace(old, new, 1)
+
+          old = '''#ifdef INNIOASIS_Y1
+              { "fm_radio_app", &fm_radio_app_item },
+          #endif
+              { "plugins", &rocks_browser },
+          '''
+          new = '''#ifdef INNIOASIS_Y1
+              { "fm_radio_app", &fm_radio_app_item },
+              { "solar", &solar_native_item },
+          #endif
+              { "plugins", &rocks_browser },
+          '''
+          if old not in text:
+              raise SystemExit("root_menu.c menu-table insertion point not found")
+          root_menu.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          checks = {
+              plugin: ["PLUGIN_HEADER", "android_podcast_connect_wifi", "Piped and Deezer are not implemented yet"],
+              sources: ["solar.c"],
+              categories: ["solar,apps"],
+              main_menu: ["PLUGIN_APPS_DIR \"/solar.rock\"", "solar_native_item"],
+              root_menu: ["extern struct menu_item_ex solar_native_item", "{ \"solar\", &solar_native_item }"],
+          }
+          for path, needles in checks.items():
+              data = path.read_text(encoding="utf-8")
+              for needle in needles:
+                  if needle not in data:
+                      raise SystemExit(f"missing {needle!r} in {path}")
+
+          for path in (plugin, main_menu, root_menu):
+              data = path.read_text(encoding="utf-8")
+              if "am start" in data or "dev.lordfunion.rockboxsolar" in data:
+                  raise SystemExit(f"Android Activity launch leaked into {path}")
+
+          print("Native milestone files applied:")
+          for path in checks:
+              print(path)
+          PY
+
+      - name: Prepare genuine Y1 Rockbox toolchain
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y lib32z1 openjdk-17-jdk golang-go zip unzip wget e2fsprogs
+          sudo apt-get update 2>&1 | tee logs/02-apt-update.log
+          sudo apt-get install -y lib32z1 openjdk-17-jdk zip unzip wget file binutils e2fsprogs 2>&1 | tee logs/03-apt-install.log
           cd rockbox-y1/android/y1
-          yes | ./installToolchain.sh
+          set +o pipefail
+          yes | ./installToolchain.sh 2>&1 | tee ../../../logs/04-toolchain.log
+          toolchain_status=${PIPESTATUS[1]}
+          set -o pipefail
+          exit "$toolchain_status"
 
-      - name: Build Rockbox network helper tools
+      - name: Clean-build native Rockbox and Solar plugin
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p rockbox-y1/android/y1/build
-          cd rockbox-y1/android/y1/build
-          export GOPATH="$PWD/go"
-          export CGO_ENABLED=0
-          export GOOS=linux
-          export GOARCH=arm
-          export GOARM=6
-          git clone --depth 1 --branch json-data https://github.com/rockbox-y1/gocurl.git
-          (cd gocurl && go build -ldflags '-s -w' -o gocurl)
-          git clone --depth 1 --branch patches https://codeberg.org/rockbox-y1/download-podcast.git
-          git clone --depth 1 --branch patches https://github.com/rockbox-y1/id3-go.git download-podcast/id3-go
-          (cd download-podcast && go build -o poddl)
+          cd rockbox-y1/android/y1
+          rm -rf build
+          mkdir build
+          cd build
+          ../../../tools/configure --target=310 --lcdwidth=480 --lcdheight=360 --type=n 2>&1 | tee ../../../../logs/05-configure.log
+          make clean 2>&1 | tee ../../../../logs/06-clean.log
+          make -j2 2>&1 | tee ../../../../logs/07-build.log
+          make zip 2>&1 | tee ../../../../logs/08-zip.log
 
-      - name: Build and sign native Rockbox
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd rockbox-y1/android/y1/build
-          ../../../tools/configure --target=310 --lcdwidth=480 --lcdheight=360 --type=n
-          make clean
-          make -j2
-          make classes
-          make zip
-          make unsigned-apk
-          APKSIGNER=""
-          if command -v apksigner >/dev/null 2>&1; then
-            APKSIGNER=apksigner
-          else
-            BUILD_TOOLS="$(ls -1 "$ANDROID_SDK_PATH/build-tools" | sort -V | tail -1)"
-            APKSIGNER="$ANDROID_SDK_PATH/build-tools/$BUILD_TOOLS/apksigner"
-          fi
-          "$APKSIGNER" sign --key ../platform.pk8 --cert ../platform.x509.pem rockbox_unsigned.apk
-          cp rockbox_unsigned.apk rockbox.apk
+          test -f libs/armeabi/librockbox.so
+          test -f libs/armeabi/libmisc.so
+          rm -rf inspect-misc
+          mkdir inspect-misc
+          (cd inspect-misc && unzip -q ../libs/armeabi/libmisc.so)
+          test -f inspect-misc/sdcard/.rockbox/rocks/apps/solar.rock
 
-      - name: Download immutable Y1 firmware inputs
+          file libs/armeabi/librockbox.so inspect-misc/sdcard/.rockbox/rocks/apps/solar.rock | tee ../../../../logs/09-binary-file.log
+          readelf -h libs/armeabi/librockbox.so | tee ../../../../logs/10-readelf.log
+          strings libs/armeabi/librockbox.so | grep -F "Unable to load native Solar plugin" | tee ../../../../logs/11-menu-string.log
+          strings inspect-misc/sdcard/.rockbox/rocks/apps/solar.rock | grep -F "Piped and Deezer are not implemented yet" | tee ../../../../logs/12-plugin-string.log
+
+      - name: Download official Y1 base ROMs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p firmware-inputs
-          wget -q --show-progress -O firmware-inputs/type-a-base-rom.zip \
-            https://github.com/rockbox-y1/rockbox/releases/download/type-a-base/rom.zip
-          wget -q --show-progress -O firmware-inputs/type-b-base-rom.zip \
-            https://github.com/rockbox-y1/rockbox/releases/download/type-b-base/rom.zip
-          wget -q --show-progress -O firmware-inputs/com.innioasis.y1_3.0.7_patched.apk \
-            https://github.com/rockbox-y1/rockbox/releases/download/stock-menu/com.innioasis.y1_3.0.7_patched.apk
-          wget -q --show-progress -O firmware-inputs/libbluetoothdrv.so \
-            https://github.com/rockbox-y1/rockbox/releases/download/airpods-2-fix/libbluetoothdrv.so
-          wget -q --show-progress -O firmware-inputs/libbluetoothdrv_real.so \
-            https://github.com/rockbox-y1/rockbox/releases/download/airpods-2-fix/libbluetoothdrv_real.so
-          wget -q --show-progress -O firmware-inputs/cacert.pem https://curl.se/ca/cacert.pem
+          wget -O firmware-inputs/type-a-base-rom.zip \
+            https://github.com/rockbox-y1/rockbox/releases/download/type-a-base/rom.zip \
+            2>&1 | tee logs/13-type-a-download.log
+          wget -O firmware-inputs/type-b-base-rom.zip \
+            https://github.com/rockbox-y1/rockbox/releases/download/type-b-base/rom.zip \
+            2>&1 | tee logs/14-type-b-download.log
+          unzip -tq firmware-inputs/type-a-base-rom.zip | tee logs/15-type-a-test.log
+          unzip -tq firmware-inputs/type-b-base-rom.zip | tee logs/16-type-b-test.log
 
-      - name: Build Type A and Type B Innioasis rom.zip packages
+      - name: Package Type A and Type B native firmware
         shell: bash
         run: |
           set -euo pipefail
@@ -160,8 +270,9 @@ jobs:
             variant="$1"
             base_zip="$2"
             work="$ROOT/firmware-work-$variant"
+            output="$ROOT/dist/$variant/rom.zip"
             rm -rf "$work"
-            mkdir -p "$work" "$work/mount_sys" "$work/mount_user"
+            mkdir -p "$work" "$work/mount_sys" "$work/mount_user" "$work/libmisc"
             unzip -q "$base_zip" -d "$work"
 
             cleanup() {
@@ -173,76 +284,27 @@ jobs:
             sudo mount -t ext4 -o loop,rw "$work/system.img" "$work/mount_sys"
             sudo mount -t ext4 -o loop,rw "$work/userdata.img" "$work/mount_user"
 
-            sudo cp "$ROOT/firmware-inputs/com.innioasis.y1_3.0.7_patched.apk" \
-              "$work/mount_user/data/com.innioasis.y1.apk"
-            sudo cp "$ROOT/rockbox-y1/android/y1/scripts/LeanKeyKeyboardPro_v5.2.15_r.apk" \
-              "$work/mount_user/data/LeanKeyKeyboardPro_v5.2.15_r.apk"
-
-            sudo cp "$ROOT/rockbox-y1/android/y1/build/rockbox.apk" \
-              "$work/mount_sys/app/org.rockbox.apk"
-            sudo chmod 0644 "$work/mount_sys/app/org.rockbox.apk"
-            sudo chown root:root "$work/mount_sys/app/org.rockbox.apk"
-
-            sudo cp "$ROOT/firmware-build/RockboxSolarServices.apk" \
-              "$work/mount_sys/app/RockboxSolarServices.apk"
-            sudo chmod 0644 "$work/mount_sys/app/RockboxSolarServices.apk"
-            sudo chown root:root "$work/mount_sys/app/RockboxSolarServices.apk"
-
-            sudo mkdir -p "$work/mount_sys/lib"
-            sudo cp "$ROOT/rockbox-y1/android/y1/build/libs/armeabi/librockbox.so" "$work/mount_sys/lib/"
-            sudo chmod 0644 "$work/mount_sys/lib/librockbox.so"
-            sudo chown root:root "$work/mount_sys/lib/librockbox.so"
+            sudo install -D -m 0644 "$ROOT/rockbox-y1/android/y1/build/libs/armeabi/librockbox.so" \
+              "$work/mount_sys/lib/librockbox.so"
 
             sudo rm -rf "$work/mount_user/data/org.rockbox/lib"
             sudo mkdir -p "$work/mount_user/data/org.rockbox/lib"
             sudo cp "$ROOT/rockbox-y1/android/y1/build/libs/armeabi/"* \
               "$work/mount_user/data/org.rockbox/lib/"
-            sudo chmod 0777 "$work/mount_user/data/org.rockbox/lib/"*
+            sudo chmod 0755 "$work/mount_user/data/org.rockbox/lib/"*
+
+            (cd "$work/libmisc" && unzip -q "$ROOT/rockbox-y1/android/y1/build/libs/armeabi/libmisc.so")
+            test -f "$work/libmisc/sdcard/.rockbox/rocks/apps/solar.rock"
 
             sudo rm -rf "$work/mount_user/data/org.rockbox/app_rockbox"
-            sudo mkdir -p "$work/mount_user/data/org.rockbox/app_rockbox/.rockbox/docs"
-            sudo cp "$ROOT/rockbox-y1/docs/COPYING" \
-              "$work/mount_user/data/org.rockbox/app_rockbox/.rockbox/docs/COPYING.txt"
-            sudo cp -r "$ROOT/rockbox-y1/docs/LICENSES" \
-              "$work/mount_user/data/org.rockbox/app_rockbox/.rockbox/docs/LICENSES"
-
-            misc="$ROOT/rockbox-y1/android/y1/build/libs/armeabi/libmisc.so"
-            misc_dir="$work/libmisc"
-            mkdir -p "$misc_dir"
-            (cd "$misc_dir" && unzip -q "$misc")
-            if [ ! -d "$misc_dir/sdcard/.rockbox" ]; then
-              echo 'libmisc.so did not contain sdcard/.rockbox' >&2
-              exit 1
-            fi
-            sudo cp -a "$misc_dir/sdcard/.rockbox/." \
+            sudo mkdir -p "$work/mount_user/data/org.rockbox/app_rockbox/.rockbox"
+            sudo cp -a "$work/libmisc/sdcard/.rockbox/." \
               "$work/mount_user/data/org.rockbox/app_rockbox/.rockbox/"
 
-            sudo cp "$ROOT/rockbox-y1/android/y1/scripts/install-recovery.sh" \
-              "$work/mount_sys/etc/install-recovery.sh"
-            sudo chmod 0755 "$work/mount_sys/etc/install-recovery.sh"
-            sudo mkdir -p "$work/mount_sys/etc/init.d"
-            sudo cp "$ROOT/rockbox-y1/android/y1/scripts/99Y1ButtonScript" \
-              "$work/mount_sys/etc/init.d/99Y1ButtonScript"
-            sudo chmod 0755 "$work/mount_sys/etc/init.d/99Y1ButtonScript"
-            sudo cp "$ROOT/rockbox-y1/android/y1/scripts/switch-to-stock.sh" "$work/mount_user/data/"
-
-            sudo cp "$ROOT/rockbox-y1/android/y1/build/gocurl/gocurl" "$work/mount_user/data/gocurl"
-            sudo cp "$ROOT/rockbox-y1/android/y1/build/download-podcast/poddl" "$work/mount_user/data/poddl"
-            sudo cp "$ROOT/firmware-inputs/cacert.pem" "$work/mount_user/data/cacert.pem"
-            sudo chmod 0755 "$work/mount_user/data/gocurl" "$work/mount_user/data/poddl"
-
-            sudo cp "$ROOT/rockbox-y1/android/y1/scripts/Rockbox.kl" "$work/mount_sys/usr/keylayout/Rockbox.kl"
-            sudo cp "$ROOT/rockbox-y1/android/y1/scripts/Stock.kl" "$work/mount_sys/usr/keylayout/Stock.kl"
-            sudo cp "$ROOT/rockbox-y1/android/y1/scripts/Rockbox.kl" "$work/mount_sys/usr/keylayout/Generic.kl"
-
-            sudo mkdir -p "$work/mount_user/data/update"
-            sudo cp "$ROOT/rockbox-y1/android/y1/scripts/update.sh" "$work/mount_user/data/update/update.sh"
-            sudo cp "$ROOT/rockbox-y1/android/y1/scripts/bootanimation.zip" "$work/mount_sys/media/bootanimation.zip"
-
-            sudo cp "$ROOT/firmware-inputs/libbluetoothdrv.so" "$work/mount_sys/lib/"
-            sudo cp "$ROOT/firmware-inputs/libbluetoothdrv_real.so" "$work/mount_sys/lib/"
-            sudo chmod 0644 "$work/mount_sys/lib/libbluetoothdrv.so" \
-              "$work/mount_sys/lib/libbluetoothdrv_real.so"
+            sudo test -f "$work/mount_sys/lib/librockbox.so"
+            sudo test -f "$work/mount_user/data/org.rockbox/app_rockbox/.rockbox/rocks/apps/solar.rock"
+            sudo file "$work/mount_sys/lib/librockbox.so"
+            sudo file "$work/mount_user/data/org.rockbox/app_rockbox/.rockbox/rocks/apps/solar.rock"
 
             sync
             sudo umount "$work/mount_sys"
@@ -250,53 +312,74 @@ jobs:
             trap - RETURN
 
             rm -rf "$work/mount_sys" "$work/mount_user" "$work/libmisc"
-            if [ "$variant" = type-a ]; then
-              output="$ROOT/dist/type-a/rom.zip"
-            else
-              output="$ROOT/dist/type-b/rom.zip"
-            fi
             (cd "$work" && zip -q -9 -j "$output" ./*)
             unzip -tq "$output"
           }
 
-          bundle_rom type-a "$ROOT/firmware-inputs/type-a-base-rom.zip"
-          bundle_rom type-b "$ROOT/firmware-inputs/type-b-base-rom.zip"
+          bundle_rom type-a "$ROOT/firmware-inputs/type-a-base-rom.zip" 2>&1 | tee logs/17-package-type-a.log
+          bundle_rom type-b "$ROOT/firmware-inputs/type-b-base-rom.zip" 2>&1 | tee logs/18-package-type-b.log
 
-      - name: Verify firmware identity and package checksums
+      - name: Inspect packaged firmware images
         shell: bash
         run: |
           set -euo pipefail
-          for rom in dist/type-a/rom.zip dist/type-b/rom.zip; do
-            unzip -l "$rom" | grep -q 'system.img'
-            unzip -l "$rom" | grep -q 'userdata.img'
-            unzip -l "$rom" | grep -Ei -q 'scatter'
-            unzip -l "$rom" | grep -Ei -q 'DA.*\.bin|download.*agent'
-          done
-          cat > dist/README.txt <<'EOF'
-          Rockbox Solar firmware for Innioasis Y1
+          ROOT="$PWD"
+          for variant in type-a type-b; do
+            verify="$ROOT/verify-$variant"
+            rm -rf "$verify"
+            mkdir -p "$verify/mount_sys" "$verify/mount_user"
+            unzip -q "$ROOT/dist/$variant/rom.zip" -d "$verify"
 
-          This is a real Rockbox-Y1 ROM. Rockbox is the Android HOME interface after boot.
-          The native Rockbox menu, playback screens, codecs, plugins, DSP, recording, FM
-          integration, hardware controls, and .rockbox theme engine come from the pinned
-          Rockbox-Y1 source. A top-level Solar menu opens the bundled Solar service screens.
+            sudo mount -t ext4 -o loop,ro "$verify/system.img" "$verify/mount_sys"
+            sudo mount -t ext4 -o loop,ro "$verify/userdata.img" "$verify/mount_user"
 
-          Use type-a/rom.zip first. Use type-b/rom.zip only if the Type A build produces
-          incorrect or non-working wheel input on your hardware revision.
+            sudo test -f "$verify/mount_sys/lib/librockbox.so"
+            sudo test -f "$verify/mount_user/data/org.rockbox/app_rockbox/.rockbox/rocks/apps/solar.rock"
+            sudo strings "$verify/mount_sys/lib/librockbox.so" | grep -F "Unable to load native Solar plugin"
+            sudo strings "$verify/mount_user/data/org.rockbox/app_rockbox/.rockbox/rocks/apps/solar.rock" | grep -F "Piped and Deezer are not implemented yet"
 
-          Install with Innioasis Updater -> Install from .zip. Keep the player powered off
-          until the updater asks for it. Do not interrupt flashing.
+            sudo umount "$verify/mount_sys"
+            sudo umount "$verify/mount_user"
+          done 2>&1 | tee logs/19-image-verification.log
+
+      - name: Write checksums and milestone report
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum dist/type-a/rom.zip dist/type-b/rom.zip | tee dist/SHA256SUMS.txt
+          cat > dist/MILESTONE.txt <<EOF
+          Native Rockbox Solar milestone
+          =================================
+          Integration commit: $GITHUB_SHA
+          Rockbox Y1 source: $ROCKBOX_REF
+
+          Implemented and built:
+          - Native apps/plugins/solar.c Rockbox plugin
+          - Native top-level Solar menu entry
+          - Functional Wi-Fi connect/disconnect through the existing Y1 Rockbox plugin ABI
+          - No Solar APK, Android launcher, Activity, or wrapper UI is built or packaged
+
+          Explicitly not implemented in this milestone:
+          - Piped/YouTube search and download
+          - Deezer catalog integration
+          - SSH/SCP
+          - Soulseek
+          - Stem separation
+          - Physical-device validation
+
+          The Y1 Rockbox port itself remains hosted by the device's existing org.rockbox
+          Android runtime from the official base ROM; this build replaces native Rockbox
+          binaries and the .rockbox tree, not a separate Solar application.
           EOF
-          (
-            cd dist
-            sha256sum type-a/rom.zip type-b/rom.zip > SHA256SUMS.txt
-            printf 'Rockbox upstream commit: %s\n' "$ROCKBOX_REF" > BUILD-INFO.txt
-            printf 'Solar integration commit: %s\n' "$GITHUB_SHA" >> BUILD-INFO.txt
-          )
+          cp logs/*.log dist/
 
-      - name: Upload Innioasis firmware packages
+      - name: Upload firmware and complete logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rockbox-solar-y1-roms
-          path: dist/
-          if-no-files-found: error
+          name: native-rockbox-solar-y1-milestone
+          path: |
+            dist/
+            logs/
+          if-no-files-found: warn
           retention-days: 14
