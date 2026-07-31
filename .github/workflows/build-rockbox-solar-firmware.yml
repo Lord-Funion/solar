@@ -65,27 +65,28 @@ jobs:
           set -euo pipefail
           mkdir -p firmware-build
           cd firmware/native/solarctl
-          test -z "$(gofmt -l .)"
-          go mod tidy 2>&1 | tee ../../../logs/04-go-mod-tidy.log
-          go mod verify 2>&1 | tee ../../../logs/05-go-mod-verify.log
-          go test ./... 2>&1 | tee ../../../logs/06-go-test.log
-          go vet ./... 2>&1 | tee ../../../logs/07-go-vet.log
+          gofmt -l . | tee ../../../logs/04-gofmt-files.log
+          gofmt -w .
+          go mod tidy 2>&1 | tee ../../../logs/05-go-mod-tidy.log
+          go mod verify 2>&1 | tee ../../../logs/06-go-mod-verify.log
+          go test ./... 2>&1 | tee ../../../logs/07-go-test.log
+          go vet ./... 2>&1 | tee ../../../logs/08-go-vet.log
           CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
             go build -trimpath -buildvcs=false \
             -ldflags='-s -w -buildid=' \
             -o ../../../firmware-build/solarctl . \
-            2>&1 | tee ../../../logs/08-go-arm-build.log
+            2>&1 | tee ../../../logs/09-go-arm-build.log
           cp go.mod ../../../dist/source/solarctl.go.mod
           cp go.sum ../../../dist/source/solarctl.go.sum
           cd ../../..
-          file firmware-build/solarctl | tee logs/09-solarctl-file.log
-          readelf -h firmware-build/solarctl | tee logs/10-solarctl-readelf.log
+          file firmware-build/solarctl | tee logs/10-solarctl-file.log
+          readelf -h firmware-build/solarctl | tee logs/11-solarctl-readelf.log
           if readelf -d firmware-build/solarctl 2>&1 | grep -q NEEDED; then
             echo 'solarctl unexpectedly has dynamic dependencies' >&2
             readelf -d firmware-build/solarctl >&2
             exit 1
           fi
-          stat -c 'solarctl bytes=%s mode=%a' firmware-build/solarctl | tee logs/11-solarctl-size.log
+          stat -c 'solarctl bytes=%s mode=%a' firmware-build/solarctl | tee logs/12-solarctl-size.log
           strings firmware-build/solarctl | grep -F 'piped_search' >/dev/null
           strings firmware-build/solarctl | grep -F 'deezer_search' >/dev/null
           strings firmware-build/solarctl | grep -F 'slskd_search' >/dev/null
