@@ -200,10 +200,13 @@ jobs:
                   if needle not in data:
                       raise SystemExit(f"missing {needle!r} in {path}")
 
-          for path in (plugin, main_menu, root_menu):
-              data = path.read_text(encoding="utf-8")
+          solar_blocks = {
+              "native plugin": plugin.read_text(encoding="utf-8"),
+              "native menu insertion": native_menu,
+          }
+          for label, data in solar_blocks.items():
               if "am start" in data or "dev.lordfunion.rockboxsolar" in data:
-                  raise SystemExit(f"Android Activity launch leaked into {path}")
+                  raise SystemExit(f"Android Activity launch leaked into {label}")
 
           print("Native milestone files applied:")
           for path in checks:
