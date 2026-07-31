@@ -12,6 +12,13 @@ android {
         targetSdk 28
         versionCode 3
         versionName '0.3.0'
+
+        // Innioasis Y1 is a 32-bit ARM device. Keep only the ABI that can run
+        // on the target so bundled native dependencies (notably Conscrypt)
+        // cannot accidentally ship x86 or 64-bit binaries in the ROM.
+        ndk {
+            abiFilters 'armeabi-v7a'
+        }
     }
 
     buildTypes {
