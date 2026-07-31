@@ -40,6 +40,98 @@ def main() -> None:
     plugin.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(native / "solar.c", plugin)
 
+    # The Y1 Rockbox plugin API exposes write(), not fdprintf(). Keep the
+    # source readable while replacing the request writer with checked native
+    # writes in the generated Rockbox tree.
+    plugin_text = plugin.read_text(encoding="utf-8")
+    old_writer = r'''static int write_request(const char *command,
+                         const char *key1, const char *value1,
+                         const char *key2, const char *value2,
+                         const char *key3, const char *value3,
+                         const char *key4, const char *value4)
+{
+    int fd;
+    char clean[VALUE_LEN];
+    ensure_state_dir();
+    fd = rb->open(REQUEST_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0)
+        return -1;
+
+    safe_copy(clean, sizeof(clean), command);
+    rb->fdprintf(fd, "command=%s\n", clean);
+#define WRITE_PAIR(k, v) do { \
+    if ((k) != NULL && (v) != NULL) { \
+        safe_copy(clean, sizeof(clean), (v)); \
+        rb->fdprintf(fd, "%s=%s\n", (k), clean); \
+    } \
+} while (0)
+    WRITE_PAIR(key1, value1);
+    WRITE_PAIR(key2, value2);
+    WRITE_PAIR(key3, value3);
+    WRITE_PAIR(key4, value4);
+#undef WRITE_PAIR
+    rb->close(fd);
+    return 0;
+}
+'''
+    new_writer = r'''static int write_all(int fd, const char *text)
+{
+    size_t total = 0;
+    size_t length = rb->strlen(text);
+
+    while (total < length)
+    {
+        ssize_t written = rb->write(fd, text + total, length - total);
+        if (written <= 0)
+            return -1;
+        total += (size_t)written;
+    }
+    return 0;
+}
+
+static int write_pair(int fd, const char *key, const char *value)
+{
+    char clean[VALUE_LEN];
+    char line[VALUE_LEN + 80];
+    int length;
+
+    safe_copy(clean, sizeof(clean), value);
+    length = rb->snprintf(line, sizeof(line), "%s=%s\n", key, clean);
+    if (length < 0 || (size_t)length >= sizeof(line))
+        return -1;
+    return write_all(fd, line);
+}
+
+static int write_request(const char *command,
+                         const char *key1, const char *value1,
+                         const char *key2, const char *value2,
+                         const char *key3, const char *value3,
+                         const char *key4, const char *value4)
+{
+    int fd;
+    int result = 0;
+
+    ensure_state_dir();
+    fd = rb->open(REQUEST_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0)
+        return -1;
+
+    if (write_pair(fd, "command", command) < 0 ||
+        (key1 != NULL && value1 != NULL && write_pair(fd, key1, value1) < 0) ||
+        (key2 != NULL && value2 != NULL && write_pair(fd, key2, value2) < 0) ||
+        (key3 != NULL && value3 != NULL && write_pair(fd, key3, value3) < 0) ||
+        (key4 != NULL && value4 != NULL && write_pair(fd, key4, value4) < 0))
+        result = -1;
+
+    if (rb->close(fd) < 0)
+        result = -1;
+    return result;
+}
+'''
+    if old_writer not in plugin_text:
+        raise SystemExit("solar.c request writer insertion point not found")
+    plugin.write_text(plugin_text.replace(old_writer, new_writer, 1), encoding="utf-8")
+
     replace_once(
         sources,
         "#if defined(INNIOASIS_Y1)\npodcast_downloader.c\nspeaker_toggle.c\n#endif",
