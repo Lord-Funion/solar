@@ -1,0 +1,63 @@
+name: Inspect Rockbox Y1 upstream
+
+on:
+  push:
+    branches:
+      - agent/rockbox-solar-firmware
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out integration repository
+        uses: actions/checkout@v4
+
+      - name: Check out Rockbox Y1
+        uses: actions/checkout@v4
+        with:
+          repository: rockbox-y1/rockbox
+          ref: rebase-upstream
+          path: upstream-rockbox
+          fetch-depth: 1
+
+      - name: Collect build and Android integration files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p inspection/files
+          cd upstream-rockbox
+          git rev-parse HEAD > ../inspection/upstream-commit.txt
+          find . -maxdepth 4 -type f | sort > ../inspection/tree.txt
+          for p in \
+            README.md INSTALLATION.md INTERNET.md THEMES.md MISC.md \
+            .github/workflows \
+            android \
+            packaging \
+            tools/configure \
+            tools/buildzip.pl \
+            tools/root.make \
+            apps/plugins \
+            apps/menus \
+            apps/main.c \
+            apps/root_menu.c \
+            apps/root_menu.h; do
+            if [ -e "$p" ]; then
+              mkdir -p "../inspection/files/$(dirname "$p")"
+              cp -a "$p" "../inspection/files/$p"
+            fi
+          done
+          cd ..
+          find inspection -type f -size +5M -delete
+          tar -czf rockbox-y1-inspection.tar.gz inspection
+
+      - name: Upload inspection bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: rockbox-y1-inspection
+          path: rockbox-y1-inspection.tar.gz
+          if-no-files-found: error
+          retention-days: 3
