@@ -59,20 +59,17 @@ jobs:
           from pathlib import Path
 
           path = Path('firmware/build_type_a.sh')
-          text = path.read_text(encoding='utf-8')
-          checks = [
-              "unzip -l \"$INPUTS/type-a-base-rom.zip\" | grep -Eiq 'DA.*\\\\.bin|download.*agent'\n",
-              "unzip -l \"$output\" | grep -Eiq 'DA.*\\\\.bin|download.*agent'\n",
-          ]
-          removed = 0
-          for check in checks:
-              if check in text:
-                  text = text.replace(check, '', 1)
-                  removed += 1
+          lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
+          kept = [line for line in lines if 'download.*agent' not in line]
+          removed = len(lines) - len(kept)
           if removed != 2:
               raise SystemExit(f'Expected to remove two non-official DA assertions, removed {removed}')
-          path.write_text(text, encoding='utf-8')
+          path.write_text(''.join(kept), encoding='utf-8')
           PY
+          if grep -n 'download.*agent' firmware/build_type_a.sh; then
+            echo 'DA assertion still present' >&2
+            exit 1
+          fi
           grep -n "scatter\|system.img\|userdata.img" firmware/build_type_a.sh
 
       - name: Build, package, and inspect Type A ROM
