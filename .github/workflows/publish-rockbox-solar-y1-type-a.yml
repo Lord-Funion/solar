@@ -6,6 +6,11 @@ on:
       - agent/rockbox-solar-firmware
     paths:
       - .github/workflows/publish-rockbox-solar-y1-type-a.yml
+  pull_request:
+    branches:
+      - agent/rockbox-solar-cleanroom
+    paths:
+      - .github/workflows/publish-rockbox-solar-y1-type-a.yml
   workflow_dispatch:
 
 permissions:
@@ -14,6 +19,7 @@ permissions:
 
 jobs:
   publish:
+    if: github.event_name != 'pull_request' || github.head_ref == 'agent/rockbox-solar-firmware'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -71,12 +77,12 @@ jobs:
           cat > release-notes.md <<EOF
           Native Rockbox Solar firmware for **Innioasis Y1 Type A only**.
 
-          Source commit: `${SOURCE_COMMIT}`
-          Verified build run: `${SOURCE_RUN_ID}`
-          ROM SHA-256: `${EXPECTED_ROM_SHA256}`
-          ROM size: `539077181` bytes
+          Source commit: ${SOURCE_COMMIT}
+          Verified build run: ${SOURCE_RUN_ID}
+          ROM SHA-256: ${EXPECTED_ROM_SHA256}
+          ROM size: 539077181 bytes
 
-          The CI pipeline successfully completed native Rockbox compilation, Type A packaging, ZIP integrity checks, ext4 filesystem checks, ARM binary checks, and post-package image inspection. Rockbox, `solar.rock`, the static ARM `solarctl` helper, Solar configuration, and the CA bundle were found inside the generated firmware images.
+          The CI pipeline successfully completed native Rockbox compilation, Type A packaging, ZIP integrity checks, ext4 filesystem checks, ARM binary checks, and post-package image inspection. Rockbox, solar.rock, the static ARM solarctl helper, Solar configuration, and the CA bundle were found inside the generated firmware images.
 
           **Physical Y1 validation has not been performed.** This is a prerelease. It is restricted to Innioasis Y1 Type A hardware. Keep a known-good official Type A recovery ROM available before installing.
           EOF
