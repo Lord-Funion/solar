@@ -1,0 +1,382 @@
+name: Build Rockbox Solar Y1 Type A ROM
+
+on:
+  push:
+    branches:
+      - agent/rockbox-solar-firmware
+  pull_request:
+    branches:
+      - agent/rockbox-solar-cleanroom
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-type-a:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      ROCKBOX_REF: ec32a663dfb8396080227de03846c30f07dc258d
+      ROCKBOX_RELEASE_TAG: stable-v0.5
+      ANDROID_SDK_PATH: /home/runner/android-sdk
+      ANDROID_NDK_PATH: /home/runner/android-ndk-r10e
+      ANDROID_NDK_ROOT: /home/runner/android-ndk-r10e
+
+    steps:
+      - name: Check out Solar integration branch
+        uses: actions/checkout@v4
+
+      - name: Check out pinned Y1 Rockbox source
+        uses: actions/checkout@v4
+        with:
+          repository: rockbox-y1/rockbox
+          ref: ${{ env.ROCKBOX_REF }}
+          path: rockbox-y1
+          fetch-depth: 1
+
+      - name: Apply native Solar integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p logs dist/source firmware-build
+          python3 firmware/apply_native.py rockbox-y1 2>&1 | tee logs/01-native-integration.log
+          git -C rockbox-y1 diff --stat | tee logs/02-rockbox-diff-stat.log
+          git -C rockbox-y1 diff --check | tee logs/03-rockbox-diff-check.log
+          git -C rockbox-y1 diff > dist/source/rockbox-solar-native.patch
+          cp firmware/apply_native.py dist/source/
+          cp firmware/native/solar.c dist/source/
+          cp firmware/native/solar.cfg dist/source/
+          cp -r firmware/native/solarctl dist/source/
+          if grep -R -n -E 'dev\.lordfunion\.rockboxsolar|am start|android\.app\.Activity' \
+            rockbox-y1/apps/plugins/solar.c firmware/native/solarctl; then
+            echo 'Android launcher/activity reference found in native source' >&2
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+          cache-dependency-path: firmware/native/solarctl/go.mod
+
+      - name: Test and cross-build static ARM helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd firmware/native/solarctl
+          gofmt -w .
+          go mod tidy 2>&1 | tee ../../../logs/04-go-mod-tidy.log
+          go mod verify 2>&1 | tee ../../../logs/05-go-mod-verify.log
+          go test ./... 2>&1 | tee ../../../logs/06-go-test.log
+          go vet ./... 2>&1 | tee ../../../logs/07-go-vet.log
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
+            go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' \
+            -o ../../../firmware-build/solarctl . \
+            2>&1 | tee ../../../logs/08-go-arm-build.log
+          cd ../../..
+          file firmware-build/solarctl | tee logs/09-solarctl-file.log
+          readelf -h firmware-build/solarctl | tee logs/10-solarctl-readelf.log
+          if readelf -d firmware-build/solarctl 2>&1 | grep -q NEEDED; then
+            echo 'solarctl unexpectedly has dynamic dependencies' >&2
+            exit 1
+          fi
+          test "$(stat -c %a firmware-build/solarctl)" = 755 || chmod 0755 firmware-build/solarctl
+          for feature in piped_search deezer_search slskd_search ssh_exec scp_get scp_put stem_split; do
+            strings firmware-build/solarctl | grep -F "$feature" >/dev/null
+          done
+
+      - name: Install genuine Y1 build toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update 2>&1 | tee logs/11-apt-update.log
+          sudo apt-get install -y \
+            lib32z1 openjdk-17-jdk zip unzip wget curl file binutils \
+            e2fsprogs util-linux rsync \
+            2>&1 | tee logs/12-apt-install.log
+          cd rockbox-y1/android/y1
+          set +o pipefail
+          yes | ./installToolchain.sh 2>&1 | tee ../../../logs/13-toolchain.log
+          toolchain_status=${PIPESTATUS[1]}
+          set -o pipefail
+          exit "$toolchain_status"
+
+      - name: Clean-build Rockbox and native Solar plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd rockbox-y1/android/y1
+          rm -rf build
+          mkdir build
+          cd build
+          ../../../tools/configure --target=310 --lcdwidth=480 --lcdheight=360 --type=n \
+            2>&1 | tee ../../../../logs/14-configure.log
+          make clean 2>&1 | tee ../../../../logs/15-clean.log
+          make -j2 2>&1 | tee ../../../../logs/16-build.log
+          make zip 2>&1 | tee ../../../../logs/17-rockbox-zip.log
+
+          test -f librockbox.so
+          test -f rockbox.zip
+          unzip -tq rockbox.zip | tee ../../../../logs/18-rockbox-zip-test.log
+          unzip -l rockbox.zip | tee ../../../../logs/19-rockbox-zip-list.log
+          unzip -l rockbox.zip | grep -F '.rockbox/rocks/apps/solar.rock'
+
+          rm -rf inspect-rockbox
+          mkdir inspect-rockbox
+          unzip -q rockbox.zip -d inspect-rockbox
+          test -f inspect-rockbox/.rockbox/rocks/apps/solar.rock
+          file librockbox.so inspect-rockbox/.rockbox/rocks/apps/solar.rock \
+            | tee ../../../../logs/20-rockbox-binaries.log
+          readelf -h librockbox.so | tee ../../../../logs/21-librockbox-readelf.log
+          readelf -d librockbox.so | tee ../../../../logs/22-librockbox-dynamic.log
+          strings librockbox.so | grep -F '/data/solarctl' \
+            | tee ../../../../logs/23-helper-runner-string.log
+          strings inspect-rockbox/.rockbox/rocks/apps/solar.rock \
+            | grep -F 'Piped / YouTube' \
+            | tee ../../../../logs/24-plugin-feature-string.log
+          strings inspect-rockbox/.rockbox/rocks/apps/solar.rock | grep -F 'SSH / SCP' >/dev/null
+          strings inspect-rockbox/.rockbox/rocks/apps/solar.rock | grep -F 'Stem separation' >/dev/null
+
+          rm -rf "$GITHUB_WORKSPACE/firmware-build/rockbox-tree" \
+                 "$GITHUB_WORKSPACE/firmware-build/libmisc-root"
+          mkdir -p "$GITHUB_WORKSPACE/firmware-build/rockbox-tree" \
+                   "$GITHUB_WORKSPACE/firmware-build/libmisc-root/sdcard"
+          unzip -q rockbox.zip -d "$GITHUB_WORKSPACE/firmware-build/rockbox-tree"
+          cp -a "$GITHUB_WORKSPACE/firmware-build/rockbox-tree/.rockbox" \
+                "$GITHUB_WORKSPACE/firmware-build/libmisc-root/sdcard/.rockbox"
+          (cd "$GITHUB_WORKSPACE/firmware-build/libmisc-root" && \
+            zip -q -0 -r "$GITHUB_WORKSPACE/firmware-build/libmisc.so" sdcard)
+          unzip -tq "$GITHUB_WORKSPACE/firmware-build/libmisc.so" \
+            | tee ../../../../logs/25-libmisc-test.log
+          cp librockbox.so "$GITHUB_WORKSPACE/firmware-build/librockbox.so"
+          cp rockbox.zip "$GITHUB_WORKSPACE/firmware-build/rockbox.zip"
+
+      - name: Download official stable Type A base ROM
+        id: base_rom
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee logs/26-release-assets.log
+          import json
+          import os
+          import urllib.request
+
+          tag = os.environ['ROCKBOX_RELEASE_TAG']
+          api = f'https://api.github.com/repos/rockbox-y1/rockbox/releases/tags/{tag}'
+          request = urllib.request.Request(api, headers={
+              'Accept': 'application/vnd.github+json',
+              'User-Agent': 'Rockbox-Solar-Type-A-builder',
+          })
+          with urllib.request.urlopen(request, timeout=60) as response:
+              release = json.load(response)
+          assets = release.get('assets', [])
+          for asset in assets:
+              print(f"asset={asset['name']} bytes={asset['size']} url={asset['browser_download_url']}")
+
+          exact = [a for a in assets if a['name'].lower() == 'rom.zip']
+          fallback = [
+              a for a in assets
+              if a['name'].lower().endswith('.zip')
+              and 'rom' in a['name'].lower()
+              and ('type-a' in a['name'].lower() or 'type_a' in a['name'].lower())
+          ]
+          candidates = exact or fallback
+          if len(candidates) != 1:
+              raise SystemExit(f'Expected one official Type A ROM asset; found {[a["name"] for a in candidates]}')
+          chosen = candidates[0]
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f"url={chosen['browser_download_url']}\n")
+              output.write(f"name={chosen['name']}\n")
+              output.write(f"release={release['tag_name']}\n")
+          PY
+          mkdir -p firmware-inputs
+          curl --fail --location --retry 3 --output firmware-inputs/type-a-base-rom.zip \
+            '${{ steps.base_rom.outputs.url }}' \
+            2>&1 | tee logs/27-type-a-download.log
+          curl --fail --location --retry 3 --output firmware-inputs/solar-cacert.pem \
+            https://curl.se/ca/cacert.pem \
+            2>&1 | tee logs/28-ca-download.log
+          unzip -tq firmware-inputs/type-a-base-rom.zip | tee logs/29-type-a-base-test.log
+          unzip -l firmware-inputs/type-a-base-rom.zip | tee logs/30-type-a-base-list.log
+          unzip -l firmware-inputs/type-a-base-rom.zip | grep -q 'system.img'
+          unzip -l firmware-inputs/type-a-base-rom.zip | grep -q 'userdata.img'
+          unzip -l firmware-inputs/type-a-base-rom.zip | grep -Eiq 'scatter'
+          unzip -l firmware-inputs/type-a-base-rom.zip | grep -Eiq 'DA.*\.bin|download.*agent'
+          sha256sum firmware-inputs/type-a-base-rom.zip firmware-inputs/solar-cacert.pem \
+            | tee logs/31-input-checksums.log
+
+      - name: Package Type A ROM through official image layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD"
+          work="$ROOT/firmware-work-type-a"
+          output="$ROOT/dist/type-a/rom.zip"
+          rm -rf "$work" "$ROOT/dist/type-a"
+          mkdir -p "$work/mount_sys" "$work/mount_user" "$ROOT/dist/type-a"
+          unzip -q "$ROOT/firmware-inputs/type-a-base-rom.zip" -d "$work"
+
+          cleanup() {
+            mountpoint -q "$work/mount_sys" && sudo umount "$work/mount_sys" || true
+            mountpoint -q "$work/mount_user" && sudo umount "$work/mount_user" || true
+          }
+          trap cleanup EXIT
+
+          sudo mount -t ext4 -o loop,rw "$work/system.img" "$work/mount_sys"
+          sudo mount -t ext4 -o loop,rw "$work/userdata.img" "$work/mount_user"
+          sudo find "$work/mount_sys" "$work/mount_user" -maxdepth 8 \
+            \( -name librockbox.so -o -name libmisc.so -o -name .rockbox \) -print \
+            | tee logs/32-base-rockbox-layout.log
+
+          sudo test -f "$work/mount_sys/lib/librockbox.so"
+          sudo install -m 0755 "$ROOT/firmware-build/librockbox.so" \
+            "$work/mount_sys/lib/librockbox.so"
+
+          while IFS= read -r existing; do
+            sudo install -m 0755 "$ROOT/firmware-build/librockbox.so" "$existing"
+          done < <(sudo find "$work/mount_user" -type f -name librockbox.so -print)
+
+          mapfile -t misc_targets < <(sudo find "$work/mount_sys" "$work/mount_user" \
+            -type f -name libmisc.so -print)
+          if [ "${#misc_targets[@]}" -eq 0 ]; then
+            sudo mkdir -p "$work/mount_user/data/org.rockbox/lib"
+            misc_targets+=("$work/mount_user/data/org.rockbox/lib/libmisc.so")
+          fi
+          for existing in "${misc_targets[@]}"; do
+            sudo install -m 0755 "$ROOT/firmware-build/libmisc.so" "$existing"
+          done
+
+          rockbox_target="$work/mount_user/data/org.rockbox/app_rockbox/.rockbox"
+          sudo rm -rf "$rockbox_target"
+          sudo mkdir -p "$rockbox_target"
+          sudo cp -a "$ROOT/firmware-build/rockbox-tree/.rockbox/." "$rockbox_target/"
+          sudo install -m 0600 "$ROOT/firmware/native/solar.cfg" \
+            "$rockbox_target/solar.cfg"
+
+          sudo install -m 0755 "$ROOT/firmware-build/solarctl" \
+            "$work/mount_user/solarctl"
+          sudo install -m 0644 "$ROOT/firmware-inputs/solar-cacert.pem" \
+            "$work/mount_user/solar-cacert.pem"
+
+          sudo test -f "$work/mount_sys/lib/librockbox.so"
+          sudo test -x "$work/mount_user/solarctl"
+          sudo test -f "$work/mount_user/solar-cacert.pem"
+          sudo test -f "$rockbox_target/rocks/apps/solar.rock"
+          sudo test -f "$rockbox_target/solar.cfg"
+          sudo strings "$work/mount_sys/lib/librockbox.so" | grep -F '/data/solarctl'
+          sudo strings "$rockbox_target/rocks/apps/solar.rock" | grep -F 'Piped / YouTube'
+          sudo strings "$work/mount_user/solarctl" | grep -F 'slskd_search'
+          df -h "$work/mount_sys" "$work/mount_user" | tee logs/33-image-free-space.log
+          sync
+          sudo umount "$work/mount_sys"
+          sudo umount "$work/mount_user"
+          trap - EXIT
+
+          rm -rf "$work/mount_sys" "$work/mount_user"
+          e2fsck -fn "$work/system.img" 2>&1 | tee logs/34-system-e2fsck.log || status=$?
+          if [ "${status:-0}" -gt 1 ]; then exit "$status"; fi
+          unset status
+          e2fsck -fn "$work/userdata.img" 2>&1 | tee logs/35-userdata-e2fsck.log || status=$?
+          if [ "${status:-0}" -gt 1 ]; then exit "$status"; fi
+
+          (cd "$work" && zip -q -9 -r "$output" .)
+          unzip -tq "$output" | tee logs/36-type-a-rom-test.log
+          size=$(stat -c %s "$output")
+          echo "type-a-rom-bytes=$size" | tee logs/37-type-a-rom-size.log
+          if [ "$size" -lt 50000000 ]; then
+            echo 'Packaged ROM is implausibly small' >&2
+            exit 1
+          fi
+
+      - name: Inspect final Type A images
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD"
+          verify="$ROOT/verify-type-a"
+          rm -rf "$verify"
+          mkdir -p "$verify/mount_sys" "$verify/mount_user"
+          unzip -q "$ROOT/dist/type-a/rom.zip" -d "$verify"
+          unzip -l "$ROOT/dist/type-a/rom.zip" | tee logs/38-final-rom-list.log
+          unzip -l "$ROOT/dist/type-a/rom.zip" | grep -q 'system.img'
+          unzip -l "$ROOT/dist/type-a/rom.zip" | grep -q 'userdata.img'
+          unzip -l "$ROOT/dist/type-a/rom.zip" | grep -Eiq 'scatter'
+          unzip -l "$ROOT/dist/type-a/rom.zip" | grep -Eiq 'DA.*\.bin|download.*agent'
+
+          sudo mount -t ext4 -o loop,ro "$verify/system.img" "$verify/mount_sys"
+          sudo mount -t ext4 -o loop,ro "$verify/userdata.img" "$verify/mount_user"
+          plugin="$verify/mount_user/data/org.rockbox/app_rockbox/.rockbox/rocks/apps/solar.rock"
+          config="$verify/mount_user/data/org.rockbox/app_rockbox/.rockbox/solar.cfg"
+          sudo test -f "$verify/mount_sys/lib/librockbox.so"
+          sudo test -x "$verify/mount_user/solarctl"
+          sudo test -f "$verify/mount_user/solar-cacert.pem"
+          sudo test -f "$plugin"
+          sudo test -f "$config"
+          sudo cmp "$ROOT/firmware-build/librockbox.so" "$verify/mount_sys/lib/librockbox.so"
+          sudo cmp "$ROOT/firmware-build/solarctl" "$verify/mount_user/solarctl"
+          sudo strings "$verify/mount_sys/lib/librockbox.so" | grep -F '/data/solarctl'
+          sudo strings "$plugin" | grep -F 'SSH / SCP'
+          sudo strings "$verify/mount_user/solarctl" | grep -F 'piped_search'
+          sudo strings "$verify/mount_user/solarctl" | grep -F 'deezer_search'
+          sudo strings "$verify/mount_user/solarctl" | grep -F 'stem_split'
+          sudo file "$verify/mount_sys/lib/librockbox.so" \
+                    "$verify/mount_user/solarctl" "$plugin" \
+            | tee logs/39-final-binary-types.log
+          sudo stat -c '%n bytes=%s mode=%a' \
+            "$verify/mount_sys/lib/librockbox.so" \
+            "$verify/mount_user/solarctl" "$plugin" "$config" \
+            | tee logs/40-final-file-stats.log
+          sudo umount "$verify/mount_sys"
+          sudo umount "$verify/mount_user"
+
+      - name: Write checksums and installation notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum dist/type-a/rom.zip | tee dist/type-a/SHA256SUMS.txt
+          cat > dist/type-a/BUILD-INFO.txt <<EOF
+          Rockbox Solar native firmware for Innioasis Y1 Type A
+          Integration commit: $GITHUB_SHA
+          Rockbox source commit: $ROCKBOX_REF
+          Official base release: $ROCKBOX_RELEASE_TAG
+          Official base asset: ${{ steps.base_rom.outputs.name }}
+          Built UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          Physical Y1 validation: NOT PERFORMED
+          EOF
+          cat > dist/type-a/INSTALL-RECOVERY.txt <<'EOF'
+          INSTALL — TYPE A ONLY
+          =====================
+          1. Charge the Innioasis Y1 and use a known-good USB data cable.
+          2. Keep an official stock or official Rockbox Type A rom.zip available.
+          3. Open Innioasis Updater on Windows.
+          4. Select Install from .zip and choose this rom.zip without extracting it.
+          5. Follow the updater's power-off and USB prompts exactly. Do not disconnect
+             the player while any partition is being written.
+          6. The first boot can take longer than normal. Rockbox should remain the UI.
+          7. Open the native Solar entry from Rockbox and configure Wi-Fi/services.
+
+          RECOVERY
+          ========
+          - If the wheel mapping is wrong, do not continue testing: restore the official
+            matching ROM with Innioasis Updater. This package is Type A only.
+          - If Solar fails but Rockbox boots, inspect /sdcard/.rockbox/solar/response.txt
+            and /sdcard/.rockbox/solar.cfg over USB or ADB.
+          - If the device does not boot, use Innioasis Updater's full restore flow with
+            an official Type A ROM. Do not manually flash individual boot-critical images.
+          - This image was compiled, packaged, mounted, and statically inspected in CI.
+            It has not been booted or hardware-tested on a physical Y1.
+          EOF
+
+      - name: Upload Type A ROM and complete logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rockbox-solar-y1-type-a-rom
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+          path: |
+            dist/type-a/
+            dist/source/
+            logs/
