@@ -1,0 +1,211 @@
+name: Build Y1 MP4 Rockbox plugin
+
+on:
+  push:
+    branches:
+      - agent/y1-mp4-rock-plugin
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      ROCKBOX_REF: ec32a663dfb8396080227de03846c30f07dc258d
+      ANDROID_SDK_PATH: /home/runner/android-sdk
+      ANDROID_NDK_PATH: /home/runner/android-ndk-r10e
+      ANDROID_NDK_ROOT: /home/runner/android-ndk-r10e
+
+    steps:
+      - name: Check out plugin integration
+        uses: actions/checkout@v4
+
+      - name: Check out pinned Rockbox Y1 source
+        uses: actions/checkout@v4
+        with:
+          repository: rockbox-y1/rockbox
+          ref: ${{ env.ROCKBOX_REF }}
+          path: rockbox-y1
+          fetch-depth: 1
+
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y lib32z1 openjdk-17-jdk zip unzip file binutils
+          python3 -m py_compile firmware/apply_native.py firmware/y1mp4/apply.py
+
+      - name: Apply native Solar base and MP4 viewer bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 firmware/apply_native.py rockbox-y1
+          python3 firmware/y1mp4/apply.py rockbox-y1
+          git -C rockbox-y1 diff --check
+          git -C rockbox-y1 diff --stat
+          grep -n 'PLUGIN_API_VERSION 286' rockbox-y1/apps/plugin.h
+          grep -n 'mp4,apps/y1mp4,4' rockbox-y1/apps/plugins/viewers.config
+          grep -n 'y1_video_play' rockbox-y1/apps/plugin.c rockbox-y1/apps/plugin.h
+
+      - name: Install legacy Y1 Android toolchain
+        shell: bash
+        working-directory: rockbox-y1/android/y1
+        run: |
+          set -euo pipefail
+          set +o pipefail
+          yes | ./installToolchain.sh
+          status=${PIPESTATUS[1]}
+          set -o pipefail
+          exit "$status"
+
+      - name: Build Rockbox and y1mp4.rock
+        shell: bash
+        working-directory: rockbox-y1/android/y1
+        run: |
+          set -euo pipefail
+          rm -rf build
+          mkdir build
+          cd build
+          ../../../tools/configure --target=310 --lcdwidth=480 --lcdheight=360 --type=n
+          make clean
+          make -j2
+          make zip
+          test -f librockbox.so
+          test -f rockbox.zip
+          unzip -tq rockbox.zip
+
+      - name: Assemble installable plugin bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD=rockbox-y1/android/y1/build
+          DIST=dist/y1mp4
+          INSPECT="$DIST/inspect"
+          rm -rf "$DIST"
+          mkdir -p "$INSPECT"
+          unzip -q "$BUILD/rockbox.zip" -d "$INSPECT"
+
+          plugin=$(find "$INSPECT" -type f -path '*/.rockbox/rocks/apps/y1mp4.rock' -print -quit)
+          viewers=$(find "$INSPECT" -type f -path '*/.rockbox/viewers.config' -print -quit)
+          test -n "$plugin"
+          test -n "$viewers"
+
+          cp "$BUILD/librockbox.so" "$DIST/librockbox.so"
+          cp "$BUILD/rockbox.zip" "$DIST/rockbox.zip"
+          cp "$plugin" "$DIST/y1mp4.rock"
+          cp "$viewers" "$DIST/viewers.config"
+
+          file "$DIST/librockbox.so" "$DIST/y1mp4.rock"
+          readelf -h "$DIST/librockbox.so"
+          strings "$DIST/librockbox.so" | grep -F 'android.intent.action.VIEW'
+          strings "$DIST/y1mp4.rock" | grep -F 'Open an MP4 file from Rockbox Files'
+
+          cat > "$DIST/install-windows.cmd" <<'CMD'
+          @echo off
+          setlocal
+          where adb >nul 2>nul || (echo ADB was not found in PATH.& exit /b 1)
+          adb devices
+          adb root || goto :fail
+          timeout /t 2 /nobreak >nul
+          adb remount || goto :fail
+          adb shell cp /system/lib/librockbox.so /sdcard/librockbox.so.before-y1mp4 || goto :fail
+          adb push librockbox.so /system/lib/librockbox.so || goto :fail
+          adb shell chmod 0644 /system/lib/librockbox.so || goto :fail
+          adb shell mkdir -p /sdcard/.rockbox/rocks/apps || goto :fail
+          adb push y1mp4.rock /sdcard/.rockbox/rocks/apps/y1mp4.rock || goto :fail
+          adb shell "if [ -f /sdcard/.rockbox/viewers.config ]; then cp /sdcard/.rockbox/viewers.config /sdcard/.rockbox/viewers.config.before-y1mp4; fi" || goto :fail
+          adb push viewers.config /sdcard/.rockbox/viewers.config || goto :fail
+          adb reboot
+          echo Installed. After reboot, open an MP4 from Rockbox Files.
+          exit /b 0
+          :fail
+          echo Installation failed. No boot partitions were changed.
+          exit /b 1
+          CMD
+
+          cat > "$DIST/install-linux-macos.sh" <<'SH'
+          #!/usr/bin/env sh
+          set -eu
+          command -v adb >/dev/null 2>&1 || { echo 'ADB was not found in PATH.' >&2; exit 1; }
+          adb devices
+          adb root
+          sleep 2
+          adb remount
+          adb shell cp /system/lib/librockbox.so /sdcard/librockbox.so.before-y1mp4
+          adb push librockbox.so /system/lib/librockbox.so
+          adb shell chmod 0644 /system/lib/librockbox.so
+          adb shell mkdir -p /sdcard/.rockbox/rocks/apps
+          adb push y1mp4.rock /sdcard/.rockbox/rocks/apps/y1mp4.rock
+          adb shell 'if [ -f /sdcard/.rockbox/viewers.config ]; then cp /sdcard/.rockbox/viewers.config /sdcard/.rockbox/viewers.config.before-y1mp4; fi'
+          adb push viewers.config /sdcard/.rockbox/viewers.config
+          adb reboot
+          echo 'Installed. After reboot, open an MP4 from Rockbox Files.'
+          SH
+          chmod 0755 "$DIST/install-linux-macos.sh"
+
+          cat > "$DIST/INSTALL.txt" <<'TXT'
+          Y1 MP4 Rockbox viewer plugin
+          =============================
+
+          What this does
+          --------------
+          y1mp4.rock is registered for MP4, M4V and MOV files in Rockbox Files.
+          It stops Rockbox audio and asks Android to open the selected local file
+          with the Y1's registered video activity. Android performs MP4 demuxing
+          and hardware/software decoding; this does not add H.264 to mpegplayer.
+
+          Required files
+          --------------
+          The plugin uses a new Rockbox plugin API call, so y1mp4.rock alone will
+          not load on an unmodified build. Install the matching librockbox.so,
+          y1mp4.rock and viewers.config from this exact artifact together.
+
+          Installation
+          ------------
+          1. Back up music and keep a known-good Y1 recovery ROM available.
+          2. Enable ADB on the player and connect it with a data-capable USB cable.
+          3. Put this artifact's files in one folder.
+          4. On Windows run install-windows.cmd. On Linux/macOS run
+             ./install-linux-macos.sh.
+          5. After reboot, browse to a local .mp4 file in Rockbox Files and open it.
+          6. Press Back/Menu in the Android video player to return to Rockbox.
+
+          Safety and limitations
+          ----------------------
+          - No preloader, boot, recovery or other boot-critical partition is changed.
+          - The script backs up the old library to /sdcard/librockbox.so.before-y1mp4.
+          - File names containing an apostrophe are rejected for shell safety.
+          - Codec support depends on the Android firmware's installed video player
+            and codecs. H.264/AAC MP4 is the intended format.
+          - This has been CI-compiled but still requires physical Y1 testing.
+
+          Manual rollback
+          ---------------
+          adb root
+          adb remount
+          adb shell cp /sdcard/librockbox.so.before-y1mp4 /system/lib/librockbox.so
+          adb shell chmod 0644 /system/lib/librockbox.so
+          adb shell rm -f /sdcard/.rockbox/rocks/apps/y1mp4.rock
+          adb shell 'if [ -f /sdcard/.rockbox/viewers.config.before-y1mp4 ]; then cp /sdcard/.rockbox/viewers.config.before-y1mp4 /sdcard/.rockbox/viewers.config; fi'
+          adb reboot
+          TXT
+
+          rm -rf "$INSPECT"
+          sha256sum "$DIST"/librockbox.so "$DIST"/y1mp4.rock "$DIST"/viewers.config "$DIST"/rockbox.zip > "$DIST/SHA256SUMS.txt"
+          (cd dist && zip -q -9 -r Y1-MP4-Rockbox-Plugin.zip y1mp4)
+          unzip -tq dist/Y1-MP4-Rockbox-Plugin.zip
+
+      - name: Upload Y1 MP4 plugin bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Y1-MP4-Rockbox-Plugin
+          path: |
+            dist/Y1-MP4-Rockbox-Plugin.zip
+            dist/y1mp4/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
