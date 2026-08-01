@@ -52,6 +52,29 @@ jobs:
             e2fsprogs util-linux rsync \
             2>&1 | tee logs/00-apt-install.log
 
+      - name: Match official Type A package manifest
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('firmware/build_type_a.sh')
+          text = path.read_text(encoding='utf-8')
+          checks = [
+              "unzip -l \"$INPUTS/type-a-base-rom.zip\" | grep -Eiq 'DA.*\\\\.bin|download.*agent'\n",
+              "unzip -l \"$output\" | grep -Eiq 'DA.*\\\\.bin|download.*agent'\n",
+          ]
+          removed = 0
+          for check in checks:
+              if check in text:
+                  text = text.replace(check, '', 1)
+                  removed += 1
+          if removed != 2:
+              raise SystemExit(f'Expected to remove two non-official DA assertions, removed {removed}')
+          path.write_text(text, encoding='utf-8')
+          PY
+          grep -n "scatter\|system.img\|userdata.img" firmware/build_type_a.sh
+
       - name: Build, package, and inspect Type A ROM
         shell: bash
         run: |
