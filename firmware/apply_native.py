@@ -44,6 +44,9 @@ def main() -> None:
     # source readable while replacing the request writer with checked native
     # writes in the generated Rockbox tree.
     plugin_text = plugin.read_text(encoding="utf-8")
+    # This Y1 fork links plugin_crt0.o for each plugin, and that object owns
+    # rb and __header. Defining PLUGIN_HEADER here duplicates both symbols.
+    plugin_text = plugin_text.replace("\nPLUGIN_HEADER\n", "\n", 1)
     old_writer = r'''static int write_request(const char *command,
                          const char *key1, const char *value1,
                          const char *key2, const char *value2,
@@ -245,7 +248,7 @@ MENUITEM_FUNCTION(solar_native_item, 0, "Solar",
     )
 
     require(plugin, [
-        "PLUGIN_HEADER",
+        '#include "plugin.h"',
         "solar_run_helper",
         "piped_search",
         "deezer_search",

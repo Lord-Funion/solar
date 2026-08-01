@@ -1,0 +1,121 @@
+name: Publish verified Rockbox Solar Y1 Type A ROM
+
+on:
+  pull_request:
+    branches:
+      - agent/rockbox-solar-cleanroom
+    paths:
+      - .github/workflows/publish-rockbox-solar-y1-type-a.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-rockbox-solar-y1-type-a
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.event_name != 'pull_request' || github.head_ref == 'agent/rockbox-solar-firmware'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SOURCE_RUN_ID: '30718871733'
+      PART_00_ARTIFACT_ID: '8824276177'
+      PART_01_ARTIFACT_ID: '8824276655'
+      EXPECTED_PART_00_SHA256: '4be1668ba685b2b58697646c3e33f5f78e7ab4db77d1064cf28fc5522d7f64ff'
+      EXPECTED_PART_01_SHA256: '9d291f275292436800dbd10d73cf652deb85a5d5c19dde3ead59e8804bd596a2'
+      EXPECTED_ROM_SHA256: 'f456b23a70155e50995c724843c62e31dfb2a01fad0a538c7df18e2edc783421'
+      SOURCE_COMMIT: 'e4fa6f6e9d21bce5d36ce4187cbc48386ed9e58e'
+      RELEASE_TAG: 'rockbox-solar-y1-type-a-e4fa6f6'
+      ROM_NAME: 'RockboxSolar-Y1-Type-A-rom.zip'
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Check out repository context
+        uses: actions/checkout@v4
+
+      - name: Download verified split ROM artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p downloads parts release
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PART_00_ARTIFACT_ID}/zip" \
+            > downloads/part-00-artifact.zip
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PART_01_ARTIFACT_ID}/zip" \
+            > downloads/part-01-artifact.zip
+          unzip -oq downloads/part-00-artifact.zip -d parts
+          unzip -oq downloads/part-01-artifact.zip -d parts
+          test -f parts/rom.zip.part-00
+          test -f parts/rom.zip.part-01
+
+      - name: Reassemble and verify exact ROM
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${EXPECTED_PART_00_SHA256}  parts/rom.zip.part-00" | sha256sum -c -
+          echo "${EXPECTED_PART_01_SHA256}  parts/rom.zip.part-01" | sha256sum -c -
+          cat parts/rom.zip.part-00 parts/rom.zip.part-01 > "release/${ROM_NAME}"
+          echo "${EXPECTED_ROM_SHA256}  release/${ROM_NAME}" | sha256sum -c -
+          test "$(stat -c '%s' "release/${ROM_NAME}")" = '539077181'
+          unzip -tq "release/${ROM_NAME}"
+          unzip -Z1 "release/${ROM_NAME}" | grep -Fx 'system.img'
+          unzip -Z1 "release/${ROM_NAME}" | grep -Fx 'userdata.img'
+          unzip -Z1 "release/${ROM_NAME}" | grep -Fx 'MT6572_Android_scatter.txt'
+          unzip -Z1 "release/${ROM_NAME}" | grep -Fx 'preloader_g368_nyx.bin'
+          printf '%s  %s\n' "${EXPECTED_ROM_SHA256}" "${ROM_NAME}" \
+            > "release/${ROM_NAME}.sha256"
+
+      - name: Upload intact verified ROM to GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: RockboxSolar-Y1-Type-A-rom
+          path: |
+            release/RockboxSolar-Y1-Type-A-rom.zip
+            release/RockboxSolar-Y1-Type-A-rom.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Publish GitHub prerelease
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<EOF
+          Native Rockbox Solar firmware for **Innioasis Y1 Type A only**.
+
+          Source commit: ${SOURCE_COMMIT}
+          Verified build run: ${SOURCE_RUN_ID}
+          ROM SHA-256: ${EXPECTED_ROM_SHA256}
+          ROM size: 539077181 bytes
+
+          The CI pipeline successfully completed native Rockbox compilation, Type A packaging, ZIP integrity checks, ext4 filesystem checks, ARM binary checks, and post-package image inspection. Rockbox, solar.rock, the static ARM solarctl helper, Solar configuration, and the CA bundle were found inside the generated firmware images.
+
+          **Physical Y1 validation has not been performed.** This is a prerelease. It is restricted to Innioasis Y1 Type A hardware. Keep a known-good official Type A recovery ROM available before installing.
+          EOF
+
+          gh release delete "${RELEASE_TAG}" --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh release create "${RELEASE_TAG}" \
+            "release/${ROM_NAME}" \
+            "release/${ROM_NAME}.sha256" \
+            --target "${SOURCE_COMMIT}" \
+            --title 'Rockbox Solar Y1 Type A — hardware-unverified' \
+            --notes-file release-notes.md \
+            --prerelease
+
+      - name: Record publication status
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Actions artifact: RockboxSolar-Y1-Type-A-rom"
+          gh release view "${RELEASE_TAG}" --json url,tagName,isPrerelease,assets || \
+            echo 'Release asset unavailable; the intact verified ROM is available in the Actions artifact.'
