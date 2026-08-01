@@ -33,6 +33,7 @@ jobs:
       RELEASE_TAG: 'rockbox-solar-y1-type-a-e4fa6f6'
       ROM_NAME: 'RockboxSolar-Y1-Type-A-rom.zip'
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
 
     steps:
       - name: Download verified split ROM artifacts
