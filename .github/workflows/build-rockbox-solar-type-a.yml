@@ -78,15 +78,73 @@ jobs:
           chmod +x firmware/build_type_a.sh
           firmware/build_type_a.sh
 
-      - name: Upload Type A ROM and complete logs
-        if: always()
+      - name: Split verified ROM for connector download
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROM=dist/type-a/rom.zip
+          PARTS=dist/type-a-download
+          META=dist/type-a-metadata
+          test -f "$ROM"
+          unzip -tq "$ROM"
+          rm -rf "$PARTS" "$META"
+          mkdir -p "$PARTS" "$META"
+          sha256sum "$ROM" | tee "$META/rom.zip.sha256"
+          stat --printf='rom.zip bytes=%s\n' "$ROM" | tee "$META/rom.zip.size.txt"
+          split -b 300M -d -a 2 "$ROM" "$PARTS/rom.zip.part-"
+          test -f "$PARTS/rom.zip.part-00"
+          test -f "$PARTS/rom.zip.part-01"
+          test ! -f "$PARTS/rom.zip.part-02"
+          sha256sum "$PARTS"/rom.zip.part-* | tee "$META/parts.sha256"
+          cat > "$META/reassemble-linux-macos.sh" <<'SH'
+          #!/usr/bin/env sh
+          set -eu
+          cat rom.zip.part-00 rom.zip.part-01 > rom.zip
+          sha256sum -c rom.zip.sha256
+          SH
+          cat > "$META/reassemble-windows.cmd" <<'CMD'
+          @echo off
+          copy /b rom.zip.part-00+rom.zip.part-01 rom.zip
+          certutil -hashfile rom.zip SHA256
+          CMD
+          chmod 0755 "$META/reassemble-linux-macos.sh"
+          cp "$META/rom.zip.sha256" "$PARTS/"
+          ls -l "$PARTS" "$META"
+
+      - name: Upload Type A ROM part 00
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: rockbox-solar-y1-type-a-rom
-          if-no-files-found: warn
+          name: rockbox-solar-y1-type-a-rom-part-00
+          if-no-files-found: error
           compression-level: 0
           retention-days: 14
           path: |
-            dist/type-a/
+            dist/type-a-download/rom.zip.part-00
+            dist/type-a-download/rom.zip.sha256
+
+      - name: Upload Type A ROM part 01
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rockbox-solar-y1-type-a-rom-part-01
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          path: |
+            dist/type-a-download/rom.zip.part-01
+            dist/type-a-download/rom.zip.sha256
+
+      - name: Upload Type A ROM metadata and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rockbox-solar-y1-type-a-rom-metadata
+          if-no-files-found: warn
+          compression-level: 6
+          retention-days: 14
+          path: |
+            dist/type-a-metadata/
             dist/source/
             logs/
