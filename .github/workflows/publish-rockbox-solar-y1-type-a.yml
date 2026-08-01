@@ -1,11 +1,6 @@
 name: Publish verified Rockbox Solar Y1 Type A ROM
 
 on:
-  push:
-    branches:
-      - agent/rockbox-solar-firmware
-    paths:
-      - .github/workflows/publish-rockbox-solar-y1-type-a.yml
   pull_request:
     branches:
       - agent/rockbox-solar-cleanroom
@@ -16,6 +11,10 @@ on:
 permissions:
   actions: read
   contents: write
+
+concurrency:
+  group: publish-rockbox-solar-y1-type-a
+  cancel-in-progress: true
 
 jobs:
   publish:
@@ -36,6 +35,9 @@ jobs:
       GH_REPO: ${{ github.repository }}
 
     steps:
+      - name: Check out repository context
+        uses: actions/checkout@v4
+
       - name: Download verified split ROM artifacts
         shell: bash
         run: |
@@ -71,7 +73,19 @@ jobs:
           printf '%s  %s\n' "${EXPECTED_ROM_SHA256}" "${ROM_NAME}" \
             > "release/${ROM_NAME}.sha256"
 
+      - name: Upload intact verified ROM to GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: RockboxSolar-Y1-Type-A-rom
+          path: |
+            release/RockboxSolar-Y1-Type-A-rom.zip
+            release/RockboxSolar-Y1-Type-A-rom.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
       - name: Publish GitHub prerelease
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -88,27 +102,20 @@ jobs:
           **Physical Y1 validation has not been performed.** This is a prerelease. It is restricted to Innioasis Y1 Type A hardware. Keep a known-good official Type A recovery ROM available before installing.
           EOF
 
-          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh release upload "${RELEASE_TAG}" \
-              "release/${ROM_NAME}" \
-              "release/${ROM_NAME}.sha256" \
-              --clobber
-            gh release edit "${RELEASE_TAG}" \
-              --title 'Rockbox Solar Y1 Type A — hardware-unverified' \
-              --notes-file release-notes.md \
-              --prerelease
-          else
-            gh release create "${RELEASE_TAG}" \
-              "release/${ROM_NAME}" \
-              "release/${ROM_NAME}.sha256" \
-              --target "${SOURCE_COMMIT}" \
-              --title 'Rockbox Solar Y1 Type A — hardware-unverified' \
-              --notes-file release-notes.md \
-              --prerelease
-          fi
+          gh release delete "${RELEASE_TAG}" --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh release create "${RELEASE_TAG}" \
+            "release/${ROM_NAME}" \
+            "release/${ROM_NAME}.sha256" \
+            --target "${SOURCE_COMMIT}" \
+            --title 'Rockbox Solar Y1 Type A — hardware-unverified' \
+            --notes-file release-notes.md \
+            --prerelease
 
-      - name: Record published release
+      - name: Record publication status
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
-          gh release view "${RELEASE_TAG}" --json url,tagName,isPrerelease,assets
+          echo "Actions artifact: RockboxSolar-Y1-Type-A-rom"
+          gh release view "${RELEASE_TAG}" --json url,tagName,isPrerelease,assets || \
+            echo 'Release asset unavailable; the intact verified ROM is available in the Actions artifact.'
