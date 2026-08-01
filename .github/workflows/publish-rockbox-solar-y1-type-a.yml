@@ -48,8 +48,8 @@ jobs:
             -H 'Accept: application/vnd.github+json' \
             "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${PART_01_ARTIFACT_ID}/zip" \
             > downloads/part-01-artifact.zip
-          unzip -q downloads/part-00-artifact.zip -d parts
-          unzip -q downloads/part-01-artifact.zip -d parts
+          unzip -oq downloads/part-00-artifact.zip -d parts
+          unzip -oq downloads/part-01-artifact.zip -d parts
           test -f parts/rom.zip.part-00
           test -f parts/rom.zip.part-01
 
