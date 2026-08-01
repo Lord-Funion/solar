@@ -130,7 +130,11 @@ static int write_request(const char *command,
 '''
     if old_writer not in plugin_text:
         raise SystemExit("solar.c request writer insertion point not found")
-    plugin.write_text(plugin_text.replace(old_writer, new_writer, 1), encoding="utf-8")
+    plugin_text = plugin_text.replace(old_writer, new_writer, 1)
+    # The Y1 plugin API exports splashf(); splash is a two-argument macro in
+    # core code and must not be addressed as a plugin_api member.
+    plugin_text = plugin_text.replace("rb->splash(", "rb->splashf(")
+    plugin.write_text(plugin_text, encoding="utf-8")
 
     replace_once(
         sources,
