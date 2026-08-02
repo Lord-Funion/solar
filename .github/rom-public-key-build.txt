@@ -1,2 +1,3 @@
 Trigger the Y1 Type A ROM build using the official AOSP test platform keys.
 Retry after removing the optional PR status-comment step.
+Retry with Linux SOLAR_BASH and ProgramFiles overrides.
