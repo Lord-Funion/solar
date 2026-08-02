@@ -1,0 +1,1 @@
+Trigger the Y1 Type A ROM build using the official AOSP test platform keys.
