@@ -320,9 +320,6 @@ public final class RowKeys {
         if (DEVICE.equals(rowKey)) return R.string.settings_device;
         if (LIBRARY.equals(rowKey)) return R.string.settings_library;
         if (MEDIA.equals(rowKey)) return R.string.settings_media;
-        if (DOWNLOAD_AUTO_RESUME_WIFI.equals(rowKey)) {
-            return R.string.settings_download_auto_resume_wifi;
-        }
         if (POWER.equals(rowKey)) return R.string.settings_power;
         if (USB.equals(rowKey)) return R.string.settings_usb;
         if (USB_AUTO_CONNECT.equals(rowKey)) return R.string.settings_usb_auto_connect;

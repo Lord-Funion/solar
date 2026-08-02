@@ -3828,6 +3828,11 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 
+    private boolean isDownloadAutoResumeWifiEnabled() {
+        return prefs == null || prefs.getBoolean(
+                TransferNetworkPolicy.PREF_AUTO_RESUME_WIFI, true);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         // #region agent log
@@ -4362,7 +4367,6 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         try {
             transferJobStore = TransferJobStore.get(this);
-            armRecoveredDirectDownloadAutoResume();
         } catch (RuntimeException e) {
             android.util.Log.w("Solar", "Transfer journal unavailable", e);
             transferJobStore = null;
@@ -9921,11 +9925,9 @@ public class MainActivity extends Activity {
         if (transferNetworkUnavailable) {
             pausePodcastBackgroundDownload(true);
             pauseSoulseekDownloadForNetworkLoss();
-            pauseDirectDownloadForNetworkLoss(internetAvailable, wifiAssociated);
         } else {
             maybeResumePodcastDownload();
             maybeResumeSoulseekDownloadAfterNetworkLoss();
-            maybeResumeDirectDownloadAfterNetworkLoss();
         }
         if (internetAvailable && soulseekReachEnabled) {
             SolarDiagnosticReporter.onReachInternetAvailable(this, prefs);
@@ -21464,9 +21466,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             return stateOnOff(prefs == null
                     || prefs.getBoolean(WifiAutoConnectPolicy.PREF_ENABLED, true));
         }
-        if (RowKeys.DOWNLOAD_AUTO_RESUME_WIFI.equals(rowKey)) {
-            return stateOnOff(isDownloadAutoResumeWifiEnabled());
-        }
         if (RowKeys.FULL_WIDTH.equals(rowKey)) return stateOnOff(isFullWidthMenus);
         if (RowKeys.MENU_ITEM_PADDING.equals(rowKey)) {
             return stateOnOff(ThemeManager.isMenuItemPaddingEnabled(prefs, false));
@@ -22097,10 +22096,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         if (RowKeys.WIFI_AUTO_CONNECT.equals(rowKey)) {
             stateText = getString(R.string.settings_wifi_auto_connect_hint) + "\n\n"
-                    + (stateText != null ? stateText : "");
-        }
-        if (RowKeys.DOWNLOAD_AUTO_RESUME_WIFI.equals(rowKey)) {
-            stateText = getString(R.string.settings_download_auto_resume_wifi_hint) + "\n\n"
                     + (stateText != null ? stateText : "");
         }
         if (RowKeys.USB_TURN_ON.equals(rowKey)) {
