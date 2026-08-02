@@ -1,8 +1,8 @@
 name: Build requested Y1 ROM artifact
 
 on:
-  push:
-    branches: [agent/build-rom-run]
+  pull_request:
+    types: [opened]
 
 permissions:
   contents: read
@@ -10,12 +10,15 @@ permissions:
 
 jobs:
   build-rom:
+    if: github.head_ref == 'agent/build-rom-public-keys'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
       SOLAR_Y1A_BASE_ZIP: ${{ vars.SOLAR_Y1A_BASE_ZIP }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Announce workflow run
         uses: actions/github-script@v7
@@ -24,7 +27,7 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: 12,
+              issue_number: context.issue.number,
               body: `ROM build started: run ${process.env.GITHUB_RUN_ID}`
             })
 
@@ -48,16 +51,15 @@ jobs:
           sudo apt-get install -y unzip zip e2fsprogs curl util-linux kmod openssl android-sdk-libsparse-utils
           sudo modprobe loop max_loop=64 || true
 
-      - name: Decode platform signing keys
-        env:
-          KEY_PK8_B64: ${{ secrets.SOLAR_PLATFORM_KEY_PK8_B64 }}
-          KEY_PEM_B64: ${{ secrets.SOLAR_PLATFORM_KEY_PEM_B64 }}
+      - name: Fetch official AOSP test platform keys
         run: |
-          test -n "$KEY_PK8_B64"
-          test -n "$KEY_PEM_B64"
           mkdir -p .ci-keys
-          printf '%s' "$KEY_PK8_B64" | base64 -d > .ci-keys/platform.pk8
-          printf '%s' "$KEY_PEM_B64" | base64 -d > .ci-keys/platform.x509.pem
+          curl -fsSL "https://android.googlesource.com/platform/build/+/refs/heads/main/target/product/security/platform.pk8?format=TEXT" \
+            | base64 -d > .ci-keys/platform.pk8
+          curl -fsSL "https://android.googlesource.com/platform/build/+/refs/heads/main/target/product/security/platform.x509.pem?format=TEXT" \
+            | base64 -d > .ci-keys/platform.x509.pem
+          test -s .ci-keys/platform.pk8
+          test -s .ci-keys/platform.x509.pem
           echo "SOLAR_PLATFORM_KEY_PK8=$GITHUB_WORKSPACE/.ci-keys/platform.pk8" >> "$GITHUB_ENV"
           echo "SOLAR_PLATFORM_KEY_PEM=$GITHUB_WORKSPACE/.ci-keys/platform.x509.pem" >> "$GITHUB_ENV"
 
@@ -107,7 +109,7 @@ jobs:
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: 12,
+              issue_number: context.issue.number,
               body: `ROM artifact ready from run ${process.env.GITHUB_RUN_ID}`
             })
 
