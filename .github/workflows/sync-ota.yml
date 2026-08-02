@@ -1,5 +1,6 @@
-name: Verify Bluetooth and folder regressions
+name: Sync OTA catalog to solar-update
 
+# ponytail: recovery when release build succeeded but OTA push failed (bad PAT mid-pipeline).
 on:
   workflow_dispatch:
 
@@ -7,37 +8,29 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  sync-ota:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      # app/build.gradle eagerly constructs ProgramFiles/Git/bin/bash.exe even on Linux.
-      # Keep this branch-only verifier on a POSIX-safe path without changing app code.
-      ProgramFiles: /tmp
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android build packages
+      - name: Verify OTA PAT can push to solar-update
+        env:
+          SOLAR_GITHUB_PAT: ${{ secrets.SOLAR_GITHUB_PAT }}
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          chmod +x scripts/verify-ota-pat.sh
+          ./scripts/verify-ota-pat.sh
 
-      - name: Run focused Bluetooth regression tests
+      - name: Configure solar-update Pages (branch deploy)
+        env:
+          SOLAR_GITHUB_PAT: ${{ secrets.SOLAR_GITHUB_PAT }}
         run: |
-          chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest \
-            --tests "com.solar.launcher.BluetoothPairingCoordinatorTest" \
-            --tests "com.solar.launcher.BluetoothAudioRepairTest" \
-            --tests "com.solar.launcher.BluetoothDiagnosticsTest"
+          chmod +x scripts/configure-solar-update-pages.sh
+          ./scripts/configure-solar-update-pages.sh
 
-      - name: Compile debug APK
-        run: ./gradlew :app:assembleDebug
+      - name: Sync APKs from GitHub releases
+        env:
+          SOLAR_GITHUB_PAT: ${{ secrets.SOLAR_GITHUB_PAT }}
+        run: |
+          chmod +x scripts/publish-ota-updates.sh
+          ./scripts/publish-ota-updates.sh sync-from-releases
