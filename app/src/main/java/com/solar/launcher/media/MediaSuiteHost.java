@@ -31,7 +31,6 @@ import com.solar.launcher.ui.HardwareButtonGlyph;
 import com.solar.launcher.ui.RowBusyChrome;
 import com.solar.launcher.DebugAgentLog;
 import com.solar.launcher.DebugF9ef0bLog;
-import com.solar.launcher.ConnectivityHelper;
 import com.solar.launcher.FocusScrollHelper;
 import com.solar.launcher.MoveRibbonTouch;
 import com.solar.launcher.PlayQueue;
@@ -60,20 +59,12 @@ import com.solar.launcher.video.VideoPlayerController;
 import com.solar.launcher.video.VideoSeekPolicy;
 import com.solar.launcher.youtube.YouTubeClient;
 import com.solar.launcher.youtube.YouTubeComment;
-import com.solar.launcher.youtube.CreatorDownloadLinkExtractor;
 import com.solar.launcher.youtube.YouTubeDownloader;
-import com.solar.launcher.youtube.YouTubeAcquisitionPolicy;
-import com.solar.launcher.youtube.YouTubeBookmarks;
-import com.solar.launcher.youtube.YouTubeDiscoverFeedback;
-import com.solar.launcher.youtube.YouTubeLocalLibrarySignals;
-import com.solar.launcher.youtube.YouTubeDiscoverRanker;
-import com.solar.launcher.youtube.YouTubeDiscoverSignals;
 import com.solar.launcher.youtube.YouTubeProgressiveCache;
 import com.solar.launcher.youtube.YouTubeRecentSearches;
 import com.solar.launcher.youtube.YouTubeResultJson;
 import com.solar.launcher.youtube.YouTubeSavePaths;
 import com.solar.launcher.youtube.YouTubeVideo;
-import com.solar.launcher.youtube.official.YouTubeDeviceAuth;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -237,11 +228,8 @@ public final class MediaSuiteHost {
          */
         void openRadioNetSearchKeyboard(String prefill);
 
-        /** Search the existing authorized Soulseek provider using YouTube metadata. */
-        void searchSoulseekForYouTube(YouTubeVideo video);
-
-        /** Hand a validated creator-provided direct audio URL to the separate download provider. */
-        void openAuthorizedDirectAudioUrl(String url);
+        /** Save YouTube stream via downloader (video or audio-only). */
+        void requestYouTubeSave(YouTubeVideo video, boolean audioOnly);
 
         /**
          * 2026-07-15 — Play a local audio file in music Now Playing (YouTube Audio path).
@@ -349,7 +337,6 @@ public final class MediaSuiteHost {
     private String youtubeStreamUrl;
     private final List<YouTubeVideo> youtubeVideos = new ArrayList<YouTubeVideo>();
     private int youtubeLoadGen;
-    private int youtubeProbeGen;
     private boolean youtubeLoading;
     /** 2026-07-14 — Play resolve in progress (detail Play row subtitle); not browse list load. */
     private boolean youtubeResolvingStream;
@@ -371,22 +358,6 @@ public final class MediaSuiteHost {
     private final java.util.concurrent.atomic.AtomicBoolean youtubeProgCancel =
             new java.util.concurrent.atomic.AtomicBoolean(false);
     private String youtubePendingSearch;
-    private String youtubeNextPageToken = "";
-    private boolean youtubeAppending;
-    private boolean youtubeShowingBookmarks;
-    private boolean youtubeShowingDiscover;
-    /** True when visible official metadata came from an expired offline cache entry. */
-    private boolean youtubeMetadataStale;
-    private boolean youtubeDiscoverSignalsLoading;
-    private boolean youtubeDiscoverLocalSignalsLoading;
-    private boolean youtubeDiscoverPopularStale;
-    private final List<YouTubeVideo> youtubeDiscoverPopular =
-            new ArrayList<YouTubeVideo>();
-    private final List<String> youtubeDiscoverReasons = new ArrayList<String>();
-    private YouTubeDiscoverSignals youtubeDiscoverSignals =
-            new YouTubeDiscoverSignals(null, null, false, false);
-    private YouTubeLocalLibrarySignals youtubeLocalLibrarySignals =
-            YouTubeLocalLibrarySignals.empty();
     private String youtubeNowPlayingTitle;
     private String youtubeNowPlayingId;
     /**
@@ -398,22 +369,7 @@ public final class MediaSuiteHost {
     private YouTubeVideo youtubeDetailVideo;
     private final List<YouTubeComment> youtubeComments = new ArrayList<YouTubeComment>();
     private boolean youtubeCommentsLoading;
-    private boolean youtubeCommentsStale;
     private int youtubeCommentsGen;
-    private YouTubeBookmarks youtubeBookmarks;
-    private YouTubeDiscoverFeedback youtubeDiscoverFeedback;
-    private YouTubeDeviceAuth youtubeAuth;
-    private final Handler youtubeAuthHandler = new Handler(Looper.getMainLooper());
-    private final Runnable youtubeAuthTick = new Runnable() {
-        @Override
-        public void run() {
-            if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) return;
-            rebuildYouTubeVirtualRows();
-            notifyVirtualDataChangedPreserveFocus();
-            YouTubeDeviceAuth.Snapshot current = youtubeAuth().snapshot();
-            if (current.isActive()) youtubeAuthHandler.postDelayed(this, 1000L);
-        }
-    };
     private final List<YoutubeDetailRow> youtubeDetailRows = new ArrayList<YoutubeDetailRow>();
     private VideoPlayerController videoController;
     private SurfaceRenderView videoSurface;
@@ -448,10 +404,6 @@ public final class MediaSuiteHost {
         static final int KIND_RECENT = 3;
         static final int KIND_STATUS = 4;
         static final int KIND_VIDEO = 5;
-        static final int KIND_ACCOUNT = 6;
-        static final int KIND_MORE = 7;
-        static final int KIND_BOOKMARKS = 8;
-        static final int KIND_DISCOVER = 9;
 
         final int kind;
         final String recentQuery;
@@ -480,34 +432,17 @@ public final class MediaSuiteHost {
         static final int KIND_HEADER = 4;
         static final int KIND_COMMENT = 5;
         static final int KIND_STATUS = 6;
-        static final int KIND_BOOKMARK = 7;
-        static final int KIND_SOULSEEK = 8;
-        static final int KIND_COPY_LINK = 9;
-        static final int KIND_NOT_INTERESTED = 10;
-        static final int KIND_MORE_LIKE = 11;
-        static final int KIND_LESS_FROM_CHANNEL = 12;
-        static final int KIND_CREATOR_DOWNLOAD = 13;
 
         final int kind;
         final int commentIndex;
-        final String directUrl;
 
         YoutubeDetailRow(int kind) {
-            this(kind, -1, null);
+            this(kind, -1);
         }
 
         YoutubeDetailRow(int kind, int commentIndex) {
-            this(kind, commentIndex, null);
-        }
-
-        YoutubeDetailRow(int kind, String directUrl) {
-            this(kind, -1, directUrl);
-        }
-
-        YoutubeDetailRow(int kind, int commentIndex, String directUrl) {
             this.kind = kind;
             this.commentIndex = commentIndex;
-            this.directUrl = directUrl;
         }
     }
 
@@ -733,11 +668,8 @@ public final class MediaSuiteHost {
                 break;
             case STATE_YOUTUBE_BROWSE:
                 youtubeLoadGen++;
-                youtubeProbeGen++;
                 youtubeLoading = false;
-                youtubeAppending = false;
                 youtubeResolvingStream = false;
-                youtubeAuthHandler.removeCallbacks(youtubeAuthTick);
                 break;
             case STATE_YOUTUBE_DETAIL:
                 youtubeCommentsGen++;
@@ -790,9 +722,7 @@ public final class MediaSuiteHost {
             case STATE_VIDEOS:
                 return host.getString(R.string.status_videos);
             case STATE_YOUTUBE_BROWSE:
-                return host.getString(youtubeShowingDiscover
-                        ? R.string.youtube_discover_title
-                        : R.string.status_youtube);
+                return host.getString(R.string.status_youtube);
             case STATE_YOUTUBE_DETAIL:
                 if (youtubeDetailVideo != null && youtubeDetailVideo.title.length() > 0) {
                     return youtubeDetailVideo.title;
@@ -3790,11 +3720,6 @@ public final class MediaSuiteHost {
      */
     private void openYouTubeBrowse() {
         youtubeAudioMode = false;
-        if (youtubeShowingDiscover) {
-            youtubeVideos.clear();
-            youtubeDiscoverReasons.clear();
-        }
-        youtubeShowingDiscover = false;
         openYouTubeBrowseInternal();
     }
 
@@ -3805,31 +3730,12 @@ public final class MediaSuiteHost {
      */
     public void openYouTubeAudioBrowse() {
         youtubeAudioMode = true;
-        if (youtubeShowingDiscover) {
-            youtubeVideos.clear();
-            youtubeDiscoverReasons.clear();
-        }
-        youtubeShowingDiscover = false;
-        openYouTubeBrowseInternal();
-    }
-
-    /** Get Music entry for Solar's transparent local recommendation mode. */
-    public void openYouTubeDiscoverBrowse() {
-        youtubeAudioMode = true;
-        youtubeShowingDiscover = true;
-        youtubeShowingBookmarks = false;
-        youtubePendingSearch = null;
-        youtubeNextPageToken = "";
-        youtubeVideos.clear();
-        youtubeDiscoverReasons.clear();
         openYouTubeBrowseInternal();
     }
 
     private void openYouTubeBrowseInternal() {
         host.changeScreen(STATE_YOUTUBE_BROWSE);
-        bindYouTubeAuthListener();
-        if (!ConnectivityHelper.isOnline(host.context())) return;
-        final int probeGen = ++youtubeProbeGen;
+        final int probeGen = ++youtubeLoadGen;
         YouTubeClient.getInstance(host.context()).probe(new YouTubeClient.Callback() {
             @Override
             public void onSuccess(String payloadJson) {
@@ -3838,11 +3744,9 @@ public final class MediaSuiteHost {
 
             @Override
             public void onError(String message) {
-                if (probeGen != youtubeProbeGen) return;
-                Toast.makeText(host.context(),
-                        "youtube_setup_required".equals(message)
-                                ? R.string.youtube_setup_required
-                                : R.string.youtube_backend_not_ready,
+                if (probeGen != youtubeLoadGen) return;
+                // Soft fail: browse can still retry popular/search; toast once.
+                Toast.makeText(host.context(), R.string.youtube_backend_not_ready,
                         Toast.LENGTH_LONG).show();
             }
         });
@@ -3876,7 +3780,6 @@ public final class MediaSuiteHost {
     }
 
     private void buildYouTubeBrowseUi() {
-        bindYouTubeAuthListener();
         prepareVirtualListBrowse();
         host.applyReachBrowseLayoutMode();
         host.showReachBrowseList(true);
@@ -3888,19 +3791,14 @@ public final class MediaSuiteHost {
                 handleYouTubeRowClick(position);
             }
         });
-        if (!youtubeShowingBookmarks && youtubeVideos.isEmpty() && !youtubeLoading
+        if (youtubeVideos.isEmpty() && !youtubeLoading
                 && (youtubePendingSearch == null || youtubePendingSearch.isEmpty())) {
-            if (youtubeShowingDiscover) loadYouTubeDiscover();
-            else loadYouTubePopular();
+            loadYouTubePopular();
         }
     }
 
     private void updateYouTubeStatusPath() {
-        if (youtubeShowingBookmarks) {
-            host.setBrowserStatusTitle(host.getString(R.string.youtube_bookmarks_title));
-        } else if (youtubeShowingDiscover) {
-            host.setBrowserStatusTitle(host.getString(R.string.youtube_discover_title));
-        } else if (youtubePendingSearch != null && !youtubePendingSearch.isEmpty()) {
+        if (youtubePendingSearch != null && !youtubePendingSearch.isEmpty()) {
             host.setBrowserStatusTitle(host.getString(R.string.status_youtube_results,
                     youtubePendingSearch));
         } else {
@@ -3928,30 +3826,9 @@ public final class MediaSuiteHost {
         }
         youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_SEARCH));
 
-        appendYouTubeAccountRow();
-
-        if (!youtubeShowingBookmarks) {
-            int saved = youtubeBookmarks().list().size();
-            virtualLabels.add(host.getString(R.string.youtube_bookmarks_row));
-            virtualSubtitles.add(host.getString(R.string.youtube_bookmarks_count, saved));
-            youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_BOOKMARKS));
-        }
-
-        if (!youtubeShowingDiscover && !youtubeShowingBookmarks
-                && (youtubePendingSearch == null || youtubePendingSearch.isEmpty())) {
-            virtualLabels.add(host.getString(R.string.youtube_discover_row));
-            virtualSubtitles.add(host.getString(R.string.youtube_discover_row_sub));
-            youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_DISCOVER));
-        }
-
-        if (youtubeShowingDiscover || youtubeShowingBookmarks
-                || (youtubePendingSearch != null && !youtubePendingSearch.isEmpty())) {
+        if (youtubePendingSearch != null && !youtubePendingSearch.isEmpty()) {
             virtualLabels.add(host.getString(R.string.youtube_show_popular));
-            virtualSubtitles.add(youtubeShowingDiscover
-                    ? host.getString(R.string.youtube_leave_discover_sub)
-                    : youtubeShowingBookmarks
-                    ? host.getString(R.string.youtube_leave_bookmarks_sub)
-                    : host.getString(R.string.youtube_show_popular_sub));
+            virtualSubtitles.add(host.getString(R.string.youtube_show_popular_sub));
             youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_CLEAR));
         } else {
             List<String> recent = YouTubeRecentSearches.get(host.context());
@@ -3962,7 +3839,7 @@ public final class MediaSuiteHost {
             }
         }
 
-        if (youtubeLoading && youtubeVideos.isEmpty()) {
+        if (youtubeLoading) {
             virtualLabels.add(host.getString(R.string.youtube_loading));
             virtualSubtitles.add("");
             youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_STATUS));
@@ -3970,67 +3847,27 @@ public final class MediaSuiteHost {
         }
 
         if (youtubeVideos.isEmpty()) {
-            virtualLabels.add(youtubeShowingBookmarks
-                    ? host.getString(R.string.youtube_bookmarks_empty)
-                    : youtubeShowingDiscover
-                    ? host.getString(R.string.youtube_discover_empty)
-                    : (youtubePendingSearch != null && !youtubePendingSearch.isEmpty()
+            virtualLabels.add(youtubePendingSearch != null && !youtubePendingSearch.isEmpty()
                     ? host.getString(R.string.youtube_empty)
-                    : host.getString(R.string.youtube_popular_empty)));
-            virtualSubtitles.add(youtubeMetadataStale
-                    ? host.getString(R.string.youtube_offline_cache)
-                    : "");
+                    : host.getString(R.string.youtube_popular_empty));
+            virtualSubtitles.add("");
             youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_STATUS));
             return;
         }
 
-        if (youtubeShowingBookmarks) {
-            virtualLabels.add(host.getString(R.string.youtube_bookmarks_header));
-        } else if (youtubeShowingDiscover) {
-            virtualLabels.add(host.getString(R.string.youtube_discover_header));
-        } else if (youtubePendingSearch == null || youtubePendingSearch.isEmpty()) {
+        if (youtubePendingSearch == null || youtubePendingSearch.isEmpty()) {
             virtualLabels.add(host.getString(R.string.youtube_popular_header));
         } else {
             virtualLabels.add(host.getString(R.string.youtube_results_header));
         }
-        if (youtubeShowingDiscover
-                && (youtubeDiscoverSignalsLoading
-                        || youtubeDiscoverLocalSignalsLoading)) {
-            virtualSubtitles.add(host.getString(R.string.youtube_discover_personalizing));
-        } else if (youtubeShowingDiscover
-                && (youtubeDiscoverSignals.partial
-                        || youtubeLocalLibrarySignals.partial)) {
-            virtualSubtitles.add(host.getString(R.string.youtube_discover_partial));
-        } else {
-            virtualSubtitles.add(youtubeMetadataStale
-                    ? host.getString(R.string.youtube_offline_cache)
-                    : "");
-        }
+        virtualSubtitles.add("");
         youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_STATUS));
 
         for (int i = 0; i < youtubeVideos.size(); i++) {
             YouTubeVideo v = youtubeVideos.get(i);
             virtualLabels.add(v.title);
-            if (youtubeShowingDiscover && i < youtubeDiscoverReasons.size()) {
-                String metadata = v.subtitle();
-                String reason = youtubeDiscoverReasons.get(i);
-                virtualSubtitles.add(metadata.length() > 0
-                        ? reason + " · " + metadata : reason);
-            } else {
-                virtualSubtitles.add(v.subtitle());
-            }
+            virtualSubtitles.add(v.subtitle());
             youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_VIDEO, null, i));
-        }
-
-        if (youtubeAppending) {
-            virtualLabels.add(host.getString(R.string.youtube_loading_more));
-            virtualSubtitles.add("");
-            youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_STATUS));
-        } else if (!youtubeShowingDiscover && !youtubeShowingBookmarks
-                && youtubeNextPageToken.length() > 0) {
-            virtualLabels.add(host.getString(R.string.youtube_show_more));
-            virtualSubtitles.add(host.getString(R.string.youtube_show_more_sub));
-            youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_MORE));
         }
     }
 
@@ -4046,32 +3883,15 @@ public final class MediaSuiteHost {
                         youtubePendingSearch != null ? youtubePendingSearch : "");
                 break;
             case YoutubeBrowseRow.KIND_CLEAR:
-                youtubeShowingBookmarks = false;
-                youtubeShowingDiscover = false;
                 youtubePendingSearch = null;
-                youtubeNextPageToken = "";
                 youtubeVideos.clear();
                 loadYouTubePopular();
                 break;
             case YoutubeBrowseRow.KIND_RECENT:
                 if (row.recentQuery != null && row.recentQuery.length() > 0) {
-                    youtubeShowingBookmarks = false;
-                    youtubeShowingDiscover = false;
                     youtubePendingSearch = row.recentQuery;
                     loadYouTubeSearch(row.recentQuery);
                 }
-                break;
-            case YoutubeBrowseRow.KIND_ACCOUNT:
-                handleYouTubeAccountClick();
-                break;
-            case YoutubeBrowseRow.KIND_BOOKMARKS:
-                showYouTubeBookmarks();
-                break;
-            case YoutubeBrowseRow.KIND_DISCOVER:
-                loadYouTubeDiscover();
-                break;
-            case YoutubeBrowseRow.KIND_MORE:
-                loadMoreYouTube();
                 break;
             case YoutubeBrowseRow.KIND_STATUS:
                 break;
@@ -4086,274 +3906,12 @@ public final class MediaSuiteHost {
         }
     }
 
-    private YouTubeBookmarks youtubeBookmarks() {
-        if (youtubeBookmarks == null) {
-            youtubeBookmarks = new YouTubeBookmarks(host.context());
-        }
-        return youtubeBookmarks;
-    }
-
-    private YouTubeDiscoverFeedback youtubeDiscoverFeedback() {
-        if (youtubeDiscoverFeedback == null) {
-            youtubeDiscoverFeedback = new YouTubeDiscoverFeedback(host.context());
-        }
-        return youtubeDiscoverFeedback;
-    }
-
-    private YouTubeDeviceAuth youtubeAuth() {
-        if (youtubeAuth == null) {
-            youtubeAuth = YouTubeDeviceAuth.getInstance(host.context());
-        }
-        return youtubeAuth;
-    }
-
-    private void bindYouTubeAuthListener() {
-        youtubeAuth().setListener(new YouTubeDeviceAuth.Listener() {
-            @Override
-            public void onAuthStateChanged(YouTubeDeviceAuth.Snapshot snapshot) {
-                if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) return;
-                youtubeAuthHandler.removeCallbacks(youtubeAuthTick);
-                rebuildYouTubeVirtualRows();
-                notifyVirtualDataChangedPreserveFocus();
-                if (snapshot != null
-                        && snapshot.state == YouTubeDeviceAuth.State.AUTHORIZED
-                        && youtubeShowingDiscover) {
-                    loadYouTubeDiscover();
-                    return;
-                }
-                if (snapshot != null && snapshot.isActive()) {
-                    youtubeAuthHandler.postDelayed(youtubeAuthTick, 1000L);
-                }
-            }
-        });
-    }
-
-    private void appendYouTubeAccountRow() {
-        YouTubeDeviceAuth auth = youtubeAuth();
-        YouTubeDeviceAuth.Snapshot snapshot = auth.snapshot();
-        String label;
-        String subtitle;
-        if (auth.hasAccount() || snapshot.state == YouTubeDeviceAuth.State.AUTHORIZED) {
-            label = host.getString(R.string.youtube_account_connected);
-            subtitle = host.getString(R.string.youtube_account_sign_out_hint);
-        } else if (snapshot.state == YouTubeDeviceAuth.State.REQUESTING_CODE) {
-            label = host.getString(R.string.youtube_account_sign_in);
-            subtitle = host.getString(R.string.youtube_account_requesting_code);
-        } else if ((snapshot.state == YouTubeDeviceAuth.State.WAITING_FOR_USER
-                || snapshot.state == YouTubeDeviceAuth.State.SLOW_DOWN)
-                && snapshot.userCode.length() > 0) {
-            label = host.getString(R.string.youtube_account_code, snapshot.userCode);
-            subtitle = host.getString(R.string.youtube_account_verify,
-                    snapshot.verificationUrl,
-                    snapshot.remainingSeconds(System.currentTimeMillis()));
-        } else if (!auth.isConfigured()
-                || snapshot.state == YouTubeDeviceAuth.State.SETUP_REQUIRED) {
-            label = host.getString(R.string.youtube_account_setup);
-            subtitle = host.getString(R.string.youtube_account_setup_hint);
-        } else {
-            label = host.getString(R.string.youtube_account_sign_in);
-            subtitle = snapshot.safeReason.length() > 0
-                    ? host.getString(R.string.youtube_account_retry_reason, snapshot.safeReason)
-                    : host.getString(R.string.youtube_account_sign_in_hint);
-        }
-        if (!snapshot.isActive()) {
-            int quota = YouTubeClient.getInstance(host.context()).estimatedQuotaToday();
-            subtitle = subtitle + " · "
-                    + host.getString(R.string.youtube_quota_today, quota);
-        }
-        virtualLabels.add(label);
-        virtualSubtitles.add(subtitle);
-        youtubeBrowseRows.add(new YoutubeBrowseRow(YoutubeBrowseRow.KIND_ACCOUNT));
-    }
-
-    private void handleYouTubeAccountClick() {
-        final YouTubeDeviceAuth auth = youtubeAuth();
-        if (auth.hasAccount()) {
-            host.showThemedConfirm(
-                    host.getString(R.string.youtube_account_connected),
-                    host.getString(R.string.youtube_account_sign_out_confirm),
-                    host.getString(R.string.youtube_account_sign_out),
-                    host.getString(R.string.common_cancel),
-                    new Runnable() {
-                        @Override
-                        public void run() {
-                            auth.signOut(new Runnable() {
-                                @Override
-                                public void run() {
-                                    YouTubeClient.getInstance(host.context())
-                                            .clearMetadataCache();
-                                    youtubeDiscoverSignals =
-                                            new YouTubeDiscoverSignals(
-                                                    null, null, false, false);
-                                    applyYouTubeDiscoverRanking();
-                                    rebuildYouTubeVirtualRows();
-                                    notifyVirtualDataChangedPreserveFocus();
-                                    Toast.makeText(host.context(),
-                                            R.string.youtube_account_signed_out,
-                                            Toast.LENGTH_SHORT).show();
-                                }
-                            });
-                        }
-                    },
-                    null);
-            return;
-        }
-        if (auth.snapshot().isActive()) {
-            auth.cancel();
-            youtubeAuthHandler.removeCallbacks(youtubeAuthTick);
-            rebuildYouTubeVirtualRows();
-            notifyVirtualDataChangedPreserveFocus();
-            return;
-        }
-        if (!host.requireInternet(R.string.toast_internet_required)) return;
-        auth.start();
-        youtubeAuthHandler.removeCallbacks(youtubeAuthTick);
-        youtubeAuthHandler.post(youtubeAuthTick);
-    }
-
-    private void showYouTubeBookmarks() {
-        youtubeLoadGen++;
-        youtubeLoading = false;
-        youtubeAppending = false;
-        youtubeShowingBookmarks = true;
-        youtubeShowingDiscover = false;
-        youtubeMetadataStale = false;
-        youtubePendingSearch = null;
-        youtubeNextPageToken = "";
-        youtubeVideos.clear();
-        youtubeVideos.addAll(youtubeBookmarks().list());
-        updateYouTubeStatusPath();
-        rebuildYouTubeVirtualRows();
-        notifyVirtualDataChangedPreserveFocus();
-    }
-
-    private void loadMoreYouTube() {
-        if (youtubeShowingBookmarks || youtubeAppending || youtubeLoading
-                || youtubeNextPageToken.length() == 0) {
-            return;
-        }
-        final String token = youtubeNextPageToken;
-        final String query = youtubePendingSearch;
-        final int gen = ++youtubeLoadGen;
-        youtubeAppending = true;
-        rebuildYouTubeVirtualRows();
-        notifyVirtualDataChangedPreserveFocus();
-        YouTubeClient.Callback callback = new YouTubeClient.Callback() {
-            @Override
-            public void onSuccess(String payloadJson) {
-                if (gen != youtubeLoadGen
-                        || host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) {
-                    return;
-                }
-                youtubeAppending = false;
-                int firstAdded = youtubeVideos.size();
-                youtubeMetadataStale = youtubeMetadataStale
-                        || YouTubeResultJson.parseCacheState(payloadJson).stale;
-                try {
-                    List<YouTubeVideo> next = YouTubeResultJson.parseVideos(payloadJson);
-                    for (YouTubeVideo video : next) {
-                        if (video != null && !containsYouTubeId(video.id)) {
-                            youtubeVideos.add(video);
-                        }
-                    }
-                    String nextToken = YouTubeResultJson.parseNextPageToken(payloadJson);
-                    youtubeNextPageToken = token.equals(nextToken) ? "" : nextToken;
-                } catch (Exception error) {
-                    youtubeNextPageToken = "";
-                }
-                rebuildYouTubeVirtualRows();
-                notifyVirtualDataChangedPreserveFocus();
-                if (youtubeVideos.size() > firstAdded) {
-                    focusYouTubeVideoIndex(firstAdded);
-                }
-            }
-
-            @Override
-            public void onError(String message) {
-                if (gen != youtubeLoadGen
-                        || host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) {
-                    return;
-                }
-                youtubeAppending = false;
-                rebuildYouTubeVirtualRows();
-                notifyVirtualDataChangedPreserveFocus();
-                Toast.makeText(host.context(), R.string.youtube_load_more_error,
-                        Toast.LENGTH_SHORT).show();
-            }
-        };
-        YouTubeClient client = YouTubeClient.getInstance(host.context());
-        if (query != null && query.length() > 0) {
-            client.search(query, token, callback);
-        } else {
-            client.fetchPopular(token, callback);
-        }
-    }
-
-    private boolean containsYouTubeId(String videoId) {
-        if (videoId == null || videoId.length() == 0) return false;
-        for (YouTubeVideo current : youtubeVideos) {
-            if (videoId.equals(current.id)) return true;
-        }
-        return false;
-    }
-
-    private void focusYouTubeVideoIndex(final int videoIndex) {
-        final ListView list = host.listVirtualSongs();
-        if (list == null) return;
-        int position = -1;
-        for (int i = 0; i < youtubeBrowseRows.size(); i++) {
-            YoutubeBrowseRow row = youtubeBrowseRows.get(i);
-            if (row.kind == YoutubeBrowseRow.KIND_VIDEO
-                    && row.videoIndex == videoIndex) {
-                position = i;
-                break;
-            }
-        }
-        if (position < 0) return;
-        final int target = position;
-        list.post(new Runnable() {
-            @Override
-            public void run() {
-                list.setSelection(target);
-                list.requestFocus();
-            }
-        });
-    }
-
-    public boolean toggleYouTubeBookmark(YouTubeVideo video) {
-        boolean saved = youtubeBookmarks().toggle(video);
-        Toast.makeText(host.context(),
-                saved ? R.string.youtube_bookmark_added : R.string.youtube_bookmark_removed,
-                Toast.LENGTH_SHORT).show();
-        return saved;
-    }
-
-    public void searchYouTubeOnSoulseek(YouTubeVideo video) {
-        host.searchSoulseekForYouTube(video);
-    }
-
-    public void copyYouTubeLink(YouTubeVideo video) {
-        String url = YouTubeAcquisitionPolicy.canonicalUrl(video);
-        if (url.length() == 0) return;
-        android.content.ClipboardManager clipboard =
-                (android.content.ClipboardManager) host.context()
-                        .getSystemService(Context.CLIPBOARD_SERVICE);
-        if (clipboard != null) {
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
-                    "YouTube URL", url));
-        }
-        Toast.makeText(host.context(),
-                host.getString(R.string.youtube_link_copied, url),
-                Toast.LENGTH_LONG).show();
-    }
-
     /** Open detail/comments for a video — Solar list only, notPipe invisible. */
     private void openYouTubeDetail(YouTubeVideo video) {
         if (video == null || video.id.isEmpty()) return;
         youtubeDetailVideo = video;
         youtubeComments.clear();
         youtubeCommentsLoading = true;
-        youtubeCommentsStale = false;
         host.changeScreen(STATE_YOUTUBE_DETAIL);
         loadYouTubeComments(video.id);
     }
@@ -4390,63 +3948,46 @@ public final class MediaSuiteHost {
         youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_BACK));
 
         if (youtubeDetailVideo != null) {
-            boolean bookmarked = youtubeBookmarks().contains(youtubeDetailVideo.id);
-            virtualLabels.add(host.getString(bookmarked
-                    ? R.string.youtube_detail_remove_bookmark
-                    : R.string.youtube_detail_bookmark));
-            virtualSubtitles.add(host.getString(R.string.youtube_detail_bookmark_sub));
-            youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_BOOKMARK));
+            // 2026-07-15 — Music hub is audio-only; Videos hub keeps Play/Save video rows.
+            // Was: always "Play video" + Save video + Save audio. Reversal: drop youtubeAudioMode branches.
+            if (youtubeAudioMode) {
+                virtualLabels.add(host.getString(R.string.youtube_detail_play_audio));
+                if (youtubeResolvingStream) {
+                    virtualSubtitles.add(youtubeResolveStatusText());
+                } else {
+                    virtualSubtitles.add(youtubeDetailVideo.subtitle().length() > 0
+                            ? youtubeDetailVideo.subtitle()
+                            : host.getString(R.string.youtube_detail_play_audio_sub));
+                }
+                youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_PLAY));
 
-            virtualLabels.add(host.getString(R.string.youtube_detail_search_soulseek));
-            virtualSubtitles.add(host.getString(R.string.youtube_detail_search_soulseek_sub));
-            youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_SOULSEEK));
+                virtualLabels.add(host.getString(R.string.youtube_detail_save));
+                virtualSubtitles.add(youtubeDetailVideo.author);
+                youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_SAVE_AUDIO));
+            } else {
+                virtualLabels.add(host.getString(R.string.youtube_detail_play));
+                // 2026-07-15 — Staged status (Looking up / Getting 480p…) not flat “Resolving”.
+                if (youtubeResolvingStream) {
+                    virtualSubtitles.add(youtubeResolveStatusText());
+                } else {
+                    virtualSubtitles.add(youtubeDetailVideo.subtitle().length() > 0
+                            ? youtubeDetailVideo.subtitle()
+                            : host.getString(R.string.youtube_detail_play_sub));
+                }
+                youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_PLAY));
 
-            virtualLabels.add(host.getString(R.string.youtube_detail_copy_link));
-            virtualSubtitles.add(YouTubeAcquisitionPolicy.canonicalUrl(youtubeDetailVideo));
-            youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_COPY_LINK));
+                virtualLabels.add(host.getString(R.string.youtube_detail_save_video));
+                virtualSubtitles.add(youtubeDetailVideo.author);
+                youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_SAVE_VIDEO));
 
-            List<CreatorDownloadLinkExtractor.Link> creatorLinks =
-                    CreatorDownloadLinkExtractor.extract(
-                            youtubeDetailVideo.description);
-            for (CreatorDownloadLinkExtractor.Link link : creatorLinks) {
-                virtualLabels.add(host.getString(
-                        R.string.youtube_detail_creator_download,
-                        link.displayName));
-                virtualSubtitles.add(host.getString(
-                        R.string.youtube_detail_creator_download_sub,
-                        link.host));
-                youtubeDetailRows.add(new YoutubeDetailRow(
-                        YoutubeDetailRow.KIND_CREATOR_DOWNLOAD, link.url));
-            }
-
-            if (youtubeShowingDiscover) {
-                virtualLabels.add(host.getString(R.string.youtube_discover_more_like));
-                virtualSubtitles.add(host.getString(
-                        R.string.youtube_discover_more_like_sub));
-                youtubeDetailRows.add(new YoutubeDetailRow(
-                        YoutubeDetailRow.KIND_MORE_LIKE));
-
-                virtualLabels.add(host.getString(
-                        R.string.youtube_discover_less_channel));
-                virtualSubtitles.add(host.getString(
-                        R.string.youtube_discover_less_channel_sub,
-                        youtubeDetailVideo.author));
-                youtubeDetailRows.add(new YoutubeDetailRow(
-                        YoutubeDetailRow.KIND_LESS_FROM_CHANNEL));
-
-                virtualLabels.add(host.getString(
-                        R.string.youtube_discover_not_interested));
-                virtualSubtitles.add(host.getString(
-                        R.string.youtube_discover_not_interested_sub));
-                youtubeDetailRows.add(new YoutubeDetailRow(
-                        YoutubeDetailRow.KIND_NOT_INTERESTED));
+                virtualLabels.add(host.getString(R.string.youtube_detail_save_audio));
+                virtualSubtitles.add(youtubeDetailVideo.author);
+                youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_SAVE_AUDIO));
             }
         }
 
         virtualLabels.add(host.getString(R.string.youtube_comments_header));
-        virtualSubtitles.add(youtubeCommentsStale
-                ? host.getString(R.string.youtube_offline_cache)
-                : "");
+        virtualSubtitles.add("");
         youtubeDetailRows.add(new YoutubeDetailRow(YoutubeDetailRow.KIND_HEADER));
 
         if (youtubeCommentsLoading) {
@@ -4479,51 +4020,25 @@ public final class MediaSuiteHost {
             case YoutubeDetailRow.KIND_BACK:
                 handleBack();
                 break;
-            case YoutubeDetailRow.KIND_BOOKMARK:
-                if (youtubeDetailVideo != null) {
-                    toggleYouTubeBookmark(youtubeDetailVideo);
-                    rebuildYouTubeDetailRows();
-                    notifyVirtualDataChangedPreserveFocus();
+            case YoutubeDetailRow.KIND_PLAY:
+                // 2026-07-14 — Ignore re-taps while resolve is already running.
+                // 2026-07-15 — Audio mode → music Now Playing; Videos hub stays video IJK.
+                if (youtubeDetailVideo != null && !youtubeResolvingStream) {
+                    if (youtubeAudioMode) {
+                        playYouTubeAudio(youtubeDetailVideo);
+                    } else {
+                        playYouTubeVideo(youtubeDetailVideo);
+                    }
                 }
                 break;
-            case YoutubeDetailRow.KIND_SOULSEEK:
+            case YoutubeDetailRow.KIND_SAVE_VIDEO:
                 if (youtubeDetailVideo != null) {
-                    host.searchSoulseekForYouTube(youtubeDetailVideo);
+                    host.requestYouTubeSave(youtubeDetailVideo, false);
                 }
                 break;
-            case YoutubeDetailRow.KIND_COPY_LINK:
+            case YoutubeDetailRow.KIND_SAVE_AUDIO:
                 if (youtubeDetailVideo != null) {
-                    copyYouTubeLink(youtubeDetailVideo);
-                }
-                break;
-            case YoutubeDetailRow.KIND_CREATOR_DOWNLOAD:
-                if (row.directUrl != null && row.directUrl.length() > 0) {
-                    host.openAuthorizedDirectAudioUrl(row.directUrl);
-                }
-                break;
-            case YoutubeDetailRow.KIND_MORE_LIKE:
-                if (youtubeDetailVideo != null) {
-                    youtubeDiscoverFeedback().moreLike(youtubeDetailVideo);
-                    applyYouTubeDiscoverRanking();
-                    Toast.makeText(host.context(),
-                            R.string.youtube_discover_feedback_saved,
-                            Toast.LENGTH_SHORT).show();
-                }
-                break;
-            case YoutubeDetailRow.KIND_LESS_FROM_CHANNEL:
-                if (youtubeDetailVideo != null) {
-                    youtubeDiscoverFeedback().lessFromChannel(youtubeDetailVideo);
-                    applyYouTubeDiscoverRanking();
-                    Toast.makeText(host.context(),
-                            R.string.youtube_discover_feedback_saved,
-                            Toast.LENGTH_SHORT).show();
-                }
-                break;
-            case YoutubeDetailRow.KIND_NOT_INTERESTED:
-                if (youtubeDetailVideo != null) {
-                    youtubeDiscoverFeedback().notInterested(youtubeDetailVideo);
-                    applyYouTubeDiscoverRanking();
-                    handleBack();
+                    host.requestYouTubeSave(youtubeDetailVideo, true);
                 }
                 break;
             case YoutubeDetailRow.KIND_COMMENT:
@@ -4554,8 +4069,6 @@ public final class MediaSuiteHost {
                 if (gen != youtubeCommentsGen) return;
                 youtubeCommentsLoading = false;
                 youtubeComments.clear();
-                youtubeCommentsStale =
-                        YouTubeResultJson.parseCacheState(payloadJson).stale;
                 try {
                     youtubeComments.addAll(YouTubeResultJson.parseComments(payloadJson));
                 } catch (Exception e) {
@@ -4571,7 +4084,6 @@ public final class MediaSuiteHost {
                 if (gen != youtubeCommentsGen) return;
                 youtubeCommentsLoading = false;
                 youtubeComments.clear();
-                youtubeCommentsStale = false;
                 if (host.getCurrentScreenState() == STATE_YOUTUBE_DETAIL) {
                     buildYouTubeDetailUi();
                     Toast.makeText(host.context(), R.string.youtube_comments_error,
@@ -4581,192 +4093,9 @@ public final class MediaSuiteHost {
         });
     }
 
-    private void loadYouTubeDiscover() {
-        youtubeShowingBookmarks = false;
-        youtubeShowingDiscover = true;
-        youtubePendingSearch = null;
-        youtubeNextPageToken = "";
-        youtubeAppending = false;
-        youtubeLoading = true;
-        youtubeDiscoverSignalsLoading = true;
-        youtubeDiscoverLocalSignalsLoading = true;
-        youtubeLocalLibrarySignals = YouTubeLocalLibrarySignals.empty();
-        youtubeMetadataStale = false;
-        youtubeDiscoverPopularStale = false;
-        youtubeDiscoverPopular.clear();
-        youtubeDiscoverReasons.clear();
-        youtubeVideos.clear();
-        final int gen = ++youtubeLoadGen;
-        updateYouTubeStatusPath();
-        rebuildYouTubeVirtualRows();
-        notifyVirtualDataChangedPreserveFocus();
-
-        final YouTubeClient client = YouTubeClient.getInstance(host.context());
-        client.fetchPopular(new YouTubeClient.Callback() {
-            @Override
-            public void onSuccess(String payloadJson) {
-                if (gen != youtubeLoadGen
-                        || host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) {
-                    return;
-                }
-                youtubeLoading = false;
-                youtubeDiscoverPopular.clear();
-                try {
-                    youtubeDiscoverPopular.addAll(
-                            YouTubeResultJson.parseVideos(payloadJson));
-                    youtubeDiscoverPopularStale =
-                            YouTubeResultJson.parseCacheState(payloadJson).stale;
-                } catch (Exception ignored) {
-                    youtubeDiscoverPopularStale = false;
-                }
-                applyYouTubeDiscoverRanking();
-            }
-
-            @Override
-            public void onError(String message) {
-                if (gen != youtubeLoadGen
-                        || host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) {
-                    return;
-                }
-                youtubeLoading = false;
-                youtubeDiscoverPopular.clear();
-                applyYouTubeDiscoverRanking();
-            }
-        });
-
-        client.fetchDiscoverSignals(new YouTubeClient.Callback() {
-            @Override
-            public void onSuccess(String payloadJson) {
-                if (gen != youtubeLoadGen
-                        || host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) {
-                    return;
-                }
-                youtubeDiscoverSignalsLoading = false;
-                try {
-                    youtubeDiscoverSignals =
-                            YouTubeDiscoverSignals.parse(payloadJson);
-                } catch (Exception ignored) {
-                    youtubeDiscoverSignals = new YouTubeDiscoverSignals(
-                            null, null, false, false, true);
-                }
-                applyYouTubeDiscoverRanking();
-            }
-
-            @Override
-            public void onError(String message) {
-                if (gen != youtubeLoadGen
-                        || host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) {
-                    return;
-                }
-                youtubeDiscoverSignalsLoading = false;
-                youtubeDiscoverSignals = new YouTubeDiscoverSignals(
-                        null, null, youtubeAuth().hasAccount(), false, true);
-                applyYouTubeDiscoverRanking();
-            }
-        });
-
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    android.os.Process.setThreadPriority(
-                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
-                } catch (RuntimeException ignored) {}
-                final YouTubeLocalLibrarySignals local =
-                        YouTubeLocalLibrarySignals.load(host.context());
-                host.runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (gen != youtubeLoadGen
-                                || host.getCurrentScreenState()
-                                        != STATE_YOUTUBE_BROWSE) {
-                            return;
-                        }
-                        youtubeDiscoverLocalSignalsLoading = false;
-                        youtubeLocalLibrarySignals = local;
-                        applyYouTubeDiscoverRanking();
-                    }
-                });
-            }
-        }, "YouTubeLocalSignals").start();
-    }
-
-    private void applyYouTubeDiscoverRanking() {
-        if (!youtubeShowingDiscover) return;
-        int minSeconds = host.prefs().getInt(
-                YouTubeDiscoverRanker.PREF_MIN_DURATION_SECONDS, 0);
-        int maxSeconds = host.prefs().getInt(
-                YouTubeDiscoverRanker.PREF_MAX_DURATION_SECONDS, 0);
-        YouTubeDiscoverRanker.Signals signals =
-                new YouTubeDiscoverRanker.Signals(
-                        youtubeBookmarks().list(),
-                        youtubeDiscoverSignals.likedVideos,
-                        youtubeDiscoverSignals.subscribedChannels,
-                        YouTubeRecentSearches.get(host.context()),
-                        youtubeLocalLibrarySignals.artists,
-                        youtubeLocalLibrarySignals.genres,
-                        youtubeDiscoverFeedback().snapshot(),
-                        minSeconds,
-                        maxSeconds);
-        List<YouTubeDiscoverRanker.Recommendation> ranked =
-                YouTubeDiscoverRanker.rank(youtubeDiscoverPopular, signals, 50);
-        youtubeVideos.clear();
-        youtubeDiscoverReasons.clear();
-        for (YouTubeDiscoverRanker.Recommendation item : ranked) {
-            youtubeVideos.add(item.video);
-            youtubeDiscoverReasons.add(youtubeDiscoverReason(item));
-        }
-        youtubeNextPageToken = "";
-        youtubeMetadataStale = youtubeDiscoverPopularStale
-                || youtubeDiscoverSignals.stale;
-        if (host.getCurrentScreenState() == STATE_YOUTUBE_BROWSE) {
-            updateYouTubeStatusPath();
-            rebuildYouTubeVirtualRows();
-            notifyVirtualDataChangedPreserveFocus();
-        }
-    }
-
-    private String youtubeDiscoverReason(
-            YouTubeDiscoverRanker.Recommendation item) {
-        if (item == null || item.reason == null) {
-            return host.getString(R.string.youtube_discover_reason_popular);
-        }
-        switch (item.reason) {
-            case MORE_LIKE:
-                return host.getString(R.string.youtube_discover_reason_more_like);
-            case SUBSCRIBED_CHANNEL:
-                return host.getString(R.string.youtube_discover_reason_subscribed);
-            case LIKED_VIDEO:
-                return host.getString(R.string.youtube_discover_reason_liked);
-            case LOCAL_LIBRARY_ARTIST:
-                return host.getString(
-                        R.string.youtube_discover_reason_local_artist,
-                        item.detail);
-            case LOCAL_LIBRARY_GENRE:
-                return host.getString(
-                        R.string.youtube_discover_reason_local_genre,
-                        item.detail);
-            case RECENT_SEARCH:
-                return item.detail.length() > 0
-                        ? host.getString(R.string.youtube_discover_reason_search,
-                                item.detail)
-                        : host.getString(R.string.youtube_discover_reason_research);
-            case RESEARCH_LIST:
-                return host.getString(R.string.youtube_discover_reason_research);
-            case POPULAR_REGION:
-            default:
-                return host.getString(R.string.youtube_discover_reason_popular);
-        }
-    }
-
     private void loadYouTubePopular() {
-        youtubeShowingBookmarks = false;
-        youtubeShowingDiscover = false;
         youtubePendingSearch = null;
-        youtubeNextPageToken = "";
-        youtubeAppending = false;
         youtubeLoading = true;
-        youtubeMetadataStale = false;
         final int gen = ++youtubeLoadGen;
         updateYouTubeStatusPath();
         rebuildYouTubeVirtualRows();
@@ -4781,16 +4110,11 @@ public final class MediaSuiteHost {
                 if (gen != youtubeLoadGen) return;
                 if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) return;
                 youtubeLoading = false;
-                youtubeMetadataStale =
-                        YouTubeResultJson.parseCacheState(payloadJson).stale;
                 try {
                     youtubeVideos.clear();
                     youtubeVideos.addAll(YouTubeResultJson.parseVideos(payloadJson));
-                    youtubeNextPageToken =
-                            YouTubeResultJson.parseNextPageToken(payloadJson);
                 } catch (Exception e) {
                     youtubeVideos.clear();
-                    youtubeNextPageToken = "";
                 }
                 updateYouTubeStatusPath();
                 rebuildYouTubeVirtualRows();
@@ -4803,8 +4127,6 @@ public final class MediaSuiteHost {
                 if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) return;
                 youtubeLoading = false;
                 youtubeVideos.clear();
-                youtubeNextPageToken = "";
-                youtubeMetadataStale = false;
                 updateYouTubeStatusPath();
                 rebuildYouTubeVirtualRows();
                 notifyVirtualDataChangedPreserveFocus();
@@ -4816,12 +4138,7 @@ public final class MediaSuiteHost {
     }
 
     private void loadYouTubeSearch(final String query) {
-        youtubeShowingBookmarks = false;
-        youtubeShowingDiscover = false;
-        youtubeNextPageToken = "";
-        youtubeAppending = false;
         youtubeLoading = true;
-        youtubeMetadataStale = false;
         final int gen = ++youtubeLoadGen;
         // #region agent log
         try {
@@ -4855,18 +4172,13 @@ public final class MediaSuiteHost {
                 }
                 if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) return;
                 youtubeLoading = false;
-                youtubeMetadataStale =
-                        YouTubeResultJson.parseCacheState(payloadJson).stale;
                 int parsed = 0;
                 try {
                     youtubeVideos.clear();
                     youtubeVideos.addAll(YouTubeResultJson.parseVideos(payloadJson));
-                    youtubeNextPageToken =
-                            YouTubeResultJson.parseNextPageToken(payloadJson);
                     parsed = youtubeVideos.size();
                 } catch (Exception e) {
                     youtubeVideos.clear();
-                    youtubeNextPageToken = "";
                     // #region agent log
                     try {
                         org.json.JSONObject d = new org.json.JSONObject();
@@ -4901,8 +4213,6 @@ public final class MediaSuiteHost {
                 if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) return;
                 youtubeLoading = false;
                 youtubeVideos.clear();
-                youtubeNextPageToken = "";
-                youtubeMetadataStale = false;
                 // #region agent log
                 try {
                     org.json.JSONObject d = new org.json.JSONObject();
@@ -5059,6 +4369,16 @@ public final class MediaSuiteHost {
                 } catch (Exception ignored) {}
                 // #endregion
                 if (youtubeStreamUrl == null || youtubeStreamUrl.isEmpty()) {
+                    // Fail-open: YtApi always has a constructible progressive URL.
+                    String seed = com.solar.launcher.youtube.api.InstancesConfig.DEFAULT_YTAPI;
+                    String q = quality != null && quality.length() > 0 ? quality : "360";
+                    youtubeStreamUrl = seed + "/direct_url?video_id="
+                            + com.solar.launcher.youtube.api.YoutubeApiUtil.urlEncode(video.id)
+                            + "&quality="
+                            + com.solar.launcher.youtube.api.YoutubeApiUtil.urlEncode(q);
+                    android.util.Log.w("SolarYouTube", "empty parse — using YtApi seed url");
+                }
+                if (youtubeStreamUrl == null || youtubeStreamUrl.isEmpty()) {
                     String next = YouTubeClient.fallbackVideoQuality(quality);
                     if (next != null) {
                         playYouTubeVideoAtQuality(video, next, fromIjkFallback);
@@ -5180,7 +4500,6 @@ public final class MediaSuiteHost {
     /** Wheel keyboard submitted a YouTube search query. */
     public void onYouTubeSearchSubmitted(String query) {
         if (query == null || query.trim().isEmpty()) return;
-        youtubeShowingBookmarks = false;
         youtubePendingSearch = query.trim();
         YouTubeRecentSearches.remember(host.context(), youtubePendingSearch);
         if (host.getCurrentScreenState() != STATE_YOUTUBE_BROWSE) {
