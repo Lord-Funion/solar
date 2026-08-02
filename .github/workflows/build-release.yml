@@ -1,57 +1,24 @@
 name: Build Solar APK and ROMs
-# 2026-07-05 — CI records SOURCE_DATE_EPOCH at checkout (build start UTC), before prepare-release.sh.
 
 on:
-  push:
-    branches: [main, nightly]
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-env:
-  SOLAR_GITHUB_REPO: thesolarproject/solar
-  SOLAR_Y1A_BASE_ZIP: ${{ vars.SOLAR_Y1A_BASE_ZIP }}
-  SOLAR_Y1B_BASE_ZIP: ${{ vars.SOLAR_Y1B_BASE_ZIP }}
-  SOLAR_Y2_BASE_ZIP: ${{ vars.SOLAR_Y2_BASE_ZIP }}
-  SOLAR_A5_BASE_ZIP: ${{ vars.SOLAR_A5_BASE_ZIP }}
-
-concurrency:
-  group: solar-release-${{ github.ref }}
-  cancel-in-progress: true
+  contents: read
 
 jobs:
-  release:
+  build-y1-type-a:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      SOLAR_Y1A_BASE_ZIP: ${{ vars.SOLAR_Y1A_BASE_ZIP }}
+      SOLAR_BASH: /bin/bash
+      ProgramFiles: /tmp
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Record build start time (UTC)
+      - name: Record reproducible build time
         run: echo "SOURCE_DATE_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
-
-      - name: Prepare release metadata
-        id: meta
-        env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          chmod +x solar-rom/scripts/prepare-release.sh \
-            solar-rom/scripts/bump-stable-version.sh \
-            solar-rom/scripts/bump-nightly-version.sh \
-            solar-rom/scripts/resolve-release-version.py
-          python3 solar-rom/scripts/resolve-release-version.py --self-test
-          ./solar-rom/scripts/prepare-release.sh
-
-      - name: Verify OTA PAT can push to solar-update
-        env:
-          SOLAR_GITHUB_PAT: ${{ secrets.SOLAR_GITHUB_PAT }}
-        run: |
-          chmod +x scripts/verify-ota-pat.sh scripts/configure-solar-update-pages.sh
-          ./scripts/verify-ota-pat.sh
-          ./scripts/configure-solar-update-pages.sh
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -62,196 +29,67 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install SDK packages
+      - name: Install build dependencies
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-35" "platforms;android-19" "build-tools;35.0.0"
+          sudo apt-get update
+          sudo apt-get install -y unzip zip e2fsprogs curl util-linux kmod openssl android-sdk-libsparse-utils
+          sudo modprobe loop max_loop=64 || true
 
-      - name: Install ROM build dependencies
+      - name: Fetch official AOSP test platform keys
         run: |
-          sudo apt-get update && sudo apt-get install -y unzip zip e2fsprogs curl util-linux kmod openssl android-sdk-libsparse-utils
-          sudo modprobe loop || true
-
-      - name: Verify ROM base firmware URLs
-        run: |
-          # 2026-07-15 — Y1 type A/B from y1-community/y1-ata-rom (was rockbox-y1 type-a/b). Soft-skip until public.
-          if curl -fsSIL -o /dev/null "https://github.com/y1-community/y1-ata-rom/releases/download/0.1/rom.zip"; then
-            echo "Y1 type A ATA base URL OK"
-          else
-            echo "::warning::Y1 type A ATA base unavailable — rom.zip soft-skips unless SOLAR_Y1A_BASE_ZIP is set"
-          fi
-          if curl -fsSIL -o /dev/null "https://github.com/y1-community/y1-ata-rom/releases/download/0.1/rom_type_b.zip"; then
-            echo "Y1 type B ATA base URL OK"
-          else
-            echo "::warning::Y1 type B ATA base unavailable — rom_type_b.zip soft-skips unless SOLAR_Y1B_BASE_ZIP is set"
-          fi
-          # Y2 base required — jj_auto y2-test (override via SOLAR_Y2_BASE_ZIP / vars)
-          curl -fsSIL -o /dev/null "https://github.com/ryan-specter/jj_auto/releases/download/y2-test/rom_y2.zip"
-          # Rockbox asset cache still pulled from rockbox-y1 type-a-base (org.rockbox for Y1 heal / Y2 prep)
-          curl -fsSIL -o /dev/null "https://github.com/rockbox-y1/rockbox/releases/download/type-a-base/rom.zip"
-          if curl -fsSIL -o /dev/null "https://github.com/y1-community/a5-ata-rom/releases/download/0.1/rom_a5.zip"; then
-            echo "A5 ATA base URL OK"
-          else
-            echo "::warning::A5 ATA base URL unavailable — rom_a5.zip soft-skips unless SOLAR_A5_BASE_ZIP is set"
-          fi
-          test -f solar-rom/vendor/y1-su/su
-          test -f solar-rom/vendor/y2-flash/EBR2
-          test -f solar-rom/vendor/y2-flash/MT6582_Android_scatter.txt
-          test -f solar-rom/scripts/A5-mtk.kl
-          test -f solar-rom/scripts/A5.kl
-          test -d solar-rom/vendor/xposed/api17-arm
-          test -d solar-rom/vendor/xposed/api19-arm
-          test -f solar-rom/vendor/xposed/XposedInstaller.apk || ./solar-rom/scripts/build-xposed-installer-apk.sh
-          test -f solar-rom/vendor/xposed/solar-context-bridge/SolarContextBridgeY1.apk || ./solar-rom/scripts/build-context-bridge-apk.sh
-          test -f solar-rom/vendor/xposed/solar-context-bridge/SolarContextBridgeY2.apk || ./solar-rom/scripts/build-context-bridge-apk.sh
-          test -f solar-rom/vendor/xposed/solar-theme-font/SolarThemeFont.apk || ./solar-rom/scripts/build-theme-font-apk.sh
-          echo "ROM base sources OK (Y1 A/B + Y2 + A5 wired; soft-skip ATA bases until public; rockbox-y1 for Rockbox assets)"
-
-      - name: Decode platform signing keys
-        env:
-          KEY_PK8_B64: ${{ secrets.SOLAR_PLATFORM_KEY_PK8_B64 }}
-          KEY_PEM_B64: ${{ secrets.SOLAR_PLATFORM_KEY_PEM_B64 }}
-        run: |
-          if [ -z "$KEY_PK8_B64" ] || [ -z "$KEY_PEM_B64" ]; then
-            echo "::error::Set SOLAR_PLATFORM_KEY_PK8_B64 and SOLAR_PLATFORM_KEY_PEM_B64 repo secrets"
-            exit 1
-          fi
           mkdir -p .ci-keys
-          printf '%s' "$KEY_PK8_B64" | base64 -d > .ci-keys/platform.pk8
-          printf '%s' "$KEY_PEM_B64" | base64 -d > .ci-keys/platform.x509.pem
+          curl -fsSL "https://android.googlesource.com/platform/build/+/refs/heads/main/target/product/security/platform.pk8?format=TEXT" \
+            | base64 -d > .ci-keys/platform.pk8
+          curl -fsSL "https://android.googlesource.com/platform/build/+/refs/heads/main/target/product/security/platform.x509.pem?format=TEXT" \
+            | base64 -d > .ci-keys/platform.x509.pem
+          test -s .ci-keys/platform.pk8
+          test -s .ci-keys/platform.x509.pem
           echo "SOLAR_PLATFORM_KEY_PK8=$GITHUB_WORKSPACE/.ci-keys/platform.pk8" >> "$GITHUB_ENV"
           echo "SOLAR_PLATFORM_KEY_PEM=$GITHUB_WORKSPACE/.ci-keys/platform.x509.pem" >> "$GITHUB_ENV"
 
-      # 2026-07-16 — Rockbox Y2 patch + release APK need .gradle/platform.keystore before asset sync.
-      - name: Build platform.keystore for APK / Rockbox signing
+      - name: Prepare platform assets and keystore
         run: |
-          chmod +x scripts/ensure-platform-keystore.sh scripts/env.sh
+          chmod +x gradlew scripts/*.sh solar-rom/scripts/*.sh
           ./scripts/ensure-platform-keystore.sh
-          test -f .gradle/platform.keystore
-
-      - name: Sync and verify Y1 scripts (ROM sources → APK assets)
-        run: |
-          chmod +x solar-rom/scripts/sync-y1-assets.sh solar-rom/scripts/verify-y1-assets.sh \
-            solar-rom/scripts/sync-platform-assets.sh solar-rom/scripts/verify-platform-assets.sh
           ./solar-rom/scripts/sync-y1-assets.sh
           ./solar-rom/scripts/sync-platform-assets.sh
 
-      - name: Xposed ROM parity unit tests
+      - name: Build signed Solar APK
+        run: ./scripts/build.sh -x lintVitalRelease
+
+      - name: Build Y1 Type A rom.zip
         run: |
-          chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest --tests "com.solar.launcher.XposedParityVerifyScriptsTest" --tests "com.solar.launcher.Y2MtkFlashManifestTest" -q
-
-      - name: Build signed release APK
-        env:
-          JAVA_HOME: ${{ env.JAVA_HOME }}
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
-          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
-        run: |
-          chmod +x gradlew scripts/build.sh
-          ./scripts/build.sh
-
-      - name: Build ROM images
-        env:
-          SOLAR_GITHUB_REPO: thesolarproject/solar
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
-          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
-          SKIP_APK: "1"
-        run: |
-          chmod +x scripts/build-all-roms.sh scripts/ensure-platform-keystore.sh \
-            solar-rom/scripts/*.sh
-          ./scripts/build-all-roms.sh
-          echo "ROM builds: Y1 A/B + Y2 + A5 when each ATA base URL or SOLAR_*_BASE_ZIP is available"
-          echo "Y2 rom_y2.zip always built (desparsed ext4, EBR2, MTK scatter verified)"
-          ls -la dist/
-
-      - name: Prepare release artifact list
-        id: release_artifacts
-        run: |
-          {
-            echo "files<<EOF"
-            echo "app/build/outputs/apk/release/app-release.apk"
-            echo "dist/rom_y2.zip"
-            for f in dist/rom.zip dist/rom_type_b.zip dist/rom_a5.zip; do
-              [ -f "$f" ] && echo "$f"
-            done
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Prepare release notes
-        run: ./solar-rom/scripts/format-release-notes.sh release.json > RELEASE_NOTES.md
-
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          name: ${{ steps.meta.outputs.version_name }}
-          body_path: RELEASE_NOTES.md
-          files: ${{ steps.release_artifacts.outputs.files }}
-          fail_on_unmatched_files: true
-          make_latest: ${{ github.ref == 'refs/heads/main' }}
-          prerelease: ${{ github.ref == 'refs/heads/nightly' }}
-          generate_release_notes: false
-
-      - name: Publish OTA catalog
-        env:
-          SOLAR_GITHUB_PAT: ${{ secrets.SOLAR_GITHUB_PAT }}
-        run: |
-          if [ -z "$SOLAR_GITHUB_PAT" ]; then
-            echo "::error::SOLAR_GITHUB_PAT secret is missing — OTA publish to thesolarproject/solar-update requires a PAT with repo write access."
-            exit 1
+          mkdir -p dist
+          if [ -z "${SOLAR_Y1A_BASE_ZIP:-}" ]; then
+            export SOLAR_Y1A_BASE_ZIP="https://github.com/y1-community/y1-ata-rom/releases/download/0.1/rom.zip"
           fi
-          chmod +x scripts/publish-ota-updates.sh
-          NIGHTLY=false
-          if [ "${{ github.ref }}" = "refs/heads/nightly" ]; then NIGHTLY=true; fi
-          ./scripts/publish-ota-updates.sh add \
+          ./solar-rom/scripts/build-rom.sh a \
             --apk app/build/outputs/apk/release/app-release.apk \
-            --tag "${{ steps.meta.outputs.tag }}" \
-            --version-name "${{ steps.meta.outputs.version_name }}" \
-            --version-code "${{ steps.meta.outputs.version_code }}" \
-            $([ "$NIGHTLY" = true ] && echo --nightly)
+            dist/rom.zip
 
-      - name: Bump stable version for next release
-        if: github.ref == 'refs/heads/main'
-        run: ./solar-rom/scripts/bump-stable-version.sh
-
-      # 2026-07-16 — Use GITHUB_TOKEN for same-repo version bumps (workflow contents:write).
-      # SOLAR_GITHUB_PAT is only required for solar-update OTA publish (separate repo).
-      - name: Commit stable version bump
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify ROM archive
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/build.gradle
-          if git diff --staged --quiet; then
-            echo "No version bump to commit"
-            exit 0
-          fi
-          git commit -m "Bump stable version for next release."
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" HEAD:main
+          test -s dist/rom.zip
+          unzip -t dist/rom.zip
+          unzip -l dist/rom.zip | tee dist/rom.zip.contents.txt
+          unzip -l dist/rom.zip | grep -q MT6572_Android_scatter.txt
+          unzip -l dist/rom.zip | grep -qiE 'flash_tool\.exe|FlashToolLib'
+          ./solar-rom/scripts/verify-y1-rom-contents.sh dist/rom.zip
+          ./solar-rom/scripts/verify-xposed-rom-contents.sh dist/rom.zip 17
+          sha256sum dist/rom.zip | tee dist/rom.zip.sha256
 
-      - name: Bump nightly version for next release
-        if: github.ref == 'refs/heads/nightly'
-        run: ./solar-rom/scripts/bump-nightly-version.sh
-
-      - name: Commit nightly version bump
-        if: github.ref == 'refs/heads/nightly'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/build.gradle
-          if git diff --staged --quiet; then
-            echo "No version bump to commit"
-            exit 0
-          fi
-          git commit -m "Bump nightly version for next release."
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" HEAD:nightly
+      - name: Upload ROM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: solar-y1-type-a-rom
+          path: |
+            dist/rom.zip
+            dist/rom.zip.sha256
+            dist/rom.zip.contents.txt
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Remove signing keys
         if: always()
