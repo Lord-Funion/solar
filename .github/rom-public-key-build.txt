@@ -1,0 +1,6 @@
+Trigger the Y1 Type A ROM build using the official AOSP test platform keys.
+Retry after removing the optional PR status-comment step.
+Retry with Linux SOLAR_BASH and ProgramFiles overrides.
+Retry with minimal compile compatibility patch for the YouTube restoration.
+build trigger after isolated compile repair
+Retry with the complete compile compatibility patch.
