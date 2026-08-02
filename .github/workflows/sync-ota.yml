@@ -10,6 +10,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # app/build.gradle eagerly constructs ProgramFiles/Git/bin/bash.exe even on Linux.
+      # Keep this branch-only verifier on a POSIX-safe path without changing app code.
+      ProgramFiles: /tmp
     steps:
       - uses: actions/checkout@v4
 
