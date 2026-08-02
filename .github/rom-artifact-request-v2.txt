@@ -1,0 +1,1 @@
+Trigger the trusted Y1 Type A ROM artifact build from main.
