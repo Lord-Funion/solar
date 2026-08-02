@@ -1,0 +1,1 @@
+Build Solar Y1 Type A rom.zip from commit 5c4fda94d1da6840beab903a51bf37214902cdf1.
