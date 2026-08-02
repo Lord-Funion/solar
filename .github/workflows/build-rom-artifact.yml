@@ -1,0 +1,95 @@
+name: Build requested Y1 ROM artifact
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+env:
+  SOLAR_Y1A_BASE_ZIP: ${{ vars.SOLAR_Y1A_BASE_ZIP }}
+
+jobs:
+  build-rom:
+    if: github.head_ref == 'agent/build-rom-artifact-20260802'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record reproducible build time
+        run: echo "SOURCE_DATE_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build dependencies
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "platforms;android-19" "build-tools;35.0.0"
+          sudo apt-get update
+          sudo apt-get install -y unzip zip e2fsprogs curl util-linux kmod openssl android-sdk-libsparse-utils
+          sudo modprobe loop max_loop=64 || true
+
+      - name: Decode platform signing keys
+        env:
+          KEY_PK8_B64: ${{ secrets.SOLAR_PLATFORM_KEY_PK8_B64 }}
+          KEY_PEM_B64: ${{ secrets.SOLAR_PLATFORM_KEY_PEM_B64 }}
+        run: |
+          test -n "$KEY_PK8_B64"
+          test -n "$KEY_PEM_B64"
+          mkdir -p .ci-keys
+          printf '%s' "$KEY_PK8_B64" | base64 -d > .ci-keys/platform.pk8
+          printf '%s' "$KEY_PEM_B64" | base64 -d > .ci-keys/platform.x509.pem
+          echo "SOLAR_PLATFORM_KEY_PK8=$GITHUB_WORKSPACE/.ci-keys/platform.pk8" >> "$GITHUB_ENV"
+          echo "SOLAR_PLATFORM_KEY_PEM=$GITHUB_WORKSPACE/.ci-keys/platform.x509.pem" >> "$GITHUB_ENV"
+
+      - name: Prepare platform assets and keystore
+        run: |
+          chmod +x gradlew scripts/build.sh scripts/ensure-platform-keystore.sh scripts/env.sh \
+            solar-rom/scripts/*.sh
+          ./scripts/ensure-platform-keystore.sh
+          ./solar-rom/scripts/sync-y1-assets.sh
+          ./solar-rom/scripts/sync-platform-assets.sh
+
+      - name: Build signed Solar APK
+        run: ./scripts/build.sh
+
+      - name: Build Y1 Type A rom.zip
+        run: |
+          mkdir -p dist
+          if [ -z "${SOLAR_Y1A_BASE_ZIP:-}" ]; then
+            export SOLAR_Y1A_BASE_ZIP="https://github.com/y1-community/y1-ata-rom/releases/download/0.1/rom.zip"
+          fi
+          ./solar-rom/scripts/build-rom.sh a \
+            --apk app/build/outputs/apk/release/app-release.apk \
+            dist/rom.zip
+
+      - name: Verify archive
+        run: |
+          test -s dist/rom.zip
+          unzip -t dist/rom.zip
+          sha256sum dist/rom.zip | tee dist/rom.zip.sha256
+          unzip -l dist/rom.zip | tee dist/rom.zip.contents.txt
+
+      - name: Upload ROM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: solar-y1-type-a-rom
+          path: |
+            dist/rom.zip
+            dist/rom.zip.sha256
+            dist/rom.zip.contents.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove signing keys
+        if: always()
+        run: rm -rf .ci-keys
