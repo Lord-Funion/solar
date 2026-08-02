@@ -1,0 +1,88 @@
+name: Restore upstream YouTube behavior
+
+on:
+  push:
+    branches:
+      - agent/restore-upstream-youtube
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Revert fork-only YouTube feature stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          cp app/build.gradle /tmp/app-build.gradle.current
+          cp build.gradle /tmp/root-build.gradle.current
+
+          # Reverse the complete fork-only YouTube stack, newest first.
+          git revert --no-commit -X theirs \
+            1ce92cbb17a9e8038d1d854daba002f6daddb034 \
+            bfe3dbe20d44acc41bc38a1a085bd838f7377be6 \
+            6df75a7da72dc06e9c005bc76e9744de40de3180 \
+            88ac307544835adcde15a50b08d8f04489c3607a \
+            1defca48f3d214d0ff026ae9ea3fa9f2d5acc031 \
+            c22fd70795d04964155ef5486ced1992507c7855
+
+          # c22fd bundled unrelated build portability/signing work. Preserve that
+          # work while removing only its YouTube API/OAuth configuration block.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('/tmp/app-build.gradle.current').read_text()
+          start_marker = '        // Official YouTube Data API only.'
+          end_marker = '        buildConfigField "String", "YOUTUBE_OAUTH_CLIENT_SECRET", quoteBuildConfig(youtubeOauthClientSecret)\n'
+          start = source.find(start_marker)
+          if start < 0:
+              raise SystemExit('YouTube BuildConfig block start not found')
+          end = source.find(end_marker, start)
+          if end < 0:
+              raise SystemExit('YouTube BuildConfig block end not found')
+          end += len(end_marker)
+          while end < len(source) and source[end] == '\n':
+              end += 1
+          Path('app/build.gradle').write_text(source[:start] + source[end:])
+          PY
+
+          # The root build-directory relocation in c22fd was unrelated to YouTube.
+          cp /tmp/root-build.gradle.current build.gradle
+
+          # Preserve the unrelated local stem-readiness correction bundled in c22fd.
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/java/com/solar/launcher/MainActivity.java')
+          text = path.read_text()
+          text = text.replace('        if (canInstr) {\n', '        if (localInstrReady) {\n', 1)
+          text = text.replace('        if (canAcap) {\n', '        if (localAcapReady) {\n', 1)
+          path.write_text(text)
+          PY
+
+          # Remove this temporary workflow from the finished branch.
+          rm .github/workflows/restore-upstream-youtube.yml
+
+          # Guardrails: the fork-only official API/OAuth and Discover implementation
+          # must be gone, while the official upstream backend package is restored.
+          ! grep -R "YOUTUBE_OAUTH_CLIENT_ID\|YOUTUBE_DATA_API_KEY" -n app/src app/build.gradle
+          test -f app/src/main/java/com/solar/launcher/youtube/api/PipedBackend.java
+          test -f app/src/main/java/com/solar/launcher/youtube/api/InvidiousBackend.java
+          test ! -e app/src/main/java/com/solar/launcher/youtube/official/YouTubeDeviceAuth.java
+          test ! -e app/src/main/java/com/solar/launcher/youtube/YouTubeDiscoverRanker.java
+          test ! -e docs/YOUTUBE-SETUP.md
+
+          git status --short
+          git add -A
+          git commit -m "Restore official upstream YouTube behavior"
+          git push origin HEAD:agent/restore-upstream-youtube
