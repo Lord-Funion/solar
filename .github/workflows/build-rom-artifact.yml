@@ -33,13 +33,19 @@ jobs:
 
           main = main_path.read_text(encoding='utf-8')
           stubs = []
-          if 'void armRecoveredDirectDownloadAutoResume(' not in main:
-              stubs.append('    private void armRecoveredDirectDownloadAutoResume() {\n        // Direct-download recovery was removed with the fork-only YouTube stack.\n    }\n')
-          if 'void maybeResumeRecoveredDirectDownload(' not in main:
-              stubs.append('    private void maybeResumeRecoveredDirectDownload() {\n        // No-op: the recovered direct-download subsystem no longer exists.\n    }\n')
-          if 'void pauseDirectDownloadForNetworkLoss(' not in main:
-              stubs.append('    private void pauseDirectDownloadForNetworkLoss() {\n        // No-op: the recovered direct-download subsystem no longer exists.\n    }\n')
-          if 'boolean isDownloadAutoResumeWifiEnabled(' not in main:
+          declarations = [
+              ('armRecoveredDirectDownloadAutoResume', '    private void armRecoveredDirectDownloadAutoResume() {\n        // Removed direct-download recovery subsystem.\n    }\n'),
+              ('maybeResumeRecoveredDirectDownload', '    private void maybeResumeRecoveredDirectDownload() {\n        // Removed direct-download recovery subsystem.\n    }\n'),
+              ('maybeResumeDirectDownloadAfterNetworkLoss', '    private void maybeResumeDirectDownloadAfterNetworkLoss() {\n        // Removed direct-download recovery subsystem.\n    }\n'),
+          ]
+          for method, body in declarations:
+              if not re.search(r'\b(?:private|protected|public)\s+void\s+' + method + r'\s*\(', main):
+                  stubs.append(body)
+          if not re.search(r'\b(?:private|protected|public)\s+void\s+pauseDirectDownloadForNetworkLoss\s*\(\s*\)', main):
+              stubs.append('    private void pauseDirectDownloadForNetworkLoss() {\n        // Removed direct-download recovery subsystem.\n    }\n')
+          if not re.search(r'\b(?:private|protected|public)\s+void\s+pauseDirectDownloadForNetworkLoss\s*\(\s*boolean\b', main):
+              stubs.append('    private void pauseDirectDownloadForNetworkLoss(boolean internetAvailable, boolean wifiAssociated) {\n        // Removed direct-download recovery subsystem.\n    }\n')
+          if not re.search(r'\b(?:private|protected|public)\s+boolean\s+isDownloadAutoResumeWifiEnabled\s*\(', main):
               stubs.append('    private boolean isDownloadAutoResumeWifiEnabled() {\n        return true;\n    }\n')
           if stubs:
               pos = main.rfind('\n}')
@@ -49,26 +55,38 @@ jobs:
               main_path.write_text(main, encoding='utf-8')
 
           rows = row_path.read_text(encoding='utf-8')
-          if 'DOWNLOAD_AUTO_RESUME_WIFI' not in rows:
-              match = re.search(r'(\bclass\s+Settings\s*\{)', rows)
-              if not match:
-                  raise SystemExit('Could not locate RowKeys.Settings')
-              insert = ('\n        public static final String DOWNLOAD_AUTO_RESUME_WIFI =\n'
-                        '                "settings.download_auto_resume_wifi";')
-              rows = rows[:match.end()] + insert + rows[match.end():]
-              row_path.write_text(rows, encoding='utf-8')
+          root_prefix = 'public final class RowKeys {'
+          root_constant = ('\n    public static final String DOWNLOAD_AUTO_RESUME_WIFI =\n'
+                           '            "settings.download_auto_resume_wifi";')
+          root_head = rows.split('public static final class Settings', 1)[0]
+          if 'DOWNLOAD_AUTO_RESUME_WIFI' not in root_head:
+              if root_prefix not in rows:
+                  raise SystemExit('Could not locate RowKeys root class')
+              rows = rows.replace(root_prefix, root_prefix + root_constant, 1)
+          settings_match = re.search(r'(\bclass\s+Settings\s*\{)', rows)
+          if not settings_match:
+              raise SystemExit('Could not locate RowKeys.Settings')
+          settings_tail = rows[settings_match.end():]
+          if 'DOWNLOAD_AUTO_RESUME_WIFI' not in settings_tail:
+              nested_constant = ('\n        public static final String DOWNLOAD_AUTO_RESUME_WIFI =\n'
+                                 '                "settings.download_auto_resume_wifi";')
+              rows = rows[:settings_match.end()] + nested_constant + rows[settings_match.end():]
+          row_path.write_text(rows, encoding='utf-8')
 
           strings = strings_path.read_text(encoding='utf-8')
-          additions = []
           values = {
               'home_menu_downloads': 'Downloads',
               'settings_download_auto_resume_title': 'Auto-resume downloads on Wi-Fi',
               'settings_download_auto_resume_summary_on': 'Downloads resume automatically on Wi-Fi',
               'settings_download_auto_resume_summary_off': 'Downloads stay paused after a connection loss',
+              'settings_download_auto_resume_wifi_hint': 'Resume interrupted downloads automatically when Wi-Fi returns.',
+              'settings_download_auto_resume_wifi': 'Auto-resume downloads on Wi-Fi',
           }
-          for name, value in values.items():
-              if f'name="{name}"' not in strings:
-                  additions.append(f'    <string name="{name}">{value}</string>')
+          additions = [
+              f'    <string name="{name}">{value}</string>'
+              for name, value in values.items()
+              if f'name="{name}"' not in strings
+          ]
           if additions:
               strings = strings.replace('</resources>', '\n' + '\n'.join(additions) + '\n</resources>')
               strings_path.write_text(strings, encoding='utf-8')
