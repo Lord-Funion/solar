@@ -105,7 +105,6 @@ import com.solar.launcher.ui.ScreenTransitionCoordinator;
 import com.solar.launcher.ui.ScreenTransitionMap;
 import com.solar.launcher.ui.UiBusy;
 import com.solar.launcher.media.FlowHoldHintPolicy;
-import com.solar.launcher.media.AuthorizedDirectDownload;
 import com.solar.launcher.media.AuthorizedMediaImporter;
 import com.solar.launcher.media.MediaSuiteHost;
 import com.solar.launcher.media.MediaSuiteHostAdapter;
@@ -302,8 +301,6 @@ public class MainActivity extends Activity {
     private static final int KEYBOARD_VIDEO_FILE_SEARCH = 53;
     /** 2026-07-20 — Online Radio station name search (wheel keyboard → Radio Browser). */
     private static final int KEYBOARD_RADIO_NET_SEARCH = 54;
-    /** Creator-provided direct audio URL; kept outside plugin keyboard ID ranges. */
-    private static final int KEYBOARD_DIRECT_AUDIO_URL = 55;
     /** ponytail: stock Y1 row art — home=itemConfig, settings/menu lists=menuConfig, file lists=itemConfig */
     private static final int Y1_ROW_HOME = 0;
     private static final int Y1_ROW_MENU = 1;
@@ -872,20 +869,6 @@ public class MainActivity extends Activity {
     private boolean soulseekPausedForNetworkLoss;
     private String podcastStreamTransferJobId;
     private String podcastSaveTransferJobId;
-    private static final class DirectDownloadControl {
-        final String jobId;
-        final AuthorizedDirectDownload.Plan plan;
-        final java.util.concurrent.atomic.AtomicBoolean cancel =
-                new java.util.concurrent.atomic.AtomicBoolean(false);
-        volatile boolean pauseRequested;
-
-        DirectDownloadControl(String jobId, AuthorizedDirectDownload.Plan plan) {
-            this.jobId = jobId;
-            this.plan = plan;
-        }
-    }
-    private volatile DirectDownloadControl directDownloadControl;
-    private volatile String directDownloadNetworkPausedJobId;
     private long downloadsLastUiRefreshMs;
     private final Runnable downloadsUiRefreshRunnable = new Runnable() {
         @Override
@@ -3820,333 +3803,6 @@ public class MainActivity extends Activity {
                 }
             }
         }, "SolarMediaImport").start();
-    }
-
-    private File directAudioDownloadDirectory() {
-        File mediaRoot = DeviceFeatures.getNewMediaRoot(this);
-        return mediaRoot != null
-                ? new File(new File(mediaRoot, "Music"), "Downloads") : null;
-    }
-
-    private void openAuthorizedDirectDownloadKeyboard() {
-        if (!requireInternet(R.string.toast_internet_required)) return;
-        if (directDownloadControl != null) {
-            Toast.makeText(this, getString(R.string.get_music_direct_audio_busy),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        keyboardPurpose = KEYBOARD_DIRECT_AUDIO_URL;
-        keyboardReturnState = STATE_SOULSEEK;
-        keyboardPrefill = "https://";
-        changeScreen(STATE_WIFI_KEYBOARD);
-    }
-
-    private void finishAuthorizedDirectDownloadUrlEntry() {
-        final String suppliedUrl = typedPassword != null ? typedPassword.trim() : "";
-        changeScreen(STATE_SOULSEEK);
-        offerAuthorizedDirectDownload(suppliedUrl);
-    }
-
-    private void offerAuthorizedDirectDownload(String suppliedUrl) {
-        if (!requireInternet(R.string.toast_internet_required)) return;
-        if (directDownloadControl != null) {
-            Toast.makeText(this, getString(R.string.get_music_direct_audio_busy),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (transferJobStore == null) {
-            Toast.makeText(this, getString(R.string.get_music_direct_audio_unavailable),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        final AuthorizedDirectDownload.Plan plan;
-        try {
-            plan = AuthorizedDirectDownload.prepare(
-                    suppliedUrl, directAudioDownloadDirectory());
-        } catch (IOException e) {
-            Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
-            return;
-        }
-        showThemedConfirm(
-                getString(R.string.get_music_direct_audio_confirm_title, plan.displayName),
-                getString(R.string.get_music_direct_audio_confirm, plan.host),
-                getString(R.string.get_music_direct_audio_confirm_action),
-                getString(R.string.common_cancel),
-                new Runnable() {
-                    @Override
-                    public void run() {
-                        startAuthorizedDirectDownload(plan);
-                    }
-                },
-                null);
-    }
-
-    public void mediaOpenAuthorizedDirectAudioUrl(String url) {
-        offerAuthorizedDirectDownload(url);
-    }
-
-    private void startAuthorizedDirectDownload(AuthorizedDirectDownload.Plan plan) {
-        if (plan == null) return;
-        if (TransferNetworkPolicy.shouldPause(
-                true,
-                ConnectivityHelper.isOnline(this),
-                ConnectivityHelper.isWifiAssociated(this))) {
-            Toast.makeText(this, getString(R.string.toast_wifi_unavailable),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (directDownloadControl != null) {
-            Toast.makeText(this, getString(R.string.get_music_direct_audio_busy),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        String transferId = beginTransferJob(null, TransferJobStore.Provider.DIRECT,
-                plan.displayName,
-                getString(R.string.get_music_direct_audio_source, plan.host),
-                plan.url, plan.target.getAbsolutePath(), true, 3);
-        if (transferId == null) {
-            Toast.makeText(this, getString(R.string.get_music_direct_audio_unavailable),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        directDownloadNetworkPausedJobId = null;
-        DirectDownloadControl control = new DirectDownloadControl(transferId, plan);
-        directDownloadControl = control;
-        Toast.makeText(this,
-                getString(R.string.get_music_direct_audio_started, plan.displayName),
-                Toast.LENGTH_SHORT).show();
-        runAuthorizedDirectDownload(control);
-    }
-
-    private void runAuthorizedDirectDownload(final DirectDownloadControl control) {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    final long[] lastProgress = new long[] {0L, 0L};
-                    final AuthorizedDirectDownload.Result result =
-                            AuthorizedDirectDownload.download(
-                                    control.plan,
-                                    new com.solar.launcher.net.SolarHttp.DownloadProgress() {
-                                @Override
-                                public void onProgress(long done, long total) {
-                                    long now = android.os.SystemClock.elapsedRealtime();
-                                    if (lastProgress[1] == 0L
-                                            || done - lastProgress[0] >= 512L * 1024L
-                                            || now - lastProgress[1] >= 500L
-                                            || (total > 0L && done >= total)) {
-                                        lastProgress[0] = done;
-                                        lastProgress[1] = now;
-                                        progressTransferJob(control.jobId, done, total);
-                                    }
-                                }
-                            },
-                                    control.cancel);
-                    finishTransferJob(control.jobId, result.file, true);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            scanMediaLibraryAsync();
-                            requestSoulseekShareRescan();
-                            Toast.makeText(MainActivity.this,
-                                    getString(result.duplicate
-                                                    ? R.string.get_music_direct_audio_duplicate
-                                                    : R.string.get_music_direct_audio_done,
-                                            result.file.getName()),
-                                    Toast.LENGTH_LONG).show();
-                        }
-                    });
-                } catch (final Exception e) {
-                    if (control.cancel.get()) {
-                        if (!control.pauseRequested) {
-                            AuthorizedDirectDownload.deletePartial(control.plan);
-                        }
-                    } else {
-                        final String message = e.getMessage() != null
-                                ? e.getMessage()
-                                : getString(R.string.get_music_import_failed_unknown);
-                        failTransferJob(control.jobId, message);
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                Toast.makeText(MainActivity.this,
-                                        getString(R.string.get_music_direct_audio_failed, message),
-                                        Toast.LENGTH_LONG).show();
-                            }
-                        });
-                    }
-                } finally {
-                    if (directDownloadControl == control) {
-                        directDownloadControl = null;
-                    }
-                    scheduleDownloadsUiRefresh();
-                    if (control.jobId.equals(directDownloadNetworkPausedJobId)) {
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                maybeResumeDirectDownloadAfterNetworkLoss();
-                            }
-                        });
-                    }
-                }
-            }
-        }, "SolarDirectAudio").start();
-    }
-
-    private AuthorizedDirectDownload.Plan directPlanForJob(TransferJobStore.Job job)
-            throws IOException {
-        if (job == null || job.provider != TransferJobStore.Provider.DIRECT) {
-            throw new IOException("This is not a direct audio transfer");
-        }
-        if (job.remoteId == null || job.remoteId.length() == 0
-                || job.targetPath == null || job.targetPath.length() == 0) {
-            throw new IOException("The saved direct download is incomplete");
-        }
-        return AuthorizedDirectDownload.resume(
-                job.remoteId, new File(job.targetPath), directAudioDownloadDirectory());
-    }
-
-    private void pauseDirectDownloadForResume(TransferJobStore.Job job) {
-        DirectDownloadControl control = directDownloadControl;
-        if (control == null || job == null || !job.id.equals(control.jobId)) return;
-        clearDirectDownloadNetworkPause(job.id);
-        control.pauseRequested = true;
-        control.cancel.set(true);
-        transitionTransferJob(job.id, TransferJobStore.State.PAUSED, "Paused", "");
-    }
-
-    private void cancelDirectDownload(TransferJobStore.Job job) {
-        if (job != null) clearDirectDownloadNetworkPause(job.id);
-        DirectDownloadControl control = directDownloadControl;
-        if (control != null && job != null && job.id.equals(control.jobId)) {
-            control.pauseRequested = false;
-            control.cancel.set(true);
-            return;
-        }
-        try {
-            AuthorizedDirectDownload.deletePartial(directPlanForJob(job));
-        } catch (Exception ignored) {}
-    }
-
-    private void resumeDirectDownload(final TransferJobStore.Job original) {
-        if (original == null || transferJobStore == null) return;
-        if (TransferNetworkPolicy.shouldPause(
-                original.wifiOnly,
-                ConnectivityHelper.isOnline(this),
-                ConnectivityHelper.isWifiAssociated(this))) {
-            Toast.makeText(this, getString(R.string.toast_wifi_unavailable),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (directDownloadControl != null) {
-            Toast.makeText(this, getString(R.string.get_music_direct_audio_busy),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        final AuthorizedDirectDownload.Plan plan;
-        try {
-            plan = directPlanForJob(original);
-            TransferJobStore.Job job = transferJobStore.get(original.id);
-            if (job == null) return;
-            if (job.state == TransferJobStore.State.FAILED) {
-                job = transferJobStore.retry(job.id);
-            }
-            if (job.state == TransferJobStore.State.PAUSED
-                    || job.state == TransferJobStore.State.RETRYING
-                    || job.state == TransferJobStore.State.QUEUED) {
-                transferJobStore.transition(
-                        job.id, TransferJobStore.State.CONNECTING, "Connecting", "");
-            }
-        } catch (Exception e) {
-            Toast.makeText(this,
-                    getString(R.string.get_music_direct_audio_failed,
-                            e.getMessage() != null ? e.getMessage()
-                                    : getString(R.string.downloads_retry_unavailable)),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        clearDirectDownloadNetworkPause(original.id);
-        DirectDownloadControl control = new DirectDownloadControl(original.id, plan);
-        directDownloadControl = control;
-        if (currentScreenState == STATE_DOWNLOADS) {
-            TransferJobStore.Job resumed = transferJobStore.get(original.id);
-            if (resumed != null && original.id.equals(downloadsDetailJobId)) {
-                buildDownloadJobDetailUI(resumed);
-            } else {
-                scheduleDownloadsUiRefresh();
-            }
-        }
-        runAuthorizedDirectDownload(control);
-    }
-
-    private void clearDirectDownloadNetworkPause(String jobId) {
-        if (jobId != null && jobId.equals(directDownloadNetworkPausedJobId)) {
-            directDownloadNetworkPausedJobId = null;
-        }
-    }
-
-    private boolean isDownloadAutoResumeWifiEnabled() {
-        return prefs == null || prefs.getBoolean(
-                TransferNetworkPolicy.PREF_AUTO_RESUME_WIFI, true);
-    }
-
-    private void pauseDirectDownloadForNetworkLoss(
-            boolean internetAvailable, boolean wifiAssociated) {
-        DirectDownloadControl control = directDownloadControl;
-        if (control == null || transferJobStore == null) return;
-        TransferJobStore.Job job = transferJobStore.get(control.jobId);
-        if (job == null || job.provider != TransferJobStore.Provider.DIRECT
-                || !job.state.isRunning()
-                || !TransferNetworkPolicy.shouldPause(
-                        job.wifiOnly, internetAvailable, wifiAssociated)
-                || !TransferJobStore.canTransition(
-                        job.state, TransferJobStore.State.PAUSED)) {
-            return;
-        }
-        directDownloadNetworkPausedJobId = job.id;
-        control.pauseRequested = true;
-        control.cancel.set(true);
-        transitionTransferJob(
-                job.id,
-                TransferJobStore.State.PAUSED,
-                "Paused - Wi-Fi unavailable",
-                "");
-    }
-
-    private void maybeResumeDirectDownloadAfterNetworkLoss() {
-        String jobId = directDownloadNetworkPausedJobId;
-        if (jobId == null || directDownloadControl != null || transferJobStore == null) return;
-        TransferJobStore.Job job = transferJobStore.get(jobId);
-        if (job == null || job.provider != TransferJobStore.Provider.DIRECT
-                || job.state != TransferJobStore.State.PAUSED) {
-            clearDirectDownloadNetworkPause(jobId);
-            return;
-        }
-        if (!TransferNetworkPolicy.shouldAutoResume(
-                isDownloadAutoResumeWifiEnabled(),
-                job.wifiOnly,
-                ConnectivityHelper.isOnline(this),
-                ConnectivityHelper.isWifiAssociated(this))) {
-            return;
-        }
-        clearDirectDownloadNetworkPause(jobId);
-        resumeDirectDownload(job);
-    }
-
-    private void armRecoveredDirectDownloadAutoResume() {
-        if (transferJobStore == null || directDownloadNetworkPausedJobId != null) return;
-        for (TransferJobStore.Job job : transferJobStore.list()) {
-            if (!TransferNetworkPolicy.isSafeRestartAutoResumeCandidate(job)) continue;
-            directDownloadNetworkPausedJobId = job.id;
-            return;
-        }
-    }
-
-    private void deleteDirectPartialForJob(TransferJobStore.Job job) {
-        if (job == null || job.provider != TransferJobStore.Provider.DIRECT) return;
-        try {
-            AuthorizedDirectDownload.deletePartial(directPlanForJob(job));
-        } catch (Exception ignored) {}
     }
 
     /**
@@ -13656,9 +13312,6 @@ public class MainActivity extends Activity {
         if (keyboardPurpose == KEYBOARD_YOUTUBE_SEARCH) {
             return getString(R.string.youtube_search_title);
         }
-        if (keyboardPurpose == KEYBOARD_DIRECT_AUDIO_URL) {
-            return getString(R.string.get_music_direct_audio_title);
-        }
         if (keyboardPurpose == KEYBOARD_RADIO_NET_SEARCH) {
             return getString(R.string.radio_net_search_title);
         }
@@ -18004,8 +17657,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 || keyboardPurpose == KEYBOARD_BT_PAIRING_PIN
                 || keyboardPurpose == KEYBOARD_LIBRARY_SEARCH
                 || keyboardPurpose == KEYBOARD_REPORT_ISSUE
-                || keyboardPurpose == KEYBOARD_LALAL_KEY
-                || keyboardPurpose == KEYBOARD_DIRECT_AUDIO_URL;
+                || keyboardPurpose == KEYBOARD_LALAL_KEY;
     }
 
     private String[] keyboardCharsetForPurpose() {
@@ -18936,9 +18588,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (keyboardPurpose == KEYBOARD_LALAL_KEY) {
             return getString(R.string.lalal_key_prompt);
         }
-        if (keyboardPurpose == KEYBOARD_DIRECT_AUDIO_URL) {
-            return getString(R.string.get_music_direct_audio_placeholder);
-        }
         if (keyboardPurpose == KEYBOARD_SOULSEEK_SEARCH) {
             return getString(getMusicFromEntryPoint
                     ? R.string.get_music_type_search : R.string.soulseek_type_search);
@@ -19111,9 +18760,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         else if (keyboardPurpose == KEYBOARD_VIDEO_FILE_SEARCH) finishVideoFileSearchEntry();
         else if (keyboardPurpose == KEYBOARD_LALAL_KEY) finishLalalKeyEntry();
         else if (keyboardPurpose == KEYBOARD_REPORT_ISSUE) finishReportIssueEntry();
-        else if (keyboardPurpose == KEYBOARD_DIRECT_AUDIO_URL) {
-            finishAuthorizedDirectDownloadUrlEntry();
-        }
         else if (keyboardPurpose == NavidromeSettingsHost.KEYBOARD_URL
                 || keyboardPurpose == NavidromeSettingsHost.KEYBOARD_USER
                 || keyboardPurpose == NavidromeSettingsHost.KEYBOARD_PASS) {
@@ -21869,37 +21515,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         if (RowKeys.SOULSEEK_ACCOUNT.equals(rowKey) && SettingsScreens.isSoulseek(settingsSubScreenKey)) {
             return SoulseekAccount.displayLabel(SoulseekAccount.load(prefs));
-        }
-        if (RowKeys.YOUTUBE_REGION.equals(rowKey)) {
-            String configured = com.solar.launcher.youtube.YouTubeDiscoverSettings
-                    .configuredRegion(prefs);
-            String effective = com.solar.launcher.youtube.YouTubeDiscoverSettings
-                    .effectiveRegion(prefs, Locale.getDefault().getCountry());
-            return configured.length() > 0
-                    ? configured
-                    : getString(R.string.settings_youtube_region_auto, effective);
-        }
-        if (RowKeys.YOUTUBE_DISCOVER_DURATION.equals(rowKey)) {
-            int preset = com.solar.launcher.youtube.YouTubeDiscoverSettings
-                    .durationPreset(
-                            prefs.getInt(com.solar.launcher.youtube.YouTubeDiscoverRanker
-                                    .PREF_MIN_DURATION_SECONDS, 0),
-                            prefs.getInt(com.solar.launcher.youtube.YouTubeDiscoverRanker
-                                    .PREF_MAX_DURATION_SECONDS, 0));
-            if (preset == 1) return getString(R.string.settings_youtube_duration_one_plus);
-            if (preset == 2) return getString(R.string.settings_youtube_duration_two_twenty);
-            if (preset == 3) return getString(R.string.settings_youtube_duration_long);
-            return getString(R.string.settings_youtube_duration_all);
-        }
-        if (RowKeys.YOUTUBE_CACHE_SIZE.equals(rowKey)) {
-            return formatBytes(com.solar.launcher.youtube.YouTubeDiscoverSettings
-                    .cacheBytes(prefs));
-        }
-        if (RowKeys.YOUTUBE_CLEAR_CACHE.equals(rowKey)) {
-            return getString(R.string.settings_youtube_clear_cache_hint);
-        }
-        if (RowKeys.YOUTUBE_CLEAR_HISTORY.equals(rowKey)) {
-            return getString(R.string.settings_youtube_clear_history_hint);
         }
         if (RowKeys.STEM_FEATURES.equals(rowKey)) {
             // 2026-07-19 — Plain On/Off for inline ✓ (hint lives in dual-pane via resolveMediaStemPreview).
@@ -35993,149 +35608,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         });
         containerSettingsItems.addView(btnVideo);
 
-        LinearLayout btnDownloadAutoResume = createSettingsRow(
-                RowKeys.DOWNLOAD_AUTO_RESUME_WIFI,
-                R.string.settings_download_auto_resume_wifi,
-                false);
-        btnDownloadAutoResume.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                clickFeedback();
-                boolean enabled = !isDownloadAutoResumeWifiEnabled();
-                prefs.edit().putBoolean(
-                        TransferNetworkPolicy.PREF_AUTO_RESUME_WIFI, enabled).commit();
-                refreshSettingsPreview(RowKeys.DOWNLOAD_AUTO_RESUME_WIFI);
-                if (enabled) {
-                    maybeResumePodcastDownload();
-                    maybeResumeSoulseekDownloadAfterNetworkLoss();
-                    maybeResumeDirectDownloadAfterNetworkLoss();
-                }
-            }
-        });
-        containerSettingsItems.addView(btnDownloadAutoResume);
-
-        LinearLayout btnYouTubeRegion = createSettingsRow(
-                RowKeys.YOUTUBE_REGION, R.string.settings_youtube_region, false);
-        btnYouTubeRegion.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                clickFeedback();
-                String current = com.solar.launcher.youtube.YouTubeDiscoverSettings
-                        .configuredRegion(prefs);
-                String next = com.solar.launcher.youtube.YouTubeDiscoverSettings
-                        .nextRegion(current);
-                prefs.edit().putString(
-                        com.solar.launcher.youtube.YouTubeDiscoverSettings.PREF_REGION,
-                        next).commit();
-                com.solar.launcher.youtube.YouTubeClient.getInstance(MainActivity.this)
-                        .clearMetadataCache();
-                refreshSettingsPreview(RowKeys.YOUTUBE_REGION);
-            }
-        });
-        containerSettingsItems.addView(btnYouTubeRegion);
-
-        LinearLayout btnDiscoverDuration = createSettingsRow(
-                RowKeys.YOUTUBE_DISCOVER_DURATION,
-                R.string.settings_youtube_discover_duration, false);
-        btnDiscoverDuration.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                clickFeedback();
-                int min = prefs.getInt(
-                        com.solar.launcher.youtube.YouTubeDiscoverRanker
-                                .PREF_MIN_DURATION_SECONDS, 0);
-                int max = prefs.getInt(
-                        com.solar.launcher.youtube.YouTubeDiscoverRanker
-                                .PREF_MAX_DURATION_SECONDS, 0);
-                int preset = com.solar.launcher.youtube.YouTubeDiscoverSettings
-                        .nextDurationPreset(
-                                com.solar.launcher.youtube.YouTubeDiscoverSettings
-                                        .durationPreset(min, max));
-                prefs.edit()
-                        .putInt(com.solar.launcher.youtube.YouTubeDiscoverRanker
-                                        .PREF_MIN_DURATION_SECONDS,
-                                com.solar.launcher.youtube.YouTubeDiscoverSettings
-                                        .minDurationSeconds(preset))
-                        .putInt(com.solar.launcher.youtube.YouTubeDiscoverRanker
-                                        .PREF_MAX_DURATION_SECONDS,
-                                com.solar.launcher.youtube.YouTubeDiscoverSettings
-                                        .maxDurationSeconds(preset))
-                        .commit();
-                refreshSettingsPreview(RowKeys.YOUTUBE_DISCOVER_DURATION);
-            }
-        });
-        containerSettingsItems.addView(btnDiscoverDuration);
-
-        LinearLayout btnYouTubeCacheSize = createSettingsRow(
-                RowKeys.YOUTUBE_CACHE_SIZE,
-                R.string.settings_youtube_cache_size, false);
-        btnYouTubeCacheSize.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                clickFeedback();
-                long next = com.solar.launcher.youtube.YouTubeDiscoverSettings
-                        .nextCacheBytes(
-                                com.solar.launcher.youtube.YouTubeDiscoverSettings
-                                        .cacheBytes(prefs));
-                prefs.edit().putLong(
-                        com.solar.launcher.youtube.YouTubeDiscoverSettings.PREF_CACHE_BYTES,
-                        next).commit();
-                com.solar.launcher.youtube.YouTubeClient.getInstance(MainActivity.this)
-                        .setMetadataCacheBytes(next);
-                refreshSettingsPreview(RowKeys.YOUTUBE_CACHE_SIZE);
-            }
-        });
-        containerSettingsItems.addView(btnYouTubeCacheSize);
-
-        LinearLayout btnClearYouTubeCache = createSettingsRow(
-                RowKeys.YOUTUBE_CLEAR_CACHE,
-                R.string.settings_youtube_clear_cache, true);
-        btnClearYouTubeCache.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                clickFeedback();
-                com.solar.launcher.youtube.YouTubeClient.getInstance(MainActivity.this)
-                        .clearMetadataCache();
-                Toast.makeText(MainActivity.this,
-                        R.string.settings_youtube_cache_cleared,
-                        Toast.LENGTH_SHORT).show();
-            }
-        });
-        containerSettingsItems.addView(btnClearYouTubeCache);
-
-        LinearLayout btnClearYouTubeHistory = createSettingsRow(
-                RowKeys.YOUTUBE_CLEAR_HISTORY,
-                R.string.settings_youtube_clear_history, true);
-        btnClearYouTubeHistory.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                clickFeedback();
-                showThemedConfirm(
-                        getString(R.string.settings_youtube_clear_history),
-                        getString(R.string.settings_youtube_clear_history_confirm),
-                        getString(R.string.dialog_clear_cache_confirm),
-                        getString(R.string.common_cancel),
-                        new Runnable() {
-                            @Override
-                            public void run() {
-                                com.solar.launcher.youtube.YouTubeRecentSearches
-                                        .clear(MainActivity.this);
-                                new com.solar.launcher.youtube.YouTubeDiscoverFeedback(
-                                        MainActivity.this).clear();
-                                GetMusicSearchHistory.clear(prefs);
-                                SoulseekSearchHistory.clear(prefs);
-                                com.solar.launcher.deezer.DeezerSearchHistory.clear(prefs);
-                                SoulseekDownloadHistory.clear(prefs);
-                                Toast.makeText(MainActivity.this,
-                                        R.string.settings_youtube_history_cleared,
-                                        Toast.LENGTH_SHORT).show();
-                            }
-                        },
-                        null);
-            }
-        });
-        containerSettingsItems.addView(btnClearYouTubeHistory);
-
         // 2026-07-19 — Enable Stem features: boolean toggle like Deezer Enable (not a submenu drill).
         // Was: createSettingsRow(..., true) → chevron, no ✓. Reversal: submenu=true.
         LinearLayout btnStemFeatures = createSettingsRow(RowKeys.STEM_FEATURES,
@@ -44441,18 +43913,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                     clickFeedback();
                     if (transferJobStore != null) {
                         try {
-                            for (TransferJobStore.Job finished : transferJobStore.list()) {
-                                if (!finished.state.isTerminal()) continue;
-                                DirectDownloadControl directControl = directDownloadControl;
-                                if (directControl != null
-                                        && finished.id.equals(directControl.jobId)) {
-                                    continue;
-                                }
-                                if (finished.state != TransferJobStore.State.COMPLETED) {
-                                    deleteDirectPartialForJob(finished);
-                                }
-                                transferJobStore.remove(finished.id);
-                            }
+                            transferJobStore.clearFinished();
                         } catch (RuntimeException e) {
                             android.util.Log.w("Solar", "Could not clear transfer history", e);
                         }
@@ -44522,11 +43983,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 && job.id.equals(soulseekTransferJobId) && isSoulseekTransferInProgress();
         boolean activePodcast = job.provider == TransferJobStore.Provider.PODCAST
                 && job.id.equals(podcastStreamTransferJobId) && podcastDownloadInProgress;
-        DirectDownloadControl directControl = directDownloadControl;
-        boolean activeDirect = job.provider == TransferJobStore.Provider.DIRECT
-                && directControl != null && job.id.equals(directControl.jobId)
-                && job.state.isRunning();
-        if (activeSoulseek || activePodcast || activeDirect) {
+        if (activeSoulseek || activePodcast) {
             Button pause = createListButton(getString(R.string.downloads_pause));
             pause.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -44561,10 +44018,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             containerBrowserItems.addView(resume);
         }
 
-        boolean directWorkerStopping = directControl != null
-                && job.id.equals(directControl.jobId);
-        if ((job.state.isTerminal() || job.state == TransferJobStore.State.PAUSED)
-                && !directWorkerStopping) {
+        if (job.state.isTerminal() || job.state == TransferJobStore.State.PAUSED) {
             Button remove = createListButton(getString(R.string.downloads_remove));
             remove.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -44793,14 +44247,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private boolean canResumeTransferJob(TransferJobStore.Job job) {
         if (job == null || job.remoteId == null || job.remoteId.length() == 0
                 || job.targetPath == null || job.targetPath.length() == 0) return false;
-        DirectDownloadControl directControl = directDownloadControl;
-        if (job.provider == TransferJobStore.Provider.DIRECT
-                && directControl != null && job.id.equals(directControl.jobId)) {
-            return false;
-        }
         return job.provider == TransferJobStore.Provider.SOULSEEK
-                || job.provider == TransferJobStore.Provider.PODCAST
-                || job.provider == TransferJobStore.Provider.DIRECT;
+                || job.provider == TransferJobStore.Provider.PODCAST;
     }
 
     private void pauseTransferFromDownloads(TransferJobStore.Job job) {
@@ -44810,8 +44258,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         } else if (job.provider == TransferJobStore.Provider.PODCAST
                 && job.id.equals(podcastStreamTransferJobId)) {
             pausePodcastBackgroundDownload();
-        } else if (job.provider == TransferJobStore.Provider.DIRECT) {
-            pauseDirectDownloadForResume(job);
         }
         TransferJobStore.Job refreshed = transferJobStore != null
                 ? transferJobStore.get(job.id) : null;
@@ -44819,9 +44265,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     }
 
     private void cancelTransferFromDownloads(TransferJobStore.Job job) {
-        if (job.provider == TransferJobStore.Provider.DIRECT) {
-            cancelDirectDownload(job);
-        }
         transitionTransferJob(job.id, TransferJobStore.State.CANCELED, "Canceled", "");
         if (job.provider == TransferJobStore.Provider.SOULSEEK
                 && job.id.equals(soulseekTransferJobId)) {
@@ -44860,10 +44303,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (job.provider == TransferJobStore.Provider.PODCAST) {
             podcastPausedForNetworkLoss = false;
             resumePodcastTransferJob(job);
-            return;
-        }
-        if (job.provider == TransferJobStore.Provider.DIRECT) {
-            resumeDirectDownload(job);
             return;
         }
         Toast.makeText(this, getString(R.string.downloads_retry_unavailable),
@@ -44946,9 +44385,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
     private void removeTransferHistory(TransferJobStore.Job job) {
         if (transferJobStore == null || job == null) return;
         try {
-            if (job.state != TransferJobStore.State.COMPLETED) {
-                deleteDirectPartialForJob(job);
-            }
             transferJobStore.remove(job.id);
             downloadsDetailJobId = null;
             Toast.makeText(this, getString(R.string.downloads_removed),
@@ -51666,37 +51102,77 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         }
         if (video == null || video.id == null || video.id.isEmpty()) return;
         final YouTubeVideo target = video;
+        // 2026-07-15 — Music→YouTube context is audio-only (no Save video / Open video).
+        // Was: always Play + Save video + Save audio. Reversal: drop audioMode branches.
+        final boolean audioMode = mediaSuite != null && mediaSuite.isYouTubeAudioMode();
         if (currentScreenState == MediaSuiteHost.STATE_YOUTUBE_BROWSE) {
-            addContextAction(getString(R.string.youtube_ctx_open), new Runnable() {
+            addContextAction(getString(audioMode
+                    ? R.string.youtube_ctx_open_audio
+                    : R.string.youtube_ctx_open), new Runnable() {
                 @Override public void run() {
                     if (!requireInternet(R.string.toast_internet_required)) return;
                     mediaSuite.openYouTubeDetailFromContext(target);
                 }
             });
         }
-        addContextAction(getString(R.string.youtube_detail_bookmark), new Runnable() {
-            @Override public void run() {
-                mediaSuite.toggleYouTubeBookmark(target);
-            }
-        });
-        addContextAction(getString(R.string.youtube_detail_search_soulseek), new Runnable() {
+        addContextAction(getString(R.string.youtube_ctx_play), new Runnable() {
             @Override public void run() {
                 if (!requireInternet(R.string.toast_internet_required)) return;
-                mediaSuite.searchYouTubeOnSoulseek(target);
+                mediaSuite.playYouTubeFromContext(target);
             }
         });
-        addContextAction(getString(R.string.youtube_detail_copy_link), new Runnable() {
+        if (audioMode) {
+            addContextAction(getString(R.string.youtube_ctx_save), new Runnable() {
+                @Override public void run() {
+                    if (!requireInternet(R.string.toast_internet_required)) return;
+                    startYouTubeSave(target, true);
+                }
+            });
+            addContextAction(getString(R.string.context_add_to_local_playlist), new Runnable() {
+                @Override public void run() {
+                    openAddYouTubeTrackToLocalPlaylistFlow(target);
+                }
+            });
+            java.io.File savedAudio = YouTubeSavePaths.findSavedAudio(this, target);
+            if (savedAudio != null && savedAudio.length() > 1024L) {
+                addContextAction(getString(R.string.youtube_ctx_play_saved), new Runnable() {
+                    @Override public void run() {
+                        mediaSuite.playYouTubeFromContext(target);
+                    }
+                });
+            }
+            return;
+        }
+        addContextAction(getString(R.string.youtube_ctx_save_video), new Runnable() {
             @Override public void run() {
-                mediaSuite.copyYouTubeLink(target);
+                if (!requireInternet(R.string.toast_internet_required)) return;
+                startYouTubeSave(target, false);
             }
         });
+        addContextAction(getString(R.string.youtube_ctx_save_audio), new Runnable() {
+            @Override public void run() {
+                if (!requireInternet(R.string.toast_internet_required)) return;
+                startYouTubeSave(target, true);
+            }
+        });
+        addContextAction(getString(R.string.context_add_to_local_playlist), new Runnable() {
+            @Override public void run() {
+                openAddYouTubeTrackToLocalPlaylistFlow(target);
+            }
+        });
+        java.io.File savedVideo = YouTubeSavePaths.findSavedVideo(this, target);
+        if (savedVideo != null && savedVideo.length() > 1024L) {
+            addContextAction(getString(R.string.youtube_ctx_play_saved), new Runnable() {
+                @Override public void run() {
+                    mediaSuite.playYouTubeFromContext(target);
+                }
+            });
+        }
     }
 
-    /** Route official YouTube metadata into the existing authorized Soulseek search. */
-    public void mediaSearchSoulseekForYouTube(YouTubeVideo video) {
-        String query = com.solar.launcher.youtube.YouTubeAcquisitionPolicy
-                .soulseekQuery(video);
-        if (query.length() > 0) launchReachSearchFromSuggestion(query, false);
+    /** MediaSuiteHost adapter — save from detail list actions. */
+    public void mediaRequestYouTubeSave(YouTubeVideo video, boolean audioOnly) {
+        startYouTubeSave(video, audioOnly);
     }
 
     /**
@@ -54672,31 +54148,15 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
             });
             containerBrowserItems.addView(localImport);
 
-            if (online) {
-                View directAudio = createGetMusicListRow(
-                        getString(R.string.get_music_direct_audio),
-                        getString(R.string.get_music_direct_audio_hint),
-                        new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        clickFeedback();
-                        openAuthorizedDirectDownloadKeyboard();
-                    }
-                });
-                containerBrowserItems.addView(directAudio);
-            }
-
-            if (com.solar.launcher.youtube.YouTubeExperiment.isEnabled(prefs)) {
+            if (online && com.solar.launcher.youtube.YouTubeExperiment.isEnabled(prefs)) {
                 View youtube = createGetMusicListRow(
                         getString(R.string.get_music_youtube_discover),
-                        getString(online
-                                ? R.string.get_music_youtube_discover_hint
-                                : R.string.get_music_youtube_discover_offline_hint),
+                        getString(R.string.get_music_youtube_discover_hint),
                         new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
                         clickFeedback();
-                        if (mediaSuite != null) mediaSuite.openYouTubeDiscoverBrowse();
+                        if (mediaSuite != null) mediaSuite.openYouTubeAudioBrowse();
                     }
                 });
                 containerBrowserItems.addView(youtube);
@@ -62470,17 +61930,6 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     @Override
     protected void onDestroy() {
-        try {
-            DirectDownloadControl directControl = directDownloadControl;
-            if (directControl != null && transferJobStore != null) {
-                TransferJobStore.Job directJob = transferJobStore.get(directControl.jobId);
-                if (directJob != null && directJob.state.isRunning()) {
-                    pauseDirectDownloadForResume(directJob);
-                }
-            }
-        } catch (RuntimeException e) {
-            android.util.Log.w("Solar", "Could not pause direct download during shutdown", e);
-        }
         // 2026-07-20 — Clear MemoryRelease host so trim doesn’t touch a dead Activity.
         MemoryRelease.setHost(null);
         if (usbFocusHelper != null) usbFocusHelper.onDestroy();

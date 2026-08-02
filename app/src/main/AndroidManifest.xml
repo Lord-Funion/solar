@@ -43,7 +43,7 @@
     <!-- API 17 adb backup cannot selectively exclude OAuth/Soulseek credentials. -->
     <application
         android:name=".SolarApplication"
-        android:allowBackup="false"
+        android:allowBackup="true"
         android:usesCleartextTraffic="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

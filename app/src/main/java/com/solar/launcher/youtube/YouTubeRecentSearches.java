@@ -57,13 +57,4 @@ public final class YouTubeRecentSearches {
                 .putString(KEY_LIST, arr.toString())
                 .apply();
     }
-
-    public static void clear(Context ctx) {
-        if (ctx == null) return;
-        ctx.getApplicationContext()
-                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .remove(KEY_LIST)
-                .commit();
-    }
 }
