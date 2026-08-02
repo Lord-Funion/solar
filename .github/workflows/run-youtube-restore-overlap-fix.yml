@@ -1,15 +1,16 @@
 name: Run YouTube restore overlap fix
 
 on:
-  issues:
-    types: [opened]
+  pull_request:
+    branches: [main]
+    types: [reopened]
 
 permissions:
   contents: write
 
 jobs:
   fix-overlap:
-    if: github.event.issue.title == 'run-youtube-restore-overlap-fix-20260802'
+    if: github.event.pull_request.number == 8
     runs-on: ubuntu-latest
     steps:
       - name: Check out restore branch
