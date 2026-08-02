@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 120
     env:
       SOLAR_Y1A_BASE_ZIP: ${{ vars.SOLAR_Y1A_BASE_ZIP }}
+      SOLAR_BASH: /bin/bash
+      ProgramFiles: /tmp
     steps:
       - uses: actions/checkout@v4
         with:
