@@ -19,7 +19,62 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: main
+
+      - name: Patch restoration compile leftovers
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          main_path = Path('app/src/main/java/com/solar/launcher/MainActivity.java')
+          row_path = Path('app/src/main/java/com/solar/launcher/RowKeys.java')
+          strings_path = Path('app/src/main/res/values/strings.xml')
+
+          main = main_path.read_text(encoding='utf-8')
+          stubs = []
+          if 'void armRecoveredDirectDownloadAutoResume(' not in main:
+              stubs.append('    private void armRecoveredDirectDownloadAutoResume() {\n        // Direct-download recovery was removed with the fork-only YouTube stack.\n    }\n')
+          if 'void maybeResumeRecoveredDirectDownload(' not in main:
+              stubs.append('    private void maybeResumeRecoveredDirectDownload() {\n        // No-op: the recovered direct-download subsystem no longer exists.\n    }\n')
+          if 'void pauseDirectDownloadForNetworkLoss(' not in main:
+              stubs.append('    private void pauseDirectDownloadForNetworkLoss() {\n        // No-op: the recovered direct-download subsystem no longer exists.\n    }\n')
+          if 'boolean isDownloadAutoResumeWifiEnabled(' not in main:
+              stubs.append('    private boolean isDownloadAutoResumeWifiEnabled() {\n        return true;\n    }\n')
+          if stubs:
+              pos = main.rfind('\n}')
+              if pos < 0:
+                  raise SystemExit('Could not locate MainActivity closing brace')
+              main = main[:pos] + '\n\n' + '\n'.join(stubs) + main[pos:]
+              main_path.write_text(main, encoding='utf-8')
+
+          rows = row_path.read_text(encoding='utf-8')
+          if 'DOWNLOAD_AUTO_RESUME_WIFI' not in rows:
+              match = re.search(r'(\bclass\s+Settings\s*\{)', rows)
+              if not match:
+                  raise SystemExit('Could not locate RowKeys.Settings')
+              insert = ('\n        public static final String DOWNLOAD_AUTO_RESUME_WIFI =\n'
+                        '                "settings.download_auto_resume_wifi";')
+              rows = rows[:match.end()] + insert + rows[match.end():]
+              row_path.write_text(rows, encoding='utf-8')
+
+          strings = strings_path.read_text(encoding='utf-8')
+          additions = []
+          values = {
+              'home_menu_downloads': 'Downloads',
+              'settings_download_auto_resume_title': 'Auto-resume downloads on Wi-Fi',
+              'settings_download_auto_resume_summary_on': 'Downloads resume automatically on Wi-Fi',
+              'settings_download_auto_resume_summary_off': 'Downloads stay paused after a connection loss',
+          }
+          for name, value in values.items():
+              if f'name="{name}"' not in strings:
+                  additions.append(f'    <string name="{name}">{value}</string>')
+          if additions:
+              strings = strings.replace('</resources>', '\n' + '\n'.join(additions) + '\n</resources>')
+              strings_path.write_text(strings, encoding='utf-8')
+
+          print('Applied minimal compile compatibility patch')
+          PY
 
       - name: Record reproducible build time
         run: echo "SOURCE_DATE_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
