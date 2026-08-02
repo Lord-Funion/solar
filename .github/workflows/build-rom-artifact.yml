@@ -1,8 +1,8 @@
 name: Build requested Y1 ROM artifact
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -12,13 +12,13 @@ env:
 
 jobs:
   build-rom:
-    if: github.event.pull_request.head.ref == 'agent/build-rom-artifact-20260802'
+    if: github.event.issue.pull_request && github.event.issue.number == 11 && github.event.comment.body == '/build-rom'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: main
 
       - name: Record reproducible build time
         run: echo "SOURCE_DATE_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
