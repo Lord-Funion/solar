@@ -1,7 +1,7 @@
 name: Build requested Y1 ROM artifact
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 permissions:
@@ -12,11 +12,13 @@ env:
 
 jobs:
   build-rom:
-    if: github.head_ref == 'agent/build-rom-artifact-20260802'
+    if: github.event.pull_request.head.ref == 'agent/build-rom-artifact-20260802'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Record reproducible build time
         run: echo "SOURCE_DATE_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
