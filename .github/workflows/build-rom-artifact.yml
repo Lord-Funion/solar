@@ -6,19 +6,30 @@ on:
 
 permissions:
   contents: read
-
-env:
-  SOLAR_Y1A_BASE_ZIP: ${{ vars.SOLAR_Y1A_BASE_ZIP }}
+  issues: write
 
 jobs:
   build-rom:
     if: github.event.issue.pull_request && github.event.issue.number == 11 && github.event.comment.body == '/build-rom'
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      SOLAR_Y1A_BASE_ZIP: ${{ vars.SOLAR_Y1A_BASE_ZIP }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
+
+      - name: Announce workflow run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 11,
+              body: `ROM build started: run ${process.env.GITHUB_RUN_ID}`
+            })
 
       - name: Record reproducible build time
         run: echo "SOURCE_DATE_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
@@ -91,6 +102,17 @@ jobs:
             dist/rom.zip.contents.txt
           if-no-files-found: error
           retention-days: 1
+
+      - name: Announce successful artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 11,
+              body: `ROM artifact ready from run ${process.env.GITHUB_RUN_ID}`
+            })
 
       - name: Remove signing keys
         if: always()
