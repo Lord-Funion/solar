@@ -2,11 +2,10 @@ name: Build requested Y1 ROM artifact
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   build-rom:
@@ -15,21 +14,85 @@ jobs:
     timeout-minutes: 120
     env:
       SOLAR_Y1A_BASE_ZIP: ${{ vars.SOLAR_Y1A_BASE_ZIP }}
+      SOLAR_BASH: /bin/bash
+      ProgramFiles: /tmp
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: main
 
-      - name: Announce workflow run
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `ROM build started: run ${process.env.GITHUB_RUN_ID}`
-            })
+      - name: Patch restoration compile leftovers
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          main_path = Path('app/src/main/java/com/solar/launcher/MainActivity.java')
+          row_path = Path('app/src/main/java/com/solar/launcher/RowKeys.java')
+          strings_path = Path('app/src/main/res/values/strings.xml')
+
+          main = main_path.read_text(encoding='utf-8')
+          stubs = []
+          declarations = [
+              ('armRecoveredDirectDownloadAutoResume', '    private void armRecoveredDirectDownloadAutoResume() {\n        // Removed direct-download recovery subsystem.\n    }\n'),
+              ('maybeResumeRecoveredDirectDownload', '    private void maybeResumeRecoveredDirectDownload() {\n        // Removed direct-download recovery subsystem.\n    }\n'),
+              ('maybeResumeDirectDownloadAfterNetworkLoss', '    private void maybeResumeDirectDownloadAfterNetworkLoss() {\n        // Removed direct-download recovery subsystem.\n    }\n'),
+          ]
+          for method, body in declarations:
+              if not re.search(r'\b(?:private|protected|public)\s+void\s+' + method + r'\s*\(', main):
+                  stubs.append(body)
+          if not re.search(r'\b(?:private|protected|public)\s+void\s+pauseDirectDownloadForNetworkLoss\s*\(\s*\)', main):
+              stubs.append('    private void pauseDirectDownloadForNetworkLoss() {\n        // Removed direct-download recovery subsystem.\n    }\n')
+          if not re.search(r'\b(?:private|protected|public)\s+void\s+pauseDirectDownloadForNetworkLoss\s*\(\s*boolean\b', main):
+              stubs.append('    private void pauseDirectDownloadForNetworkLoss(boolean internetAvailable, boolean wifiAssociated) {\n        // Removed direct-download recovery subsystem.\n    }\n')
+          if not re.search(r'\b(?:private|protected|public)\s+boolean\s+isDownloadAutoResumeWifiEnabled\s*\(', main):
+              stubs.append('    private boolean isDownloadAutoResumeWifiEnabled() {\n        return true;\n    }\n')
+          if stubs:
+              pos = main.rfind('\n}')
+              if pos < 0:
+                  raise SystemExit('Could not locate MainActivity closing brace')
+              main = main[:pos] + '\n\n' + '\n'.join(stubs) + main[pos:]
+              main_path.write_text(main, encoding='utf-8')
+
+          rows = row_path.read_text(encoding='utf-8')
+          root_prefix = 'public final class RowKeys {'
+          root_constant = ('\n    public static final String DOWNLOAD_AUTO_RESUME_WIFI =\n'
+                           '            "settings.download_auto_resume_wifi";')
+          root_head = rows.split('public static final class Settings', 1)[0]
+          if 'DOWNLOAD_AUTO_RESUME_WIFI' not in root_head:
+              if root_prefix not in rows:
+                  raise SystemExit('Could not locate RowKeys root class')
+              rows = rows.replace(root_prefix, root_prefix + root_constant, 1)
+          settings_match = re.search(r'(\bclass\s+Settings\s*\{)', rows)
+          if not settings_match:
+              raise SystemExit('Could not locate RowKeys.Settings')
+          settings_tail = rows[settings_match.end():]
+          if 'DOWNLOAD_AUTO_RESUME_WIFI' not in settings_tail:
+              nested_constant = ('\n        public static final String DOWNLOAD_AUTO_RESUME_WIFI =\n'
+                                 '                "settings.download_auto_resume_wifi";')
+              rows = rows[:settings_match.end()] + nested_constant + rows[settings_match.end():]
+          row_path.write_text(rows, encoding='utf-8')
+
+          strings = strings_path.read_text(encoding='utf-8')
+          values = {
+              'home_menu_downloads': 'Downloads',
+              'settings_download_auto_resume_title': 'Auto-resume downloads on Wi-Fi',
+              'settings_download_auto_resume_summary_on': 'Downloads resume automatically on Wi-Fi',
+              'settings_download_auto_resume_summary_off': 'Downloads stay paused after a connection loss',
+              'settings_download_auto_resume_wifi_hint': 'Resume interrupted downloads automatically when Wi-Fi returns.',
+              'settings_download_auto_resume_wifi': 'Auto-resume downloads on Wi-Fi',
+          }
+          additions = [
+              f'    <string name="{name}">{value}</string>'
+              for name, value in values.items()
+              if f'name="{name}"' not in strings
+          ]
+          if additions:
+              strings = strings.replace('</resources>', '\n' + '\n'.join(additions) + '\n</resources>')
+              strings_path.write_text(strings, encoding='utf-8')
+
+          print('Applied minimal compile compatibility patch')
+          PY
 
       - name: Record reproducible build time
         run: echo "SOURCE_DATE_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
@@ -101,17 +164,6 @@ jobs:
             dist/rom.zip.contents.txt
           if-no-files-found: error
           retention-days: 1
-
-      - name: Announce successful artifact
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `ROM artifact ready from run ${process.env.GITHUB_RUN_ID}`
-            })
 
       - name: Remove signing keys
         if: always()
