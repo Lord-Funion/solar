@@ -78,4 +78,33 @@ public class BluetoothPairingCoordinatorTest {
         assertEquals(-1, BluetoothPairingCoordinator.parsePasskey("1234567"));
         assertEquals(-1, BluetoothPairingCoordinator.parsePasskey("12A4"));
     }
+
+    @Test
+    public void userInitiatedAudioCompatibilityIsScopedToPinAndConsent() {
+        long started = 1_000L;
+        assertTrue(BluetoothPairingCoordinator.shouldUseUserInitiatedAudioCompatibilityAuth(
+                "AA:BB", started, "aa:bb", started + 500L, true,
+                BluetoothPairingCoordinator.MODE_PIN));
+        assertTrue(BluetoothPairingCoordinator.shouldUseUserInitiatedAudioCompatibilityAuth(
+                "AA:BB", started, "AA:BB", started + 500L, true,
+                BluetoothPairingCoordinator.MODE_CONSENT));
+        assertFalse(BluetoothPairingCoordinator.shouldUseUserInitiatedAudioCompatibilityAuth(
+                "AA:BB", started, "AA:BB", started + 500L, true,
+                BluetoothPairingCoordinator.MODE_PASSKEY_CONFIRM));
+    }
+
+    @Test
+    public void userInitiatedAudioCompatibilityRejectsStaleOrUnsolicitedPairing() {
+        long started = 1_000L;
+        assertFalse(BluetoothPairingCoordinator.shouldUseUserInitiatedAudioCompatibilityAuth(
+                "AA:BB", started, "CC:DD", started + 500L, true,
+                BluetoothPairingCoordinator.MODE_CONSENT));
+        assertFalse(BluetoothPairingCoordinator.shouldUseUserInitiatedAudioCompatibilityAuth(
+                "AA:BB", started, "AA:BB",
+                started + BluetoothPairingCoordinator.NEGOTIATION_WINDOW_MS + 1L, true,
+                BluetoothPairingCoordinator.MODE_CONSENT));
+        assertFalse(BluetoothPairingCoordinator.shouldUseUserInitiatedAudioCompatibilityAuth(
+                "AA:BB", started, "AA:BB", started + 500L, false,
+                BluetoothPairingCoordinator.MODE_CONSENT));
+    }
 }

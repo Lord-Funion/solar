@@ -2166,8 +2166,13 @@ public class MainActivity extends Activity {
 
     /** Point library folder browse + Reach saves at the preferred Music root (Y2 internal-media pref). */
     private void applyMediaRootPreference() {
+        File previousRoot = rootFolder;
         rootFolder = new File(com.solar.launcher.DeviceFeatures.getNewMediaRoot(this), "Music");
         if (!rootFolder.exists()) rootFolder.mkdirs();
+        // Keep the first folder render on the resolved media root, not the pre-prefs field default.
+        if (currentFolder == null || previousRoot == null || currentFolder.equals(previousRoot)) {
+            currentFolder = rootFolder;
+        }
     }
     private boolean isPausedByHand = true;
     private String podcastResumeKey = "";
@@ -3342,6 +3347,9 @@ public class MainActivity extends Activity {
                 isMediaScanning = false;
 
             } else if (Intent.ACTION_MEDIA_MOUNTED.equals(action)) {
+                // Storage is readable now: refresh folder state independently of theme reload.
+                applyMediaRootPreference();
+                refreshLibraryBrowseIfVisible();
                 // 2026-07-17 — UMS disable remounts volumes; full theme+library work right after
                 // unplug froze the UI for new users. Defer when we just left disk mode.
                 if (shouldDeferPostUmsStorageWork()) {
@@ -19437,6 +19445,7 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
 
     private boolean createBluetoothBond(BluetoothDevice device) {
         try {
+            BluetoothPairingCoordinator.beginUserInitiatedPair(device);
             Method createBond = device.getClass().getMethod("createBond");
             Object result = createBond.invoke(device);
             boolean ok = !(result instanceof Boolean) || (Boolean) result;
@@ -26899,7 +26908,11 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         if (currentScreenState != STATE_BROWSER) return;
         clearArtistOwnAlbumCache();
         invalidateFlowCatalogAndRefreshIfVisible();
-        if (currentBrowserMode == BROWSER_ARTISTS) {
+        if (currentBrowserMode == BROWSER_FOLDER && !isPickingBackground && !isPickingApk
+                && !isPickingMediaImport) {
+            android.util.Log.d("SolarLibrary", "refresh visible folder after library/storage update");
+            buildFileBrowserUI();
+        } else if (currentBrowserMode == BROWSER_ARTISTS) {
             buildVirtualCategories("ARTIST");
         } else if (currentBrowserMode == BROWSER_ARTIST_ALBUMS) {
             buildArtistAlbums();
@@ -45651,6 +45664,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                 drillBrowserForward(new Runnable() {
                     @Override
                     public void run() {
+                        applyMediaRootPreference();
+                        currentFolder = rootFolder;
                         currentBrowserMode = BROWSER_FOLDER;
                         buildFileBrowserUI();
                     }
@@ -49561,6 +49576,10 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         updateStatusBarTitle();
         updateLibraryBreadcrumb();
         File[] files = currentFolder.listFiles();
+        android.util.Log.d("SolarLibrary", "folder render path=" + currentFolder
+                + " root=" + rootFolder + " exists=" + currentFolder.exists()
+                + " readable=" + currentFolder.canRead() + " entries="
+                + (files != null ? files.length : -1) + " scanRunning=" + libraryScanRunning);
 
         boolean showUp = isPickingBackground || isPickingApk || isPickingMediaImport
                 ? !com.solar.launcher.DeviceFeatures.isStorageVolumeRoot(currentFolder)
@@ -56874,6 +56893,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
         @Override
         public void run() {
             if (isFinishing() || isUsbMassStorageUiLocked()) return;
+            applyMediaRootPreference();
+            refreshLibraryBrowseIfVisible();
             reloadThemeAfterStorageReady();
             refreshLibraryAfterStorageMount();
         }
@@ -56931,6 +56952,8 @@ if (OverlayKeyGate.isOverlayNavigationKey(code) || Y1InputKeys.isBackKey(code)) 
                         public void run() {
                             libraryScanRunning = false;
                             if (showOverlay) releaseBlockingOverlay(OVERLAY_LIB_SCAN);
+                            // A remounted volume can expose folders without changing DB rows.
+                            refreshLibraryBrowseIfVisible();
                         }
                     });
                     return;

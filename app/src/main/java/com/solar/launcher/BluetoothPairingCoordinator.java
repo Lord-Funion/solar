@@ -47,8 +47,21 @@ public final class BluetoothPairingCoordinator {
 
     private static volatile String activeSessionAddress;
     private static volatile long activeSessionAt;
+    /** Solar-list bond request that may use the Y1 audio-headset compatibility handshake. */
+    private static volatile String userInitiatedAddress;
+    private static volatile long userInitiatedAt;
 
     private BluetoothPairingCoordinator() {}
+
+    /** Mark a bond started from Solar's Bluetooth list, never from an unsolicited remote request. */
+    public static void beginUserInitiatedPair(BluetoothDevice device) {
+        String address = safeAddress(device);
+        clearSession();
+        if (address == null) return;
+        userInitiatedAddress = address;
+        userInitiatedAt = System.currentTimeMillis();
+        Log.i(TAG, "user initiated pair addr=" + address);
+    }
 
     /**
      * Entry from the PAIRING_REQUEST broadcast.
@@ -70,16 +83,45 @@ public final class BluetoothPairingCoordinator {
         if (app == null) app = context;
 
         int mode = overlayModeForVariant(variant);
+        boolean audioCompatibilityAuth = shouldUseUserInitiatedAudioCompatibilityAuth(
+                userInitiatedAddress, userInitiatedAt, address, System.currentTimeMillis(),
+                BluetoothAudioRepair.isLikelyAudioSink(device), mode);
+        Log.i(TAG, "pairing request addr=" + address + " variant=" + variant
+                + " mode=" + mode + " userAudioCompatibility=" + audioCompatibilityAuth);
         switch (mode) {
             case MODE_PIN:
+                if (audioCompatibilityAuth) {
+                    boolean submitted = submitPin(device,
+                            BluetoothAudioRepair.pairingPinForDevice(context, device));
+                    Log.i(TAG, "user audio PIN submitted=" + submitted + " addr=" + address);
+                    if (submitted) {
+                        BluetoothAudioRepair.rememberLastAudioDevice(context, device);
+                        return true;
+                    }
+                    clearSession();
+                    return false;
+                }
                 return showCredentialOverlay(app, address, safeName(device), MODE_PIN,
                         BluetoothAudioRepair.pairingPinForDevice(context, device));
             case MODE_PASSKEY_ENTRY:
                 return showCredentialOverlay(app, address, safeName(device),
                         MODE_PASSKEY_ENTRY, null);
             case MODE_PASSKEY_CONFIRM:
-            case MODE_CONSENT:
             case MODE_OOB_CONSENT:
+                return showReadOrConfirmOverlay(
+                        app, address, safeName(device), pairingKey, mode);
+            case MODE_CONSENT:
+                if (audioCompatibilityAuth) {
+                    boolean submitted = submitConfirmation(device, true);
+                    Log.i(TAG, "user audio consent submitted=" + submitted
+                            + " addr=" + address);
+                    if (submitted) {
+                        BluetoothAudioRepair.rememberLastAudioDevice(context, device);
+                        return true;
+                    }
+                    clearSession();
+                    return false;
+                }
                 return showReadOrConfirmOverlay(
                         app, address, safeName(device), pairingKey, mode);
             case MODE_PASSKEY_DISPLAY:
@@ -275,6 +317,20 @@ public final class BluetoothPairingCoordinator {
         return BluetoothPairingVariantPolicy.modeForVariant(variant);
     }
 
+    /**
+     * MT6572 audio pairing expects legacy PIN/Just Works acknowledgement immediately. Keep that
+     * compatibility path scoped to a recent explicit Solar-list action; passkey confirmation and
+     * unsolicited pairing requests remain interactive.
+     */
+    static boolean shouldUseUserInitiatedAudioCompatibilityAuth(String requestedAddress,
+            long requestedAt, String incomingAddress, long now, boolean audioSink, int mode) {
+        if (!audioSink || requestedAddress == null || incomingAddress == null) return false;
+        if (!requestedAddress.equalsIgnoreCase(incomingAddress)) return false;
+        long age = now - requestedAt;
+        if (age < 0L || age > NEGOTIATION_WINDOW_MS) return false;
+        return mode == MODE_PIN || mode == MODE_CONSENT;
+    }
+
     private static boolean showCredentialOverlay(Context context, String address, String name,
             int mode, String prefill) {
         return startPairingOverlay(context, address, name, 0, mode, prefill);
@@ -375,6 +431,8 @@ public final class BluetoothPairingCoordinator {
     static void clearSession() {
         activeSessionAddress = null;
         activeSessionAt = 0L;
+        userInitiatedAddress = null;
+        userInitiatedAt = 0L;
     }
 
     private static String safeAddress(BluetoothDevice device) {
